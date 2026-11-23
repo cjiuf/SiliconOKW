@@ -1,0 +1,7440 @@
+{
+ "CPromoteAutonomyCommand": {
+  "ctor": 10570272,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CRemoveAutonomyCommand": {
+  "ctor": 10570848,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CDiplomaticActionCommand": {
+  "ctor": 10761680,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CCreateEquipmentVariantCommand": {
+  "ctor": 13339360,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x3f0"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 52,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 80,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 192,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 200,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x42c"
+   },
+   {
+    "offset": 336,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 348,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x488"
+   },
+   {
+    "offset": 360,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   },
+   {
+    "offset": 384,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x488"
+   },
+   {
+    "offset": 392,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CUpdateEquipmentVariantCommand": {
+  "ctor": 13351328,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x3f0"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 184,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x3f0"
+   },
+   {
+    "offset": 320,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 332,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x488"
+   },
+   {
+    "offset": 344,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 368,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x488"
+   },
+   {
+    "offset": 376,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x4b0"
+   }
+  ]
+ },
+ "CRenameEquipmentVariantCommand": {
+  "ctor": 13361776,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetEquipmentVariantHighlightCommand": {
+  "ctor": 13363568,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetObsoleteEquipmentVariantCommand": {
+  "ctor": 13364416,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CStockpiledEquipmentDeleteCommand": {
+  "ctor": 13365296,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetEquipmentVariantOverrideModelCommand": {
+  "ctor": 13366432,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetEquipmentVariantOverrideSpriteCommand": {
+  "ctor": 13367856,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 1,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x4"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x28"
+   }
+  ]
+ },
+ "CSetEquipmentVariantNicheIconCommand": {
+  "ctor": 13369392,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetEquipmentVariantNameListCommand": {
+  "ctor": 13370784,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSetAutoUpgradedEquipmentVariantCommand": {
+  "ctor": 13372592,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetUseDynamicVersionPositioningVariantCommand": {
+  "ctor": 13373808,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetIndustrialManufacturerCommand": {
+  "ctor": 15896512,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetIndustrialOrganisationTaskCommand": {
+  "ctor": 15897680,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetIndustrialOrgTraitsInQueueCommand": {
+  "ctor": 15909728,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CCreateTradeCommand": {
+  "ctor": 19066368,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChatCommand": {
+  "ctor": 28202400,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 76,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 84,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 88,
+    "size": 1,
+    "arg": 5,
+    "kind": "bool"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 104,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 112,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CChatUserJoinedCommand": {
+  "ctor": 28203856,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 88,
+    "size": 4,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CChatUserLeftCommand": {
+  "ctor": 28205824,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChatUserJoinedChannelCommand": {
+  "ctor": 28206384,
+  "vt": 71356920,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChatUserLeftChannelCommand": {
+  "ctor": 28206880,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChatNewChannelCommand": {
+  "ctor": 28207360,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CChatSyncAllCommand": {
+  "ctor": 28249184,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 32,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x20"
+   },
+   {
+    "offset": 136,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x88"
+   }
+  ]
+ },
+ "CChatRequestSyncCommand": {
+  "ctor": 28210432,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetCountryControllerCommand": {
+  "ctor": 29031008,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAskToCoopWithCountryCommand": {
+  "ctor": 29038448,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CPromoteToCountryLeaderCommand": {
+  "ctor": 29040848,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   }
+  ]
+ },
+ "CClearAllControllersCommand": {
+  "ctor": 29041872,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetCountryControllerTypeCommand": {
+  "ctor": 29042576,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDispatchNavalCombatResultsCommand": {
+  "ctor": 29246960,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetPlayerAiPrefsCommand": {
+  "ctor": 29248720,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CAddProductionLineCommand": {
+  "ctor": 29249392,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CAddMassProductionsLineCommand": {
+  "ctor": 29251600,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0xc"
+   }
+  ]
+ },
+ "CMassRemoveProductionsLineCommand": {
+  "ctor": 29254096,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   }
+  ]
+ },
+ "CMassCancelMovementCommand": {
+  "ctor": 29256288,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CAddMassFactoryAssignmentCommand": {
+  "ctor": 29256960,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetProductionLineCommand": {
+  "ctor": 29262064,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveProductionLineCommand": {
+  "ctor": 29263344,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveShipRefitProductionLineCommand": {
+  "ctor": 29264352,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveAllProductionLineCommand": {
+  "ctor": 29265392,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetProductionLineConvertCommand": {
+  "ctor": 29266432,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CProductionLineInterfaceFactoriesScaleCommand": {
+  "ctor": 29267536,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CProductionLineInterfaceToggleExpandCommand": {
+  "ctor": 29270080,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CProductionLineInterfaceToggleExpandAllCommand": {
+  "ctor": 29272560,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CSetNavalProductionLineAirWingCompositionCommand": {
+  "ctor": 29273568,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetNavalDeploymentTargetCommand": {
+  "ctor": 29274848,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 52,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 60,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x10"
+   }
+  ]
+ },
+ "CSetShipRefitDeploymentTargetCommand": {
+  "ctor": 29277056,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 52,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 60,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x10"
+   }
+  ]
+ },
+ "CChangeProductionLineNamePriorityCommand": {
+  "ctor": 29281728,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAddConstructionCommand": {
+  "ctor": 29282304,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 3,
+    "kind": "field0x10"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 68,
+    "size": 1,
+    "arg": 1,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CRemoveConstructionCommand": {
+  "ctor": 29286416,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveAllConstructionCommand": {
+  "ctor": 29287792,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CRemoveBuildingLevelCommand": {
+  "ctor": 29290352,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x2b8"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   },
+   {
+    "offset": 45,
+    "size": 1,
+    "arg": 4,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CReplaceBuildingCommand": {
+  "ctor": 29292464,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 76,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x2b8"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 84,
+    "size": 1,
+    "arg": 5,
+    "kind": "bool"
+   },
+   {
+    "offset": 124,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 136,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 144,
+    "size": 4,
+    "arg": 3,
+    "kind": "field0x10"
+   }
+  ]
+ },
+ "CConvertFactoryCommand": {
+  "ctor": 29293008,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x2b8"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 3,
+    "kind": "field0x2b8"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 1,
+    "arg": 1,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CChangeProductionLinePriorityCommand": {
+  "ctor": 29295056,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetProductionLinePriorityCommand": {
+  "ctor": 29296208,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CAddProductionLineFactoriesCommand": {
+  "ctor": 29297072,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetProductionLineAmountToProduceCommand": {
+  "ctor": 29298016,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetResearchCommand": {
+  "ctor": 29299008,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 52,
+    "size": 1,
+    "arg": 4,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CUnlockResearchCommand": {
+  "ctor": 29301056,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetXORResearchCommand": {
+  "ctor": 29304560,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 60,
+    "size": 1,
+    "arg": 5,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CDeployAirWingCommand": {
+  "ctor": 29307584,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 128,
+    "size": 8,
+    "arg": 5,
+    "kind": "ptr"
+   },
+   {
+    "offset": 136,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 144,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 152,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CCreateFactionCommand": {
+  "ctor": 29320288,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 80,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 104,
+    "size": 1,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 144,
+    "size": 1,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CAddIdeaCommand": {
+  "ctor": 29323600,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CGenerateAdvisorCommand": {
+  "ctor": 29326720,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 120,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 128,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CAddAdvisorRoleToCharacterCommand": {
+  "ctor": 29328192,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CAddAdvisorCommand": {
+  "ctor": 29330640,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveAdvisorCommand": {
+  "ctor": 29333104,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveIdeaCommand": {
+  "ctor": 29334352,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CRetireCharacterCommand": {
+  "ctor": 29336288,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CReplaceIdeaCommand": {
+  "ctor": 29337696,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 1,
+    "arg": 4,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CReplaceAdvisorCommand": {
+  "ctor": 29340304,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetDefaultCountryOccupationPolicyCommand": {
+  "ctor": 29342304,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetOccupationPolicyCommand": {
+  "ctor": 29343600,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetStateOverrideOccupationPolicyCommand": {
+  "ctor": 29344976,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x48"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CSetMainGarrisonTemplateCommand": {
+  "ctor": 29347120,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetCountryGarrisonTemplateCommand": {
+  "ctor": 29348048,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetStateGarrisonTemplateCommand": {
+  "ctor": 29349200,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x48"
+   }
+  ]
+ },
+ "CSetSupplyReinforcementPriorityCommand": {
+  "ctor": 29350912,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetSupplyTruckBufferRatioCommand": {
+  "ctor": 29351728,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSetFuelPriorityCommand": {
+  "ctor": 29352528,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetCountryReinforcementPriorityCommand": {
+  "ctor": 29353344,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetCountryOperationsPriorityCommand": {
+  "ctor": 29356416,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetCountryRaidsPriorityCommand": {
+  "ctor": 29357024,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetCountryUpgradePriorityCommand": {
+  "ctor": 29357744,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetCountryGarrisonPriorityCommand": {
+  "ctor": 29358256,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAssignAceCommand": {
+  "ctor": 29358848,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CReleaseCountryCommand": {
+  "ctor": 29359760,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CCreateUnitLeaderCommand": {
+  "ctor": 29372256,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChangeCountryControllerCommand": {
+  "ctor": 29374064,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetNationalFocusCommand": {
+  "ctor": 29375120,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CDropCurrentNationalFocusCommand": {
+  "ctor": 29376048,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CBypassNationalFocusCommand": {
+  "ctor": 29376704,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSetContinuousFocusCommand": {
+  "ctor": 29377760,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CDropContinuousFocusCommand": {
+  "ctor": 29378608,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetTimedActivityDistributionPriorityCommand": {
+  "ctor": 29379264,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSelectDecisionCommand": {
+  "ctor": 29380560,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSelectTargetedDecisionCommand": {
+  "ctor": 29382528,
+  "vt": 71376728,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0xc"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CRequestExpeditionariesCommand": {
+  "ctor": 29387040,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CTriggerAbilityCommand": {
+  "ctor": 29398240,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x78"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x78"
+   }
+  ]
+ },
+ "CIgnoreDecisionCommand": {
+  "ctor": 29404272,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CIgnoreAllAvailableDecisionCommand": {
+  "ctor": 29406128,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CIgnoreTargetedDecisionCommand": {
+  "ctor": 29407344,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CSelectionGroupCommand": {
+  "ctor": 29418352,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CReinstateExileCommand": {
+  "ctor": 29419952,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CIncomingDiplomaticActionActingCommand": {
+  "ctor": 29422736,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAmendIncomingLendLeaseActionCommand": {
+  "ctor": 29424176,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CAmendForeignManpowerActionCommand": {
+  "ctor": 29425616,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetSupplyCapitalNodeCommand": {
+  "ctor": 29426848,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CBuildRailwayCommand": {
+  "ctor": 29427264,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChangeRailwayConstructionLeveLCommand": {
+  "ctor": 29430224,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CUpdateSupplyNodeCountrySettingsCommand": {
+  "ctor": 29431312,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetPreferredTacticCommand": {
+  "ctor": 29433520,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSetArmyLeaderPreferredTacticCommand": {
+  "ctor": 29434800,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSetScorchedStateCommand": {
+  "ctor": 29436112,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 3,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CUpgradeDivisionOfficerCommand": {
+  "ctor": 29439808,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CUpgradeShipCaptainCommand": {
+  "ctor": 29441056,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CGiveMedalCommand": {
+  "ctor": 29442240,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 68,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "COnRulingPartyChangeActionCommand": {
+  "ctor": 29445184,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetDivisionTemplateSymbolCommand": {
+  "ctor": 32388448,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CUpdateDivisionTemplateCommand": {
+  "ctor": 32389520,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 624,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CCreateDivisionTemplateCommand": {
+  "ctor": 32393968,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 624,
+    "size": 4,
+    "arg": 3,
+    "kind": "deref"
+   },
+   {
+    "offset": 632,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CRemoveDivisionTemplateCommand": {
+  "ctor": 32397376,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetObsoleteDivisionTemplateCommand": {
+  "ctor": 32398704,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CReorderTemplateListCommand": {
+  "ctor": 32399760,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CStartGameCommand": {
+  "ctor": 32657664,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSelectBookmarkCommand": {
+  "ctor": 32658560,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CAddPlayerCommand": {
+  "ctor": 33664192,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CAddHumanCommand": {
+  "ctor": 33670272,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 208,
+    "size": 4,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemovePlayerCommand": {
+  "ctor": 33672832,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetDLCsCommand": {
+  "ctor": 33676960,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   }
+  ]
+ },
+ "CRequestGameStateTransferCommand": {
+  "ctor": 34155744,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x28"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x28"
+   },
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x98"
+   }
+  ]
+ },
+ "CRequestGameStateSynchCommand": {
+  "ctor": 34156592,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CPostHotJoinCommand": {
+  "ctor": 34159200,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CReadyAfterHotJoinCommand": {
+  "ctor": 34164672,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CClientOutOfSyncCommand": {
+  "ctor": 34165104,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CReopenLobbyCommand": {
+  "ctor": 34166352,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CCheckSyncCommand": {
+  "ctor": 34168944,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   }
+  ]
+ },
+ "CCheckSyncResponseCommand": {
+  "ctor": 34170752,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 76,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CSendPingCommand": {
+  "ctor": 34172176,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x10"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   },
+   {
+    "offset": 80,
+    "size": 1,
+    "arg": 5,
+    "kind": "bool"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x10"
+   }
+  ]
+ },
+ "CCreateConveyorCommand": {
+  "ctor": 34440800,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CCreateConveyorExtendedCommand": {
+  "ctor": 34441920,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetConveyorNameCommand": {
+  "ctor": 34443312,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetConveyorLocationCommand": {
+  "ctor": 34444064,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetConveyorGroupCommand": {
+  "ctor": 34448032,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x38"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   }
+  ]
+ },
+ "CChangeConveyorTemplateCommand": {
+  "ctor": 34448800,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetConveyorPriorityCommand": {
+  "ctor": 34449760,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetConveyorSeriesCommand": {
+  "ctor": 34450384,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAddConveyorLineCommand": {
+  "ctor": 34451008,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDeployConveyorCommand": {
+  "ctor": 34451776,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CCollapseConveyorCommand": {
+  "ctor": 34452352,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CChangeConveyorPositionCommand": {
+  "ctor": 34452912,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CRemoveConveyorCommand": {
+  "ctor": 34453712,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CDeployConveyorLineCommand": {
+  "ctor": 34454304,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetDeploymentLineNameCommand": {
+  "ctor": 34455312,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CRemoveConveyorLineCommand": {
+  "ctor": 34456208,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CNavyDetachShipsAndRepairCommand": {
+  "ctor": 34739680,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CNavyCancelRepairCommand": {
+  "ctor": 34742304,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CNavyRepairNowCommand": {
+  "ctor": 34744256,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CNavyRepairModeCommand": {
+  "ctor": 34744928,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 74,
+    "size": 1,
+    "arg": 4,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CNavySetUnderwayReplenishmentCommand": {
+  "ctor": 34747264,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CNavyDetachShipsAndMergeCommand": {
+  "ctor": 34748496,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CNavyDetachShipsAndRefitCommand": {
+  "ctor": 34752560,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 80,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CNavyCancelRefitCommand": {
+  "ctor": 34754288,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 88,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CNavyCancelActivityCommand": {
+  "ctor": 34758544,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CNavalMissionSetTypeCommand": {
+  "ctor": 34759536,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CNavalMissionSetRegionsCommand": {
+  "ctor": 34763088,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CNavalMissionAddRegionCommand": {
+  "ctor": 34765216,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CNavalMissionRemoveRegionCommand": {
+  "ctor": 34766192,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 60,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CNavalMissionMoveCommand": {
+  "ctor": 34768336,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   },
+   {
+    "offset": 68,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CNavalMissionMassMoveCommand": {
+  "ctor": 34772016,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CNavalMoveCommand": {
+  "ctor": 34773680,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 68,
+    "size": 1,
+    "arg": 4,
+    "kind": "bool"
+   },
+   {
+    "offset": 69,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CSetPrideOfTheFleetCommand": {
+  "ctor": 34781616,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetNavalRegionAccessCommand": {
+  "ctor": 34782752,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CCreateFleetCommand": {
+  "ctor": 34787120,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 4,
+    "kind": "handle"
+   },
+   {
+    "offset": 96,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetFleetNameCommand": {
+  "ctor": 34793248,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetFleetCommand": {
+  "ctor": 34793984,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetFleetHomeBaseCommand": {
+  "ctor": 34798240,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetTaskForceAutoReinforcementCommand": {
+  "ctor": 34799008,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetTaskForceCompositionRequirementsCommand": {
+  "ctor": 34800080,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CNavyClearAccidentReportsCommand": {
+  "ctor": 34800656,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x48"
+   }
+  ]
+ },
+ "CSetAsReserveFleetCommand": {
+  "ctor": 34802944,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CReorganizeShipsCommand": {
+  "ctor": 34808464,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CSetMaxAllowedRepairFactoriesCommand": {
+  "ctor": 34814912,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CChangeNavalBaseRepairPriorityCommand": {
+  "ctor": 34821840,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x10"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetNavalBaseDisabledForRepairsStateCommand": {
+  "ctor": 34822656,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x10"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CSetFleetIconAndColorCommand": {
+  "ctor": 34823552,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDisengageFromNavalCombatCommand": {
+  "ctor": 34824240,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 1,
+    "kind": "field0xb8"
+   }
+  ]
+ },
+ "CSetTaskForceIconAndColorCommand": {
+  "ctor": 34824912,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CMarkSunkShipInfoAsReadCommand": {
+  "ctor": 34826224,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x2c"
+   }
+  ]
+ },
+ "CAddTaskForceTemplateCommand": {
+  "ctor": 34826976,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRemoveTaskForceTemplateCommand": {
+  "ctor": 34827760,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CAutomateHomebaseForFleetCommand": {
+  "ctor": 34832352,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CNavalMissionSetTargetCommand": {
+  "ctor": 34832928,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDismissOperativeCommand": {
+  "ctor": 35252512,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetOperativeCodenameCommand": {
+  "ctor": 35253440,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CIntelligenceAgencyCreationCommand": {
+  "ctor": 35254320,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CIntelligenceAgencyCancelCreationCommand": {
+  "ctor": 35255008,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CIntelligenceAgencyUpgradeCommand": {
+  "ctor": 35255632,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CIntelligenceAgencyCancelUpgradeCommand": {
+  "ctor": 35256960,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CSetIntelligenceAgencyNameCommand": {
+  "ctor": 35258128,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetIntelligenceAgencyRandomHistoricalNameCommand": {
+  "ctor": 35259280,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetIntelligenceAgencyLogoCommand": {
+  "ctor": 35260928,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CBecomeSpyMasterCommand": {
+  "ctor": 35261680,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetOperativeMissionCommand": {
+  "ctor": 35300384,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CStartStopDecryptionCommand": {
+  "ctor": 35268768,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CHideDecryptionCommand": {
+  "ctor": 35272128,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CRecruitOperativeCommand": {
+  "ctor": 35273296,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CReserveOperativeForOperationCommand": {
+  "ctor": 35274688,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CCreateOperationCommand": {
+  "ctor": 35297056,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CDeleteOperationCommand": {
+  "ctor": 35281088,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CLaunchOperationCommand": {
+  "ctor": 35282832,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetOperationAutoCommenceCommand": {
+  "ctor": 35286736,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetOperationAutoRepeatCommand": {
+  "ctor": 35287904,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetOperationTargetCommand": {
+  "ctor": 35289072,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetOrderGroupNameCommand": {
+  "ctor": 35531808,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetOrderGroupOrdersInstanceNamesCommand": {
+  "ctor": 35532592,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetOrderGroupMotorizationCommand": {
+  "ctor": 35533424,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetOrderGroupIconAndColorCommand": {
+  "ctor": 35534400,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetOrderGroupExecutionTypeCommand": {
+  "ctor": 35534944,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetOrderGroupCohesionTypeCommand": {
+  "ctor": 35535728,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetOrderGroupLeaderProximityCommand": {
+  "ctor": 35536288,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderGroupCommand": {
+  "ctor": 35536944,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 80,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CDeleteOrderGroupCommand": {
+  "ctor": 35542128,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CArmyGroupCommand": {
+  "ctor": 35542976,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 112,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 120,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CAssignToArmyGroupCommand": {
+  "ctor": 35548144,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CRemoveFromArmyGroupCommand": {
+  "ctor": 35550416,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CMoveArmiesInTheaterCommand": {
+  "ctor": 35551696,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CMoveArmyGroupInTheaterCommand": {
+  "ctor": 35554416,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderDeleteAllCommand": {
+  "ctor": 35555904,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderDeleteCommand": {
+  "ctor": 35558704,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderAssignCommand": {
+  "ctor": 35565632,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderUnassignCommand": {
+  "ctor": 35578656,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderBlockSectionsCommand": {
+  "ctor": 35581024,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x38"
+   }
+  ]
+ },
+ "COrderSetPathCommand": {
+  "ctor": 35584688,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x38"
+   }
+  ]
+ },
+ "COrderNewFallbackCommand": {
+  "ctor": 35594992,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CAutoMergeOrdersCommand": {
+  "ctor": 35597520,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderNewRootCommand": {
+  "ctor": 35600032,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x10"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "COrderAddNewCompletePlanCommand": {
+  "ctor": 35604064,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 5,
+    "kind": "field0x38"
+   },
+   {
+    "offset": 60,
+    "size": 4,
+    "arg": 5,
+    "kind": "field0x3c"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 100,
+    "size": 8,
+    "arg": 3,
+    "kind": "field0x10"
+   },
+   {
+    "offset": 108,
+    "size": 4,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderEditRootCommand": {
+  "ctor": 35610608,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   },
+   {
+    "offset": 65,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "COrderChildFrontRatioCommand": {
+  "ctor": 35611616,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderReorderChildFrontCommand": {
+  "ctor": 35612656,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   }
+  ]
+ },
+ "COrderMergeRootsCommand": {
+  "ctor": 35613680,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x38"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x38"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   }
+  ]
+ },
+ "COrderMembersFairSplitCommand": {
+  "ctor": 35617360,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x38"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x38"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   }
+  ]
+ },
+ "COrderNewFrontCommand": {
+  "ctor": 35625968,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   },
+   {
+    "offset": 68,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 80,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 104,
+    "size": 4,
+    "arg": 3,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 108,
+    "size": 1,
+    "arg": 5,
+    "kind": "bool"
+   },
+   {
+    "offset": 109,
+    "size": 1,
+    "arg": 1,
+    "kind": "bool"
+   },
+   {
+    "offset": 110,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "COrderReshapeCommand": {
+  "ctor": 35639344,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x38"
+   }
+  ]
+ },
+ "COrderReconnectCommand": {
+  "ctor": 35640464,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 3,
+    "kind": "field0x244"
+   }
+  ]
+ },
+ "COrderConnectCommand": {
+  "ctor": 35642272,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0x244"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderInsertFrontCommand": {
+  "ctor": 35643728,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   },
+   {
+    "offset": 112,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 120,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 144,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderExecuteCommand": {
+  "ctor": 35647072,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetArmyLeaderCommand": {
+  "ctor": 35648480,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetFleetLeaderCommand": {
+  "ctor": 35650800,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderSetInvasionSourceCommand": {
+  "ctor": 35651936,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 68,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CRemoveNavalInvasionTargetCommand": {
+  "ctor": 35655424,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAddNavalInvasionTargetCommand": {
+  "ctor": 35656144,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CEditAreaDefenseStateCommand": {
+  "ctor": 35657264,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CCreateAreaDefenseCommand": {
+  "ctor": 35658912,
+  "vt": 71704264,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetAreaDefenseSettingCommand": {
+  "ctor": 35660048,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderSetParadropSourceCommand": {
+  "ctor": 35660832,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 4,
+    "kind": "field0xc"
+   },
+   {
+    "offset": 68,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderSetParadropTargetCommand": {
+  "ctor": 35663584,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "COrderSetTrainingCommand": {
+  "ctor": 35665104,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "COrderSetCollapseCommand": {
+  "ctor": 35666688,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CLearnTraitCommand": {
+  "ctor": 35667280,
+  "vt": 71704960,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CUpdateLeaderSeenTraitsCountCommand": {
+  "ctor": 35669216,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CUpdateLeaderSeenAdvisorRolesCountCommand": {
+  "ctor": 35669792,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetOrdersLinkCommand": {
+  "ctor": 35670400,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRailwayGunManualOrderCommand": {
+  "ctor": 35920000,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "field0xa4"
+   }
+  ]
+ },
+ "CRailwayGunSetNameCommand": {
+  "ctor": 35921632,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CStratAirEnableMissionCommand": {
+  "ctor": 36522256,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 88,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CStratAirSetMissionCommand": {
+  "ctor": 36524848,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 68,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   },
+   {
+    "offset": 69,
+    "size": 1,
+    "arg": 4,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CStratAirTransferCommand": {
+  "ctor": 36530224,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 56,
+    "size": 4,
+    "arg": 4,
+    "kind": "field0x60"
+   },
+   {
+    "offset": 60,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   }
+  ]
+ },
+ "CStratAirCancelTransferCommand": {
+  "ctor": 36531920,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CStratAirSplitCommand": {
+  "ctor": 36532464,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CStratAirConsolidateCommand": {
+  "ctor": 36533040,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CStratAirMoveEquipmentCommand": {
+  "ctor": 36534112,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 3,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 112,
+    "size": 1,
+    "arg": 4,
+    "kind": "field0x38"
+   }
+  ]
+ },
+ "CStratAirMoveEquipmentToReservesCommand": {
+  "ctor": 36535968,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 104,
+    "size": 1,
+    "arg": 3,
+    "kind": "field0x38"
+   }
+  ]
+ },
+ "CStratAirDayNightCommand": {
+  "ctor": 36537360,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CStratAirChangeAggressivnessCommand": {
+  "ctor": 36537872,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetWingEquipmentNicheCommand": {
+  "ctor": 36538384,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetWingReinforcementPreferenceCommand": {
+  "ctor": 36539008,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   },
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CSetWingReinforcementPriorityCommand": {
+  "ctor": 36539984,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDeleteAirWingCommand": {
+  "ctor": 36540512,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetCarrierStickyMissionAreaCommand": {
+  "ctor": 36544464,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetAirWingNameCommand": {
+  "ctor": 36544976,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CAttachAirWingToArmyCommand": {
+  "ctor": 36545824,
+  "vt": 71728464,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CDetachAirWingFromArmyCommand": {
+  "ctor": 36547984,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CToggleBombingPriorityCommand": {
+  "ctor": 36549616,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CMoreGroundCrewsCommand": {
+  "ctor": 36550320,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 44,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CMoveAirWingAndAirGroupToAirTheatreCommand": {
+  "ctor": 36551536,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CMoveAirGroupAndAirTheatreToFreeCommand": {
+  "ctor": 36555616,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CMoveAirWingToAirGroupCommand": {
+  "ctor": 36558256,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CReorderAirTheatersCommand": {
+  "ctor": 36560672,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CRenameAirTheatreCommand": {
+  "ctor": 36561520,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CRenameAirGroupCommand": {
+  "ctor": 36562048,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CChangeAirGroupInsigniaCommand": {
+  "ctor": 36562576,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetQuickDeployPreferenceCommand": {
+  "ctor": 36563040,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "deref"
+   },
+   {
+    "offset": 68,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAssignToTheaterGroupCommand": {
+  "ctor": 37423328,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 3,
+    "kind": "deref"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 80,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   },
+   {
+    "offset": 88,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CReorderTheatersCommand": {
+  "ctor": 37425904,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDisbandTheaterGroupCommand": {
+  "ctor": 37426880,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetTheaterGroupNameCommand": {
+  "ctor": 37427472,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetTheaterGroupPriorityCommand": {
+  "ctor": 37428320,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CReorderNavyTheaterGroupCommand": {
+  "ctor": 37428976,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetNavyTheaterGroupForCommand": {
+  "ctor": 37431168,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   },
+   {
+    "offset": 96,
+    "size": 8,
+    "arg": 3,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetNavyTheaterGroupNameCommand": {
+  "ctor": 37434768,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetNavyTheaterGroupImportantCommand": {
+  "ctor": 37435648,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CHourlyTickCommand": {
+  "ctor": 37591840,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CIncreaseGameSpeedCommand": {
+  "ctor": 37592864,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CDecreaseGameSpeedCommand": {
+  "ctor": 37593520,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetGameSpeedCommand": {
+  "ctor": 37594368,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   }
+  ]
+ },
+ "CMoveCommand": {
+  "ctor": 37715712,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CMassMoveCommand": {
+  "ctor": 37657376,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 88,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CCancelMovementCommand": {
+  "ctor": 37659392,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 2,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CToggleStrategicDeploymentCommand": {
+  "ctor": 37663216,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 1,
+    "kind": "ptr"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xc"
+   }
+  ]
+ },
+ "CSupportAttackCommand": {
+  "ctor": 37665104,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetTheatreCommand": {
+  "ctor": 37666928,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CDeleteUnitCommand": {
+  "ctor": 37667872,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 2,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CSetUnitNameCommand": {
+  "ctor": 37670192,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetDivisionNameCommand": {
+  "ctor": 37672016,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 80,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDeployArmyHqCommand": {
+  "ctor": 37673968,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CWithdrawArmyHqCommand": {
+  "ctor": 37676032,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetPendingReassignTargetCommand": {
+  "ctor": 37678256,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetArmyTemplateCommand": {
+  "ctor": 37679984,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetArmyFakeTemplateCommand": {
+  "ctor": 37685664,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CMoveShipsCommand": {
+  "ctor": 37689616,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CSetShipNameCommand": {
+  "ctor": 37696352,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CDeleteShipCommand": {
+  "ctor": 37697056,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSetNavyEngagementCommand": {
+  "ctor": 37699184,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 56,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 64,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CCancelRunningAwayCommand": {
+  "ctor": 37700096,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CMergeNaviesCommand": {
+  "ctor": 37700688,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 52,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 64,
+    "size": 1,
+    "arg": 3,
+    "kind": "bool"
+   }
+  ]
+ },
+ "CPromoteUnitLeaderCommand": {
+  "ctor": 37703904,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CTransportUnitCommand": {
+  "ctor": 37704880,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 72,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   }
+  ]
+ },
+ "CStrategicRedeploymentCommand": {
+  "ctor": 37705424,
+  "vt": null,
+  "size": null,
+  "fields": []
+ },
+ "CQueueUnitActionCommand": {
+  "ctor": 37705728,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 2,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CMergeArmiesCommand": {
+  "ctor": 37706864,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "field0x18"
+   },
+   {
+    "offset": 64,
+    "size": 8,
+    "arg": 3,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CAiOnFailedInvasionCommand": {
+  "ctor": 38663200,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAiStoreTotalWantedNrDivisionsCommand": {
+  "ctor": 38664880,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 4,
+    "kind": "int"
+   }
+  ]
+ },
+ "CAiStoreForceConcentrationTargetCommand": {
+  "ctor": 38666432,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 4,
+    "kind": "ptr"
+   }
+  ]
+ },
+ "CAiDiscardForceConcentrationTargetCommand": {
+  "ctor": 38667744,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CUpdateProfileBadgeCommand": {
+  "ctor": 38839376,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CPassPeaceConferenceCommand": {
+  "ctor": 39551888,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CDonePeaceConferenceCommand": {
+  "ctor": 39552960,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CEndTurnPeaceConferenceCommand": {
+  "ctor": 39554208,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CRecruitScientistCommand": {
+  "ctor": 40031232,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 1,
+    "kind": "deref"
+   }
+  ]
+ },
+ "CAttachScientistCommand": {
+  "ctor": 40033040,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CUnattachScientistCommand": {
+  "ctor": 40034288,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CStartProjectCommand": {
+  "ctor": 40035472,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CStopProjectCommand": {
+  "ctor": 40036656,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CPrototypeRewardOptionCommand": {
+  "ctor": 40037376,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "int"
+   }
+  ]
+ },
+ "CDismantleFacilityCommand": {
+  "ctor": 40038304,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CAbortDismantleFacilityCommand": {
+  "ctor": 40038784,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CResetUnreadPrototypeRewardsCounterCommand": {
+  "ctor": 40039248,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 8,
+    "arg": 1,
+    "kind": "handle"
+   }
+  ]
+ },
+ "CSelectEventOptionCommand": {
+  "ctor": 45564272,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "int"
+   },
+   {
+    "offset": 40,
+    "size": 8,
+    "arg": 2,
+    "kind": "handle"
+   },
+   {
+    "offset": 48,
+    "size": 4,
+    "arg": 3,
+    "kind": "deref"
+   },
+   {
+    "offset": 232,
+    "size": 4,
+    "arg": 5,
+    "kind": "int"
+   }
+  ]
+ },
+ "CTogglePinnedStrategicRegionCommand": {
+  "ctor": 45589984,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xa0"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xa0"
+   }
+  ]
+ },
+ "CReorderPinnedStrategicRegionCommand": {
+  "ctor": 45591088,
+  "vt": null,
+  "size": null,
+  "fields": [
+   {
+    "offset": 36,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xa0"
+   },
+   {
+    "offset": 40,
+    "size": 4,
+    "arg": 1,
+    "kind": "field0xa0"
+   },
+   {
+    "offset": 44,
+    "size": 4,
+    "arg": 2,
+    "kind": "int"
+   }
+  ]
+ },
+ "CSetPinnedStrategicRegionCommand": {
+  "ctor": 45591984,
+  "vt": null,
+  "size": null,
+  "fields": []
+ }
+}

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "hoi4": {
+      "command": "python",
+      "args": ["D:\\path\\to\\SiliconOKW\\clausewitz.py", "serve", "--compact"],
+      "env": {
+        "HOI4_PATH": "D:\\SteamLibrary\\steamapps\\common\\Hearts of Iron IV",
+        "HOI4_MCP_PROFILE": "compact",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

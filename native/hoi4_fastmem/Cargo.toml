@@ -1,0 +1,20 @@
+[package]
+name = "hoi4_fastmem"
+version = "0.1.0"
+edition = "2021"
+description = "基于 Win32 API + Rayon 多核并行的 HOI4 进程内存高速扫描与批量读取扩展"
+
+[lib]
+name = "hoi4_fastmem"
+crate-type = ["cdylib"]
+
+[dependencies]
+# abi3-py311：兼容 Python 3.11+；generate-import-lib：允许在 Windows GNU 工具链下免 MSVC 链接 .pyd
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py311", "generate-import-lib"] }
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

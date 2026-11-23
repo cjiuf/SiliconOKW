@@ -1,0 +1,24 @@
+[package]
+name = "hoi4_recalc"
+version = "0.2.0"
+edition = "2021"
+description = "HOI4 Windows PE 离线版本重算与 Paradox 静态资产并行构建独立 CLI"
+
+[[bin]]
+name = "hoi4_recalc"
+path = "src/main.rs"
+
+[dependencies]
+# 多核并行加速 PE 扫描与命令反汇编
+rayon = "1.10"
+# 纯 Rust 零 C 依赖 x86-64 反汇编器（比 Capstone 更快且支持精确内存/寄存器操作数解析）
+iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "instr_info"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

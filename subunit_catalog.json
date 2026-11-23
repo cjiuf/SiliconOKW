@@ -1,0 +1,3428 @@
+[
+ {
+  "key": "carrier",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "carrier"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 40.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "ship_hull_carrier": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "carrier.txt"
+ },
+ {
+  "key": "suicide_craft",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "suicide",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "small_plane_suicide_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "cv_suicide_craft",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "suicide",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "cv_small_plane_suicide_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "battleship",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "capital_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 50.0,
+  "mp": null,
+  "train": null,
+  "need": {},
+  "support": false,
+  "tech": [],
+  "file": "battleship.txt"
+ },
+ {
+  "key": "guided_missile",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "missile",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "guided_missile_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "explosive_ammo",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "emplacement_gun_ammo",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "explosive_ammo_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "ballistic_missile",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "ballistic_missile",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "ballistic_missile_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "nuclear_missile",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "nuclear_missile",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "nuclear_missile_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "sam_missile",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "sam_missile",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "sam_missile_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "battle_cruiser",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "capital_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 50.0,
+  "mp": null,
+  "train": null,
+  "need": {},
+  "support": false,
+  "tech": [],
+  "file": "battlecruiser.txt"
+ },
+ {
+  "key": "rocket_interceptor",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "interceptor",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "rocket_interceptor_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "transport_plane",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "air_transport",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "transport_plane_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "mothership",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "fighter",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "mothership_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "heavy_cruiser",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "capital_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 40.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "ship_hull_cruiser": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "heavy_cruiser.txt"
+ },
+ {
+  "key": "strat_bomber",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "strategic_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "large_plane_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "maritime_patrol_plane",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "maritime_patrol_plane",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "large_plane_maritime_patrol_plane_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "jet_strat_bomber",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "strategic_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "jet_strat_bomber_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "light_cruiser",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "screen_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 40.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "ship_hull_cruiser": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "light_cruiser.txt"
+ },
+ {
+  "key": "tac_bomber",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "tactical_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "medium_plane_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "jet_tac_bomber",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "tactical_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "jet_tac_bomber_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "nav_bomber",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "naval_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "small_plane_naval_bomber_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "cv_nav_bomber",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "naval_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "cv_small_plane_naval_bomber_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "strat_bomber_intercontinental",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "strategic_bomber",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "strat_bomber_intercontinental_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "destroyer",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "screen_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 35.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "ship_hull_light": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "destroyer.txt"
+ },
+ {
+  "key": "repair_ship",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "support_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 40.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "repair_ship_1": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "repair_ships.txt"
+ },
+ {
+  "key": "support_ship",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "support_ship"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 40.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "support_ship_1": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "support_ships.txt"
+ },
+ {
+  "key": "cas",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "cas",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "small_plane_cas_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "cv_cas",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "cas",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "cv_small_plane_cas_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "submarine",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "submarine"
+  ],
+  "cw": null,
+  "hp": null,
+  "org": 30.0,
+  "mp": null,
+  "train": null,
+  "need": {
+   "ship_hull_submarine": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "submarine.txt"
+ },
+ {
+  "key": "fighter",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "fighter",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "small_plane_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "cv_fighter",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "fighter",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "cv_small_plane_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "heavy_fighter",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "heavy_fighter",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "medium_plane_fighter_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "scout_plane",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "scout_plane",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "medium_plane_scout_plane_airframe": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "jet_fighter",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": "fighter",
+  "cw": null,
+  "hp": null,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "jet_fighter_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "air.txt"
+ },
+ {
+  "key": "railway_gun",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "railway_gun"
+  ],
+  "cw": null,
+  "hp": 2000.0,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "railway_gun_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "railway_gun.txt"
+ },
+ {
+  "key": "super_heavy_railway_gun",
+  "abbr": null,
+  "group": null,
+  "active": "yes",
+  "type": [
+   "railway_gun"
+  ],
+  "cw": null,
+  "hp": 3500.0,
+  "org": null,
+  "mp": null,
+  "train": null,
+  "need": {
+   "super_heavy_railway_gun_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "railway_gun.txt"
+ },
+ {
+  "key": "modern_armor",
+  "abbr": "OTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "modern_tank_chassis": "50"
+  },
+  "support": false,
+  "tech": [
+   "main_battle_tank_chassis",
+   "main_battle_tank"
+  ],
+  "file": "modern_armor.txt"
+ },
+ {
+  "key": "heavy_armor",
+  "abbr": "HTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "heavy_tank_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "gwtank_chassis",
+   "basic_heavy_tank_chassis",
+   "basic_heavy_tank"
+  ],
+  "file": "heavy_armor.txt"
+ },
+ {
+  "key": "medium_armor",
+  "abbr": "MTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "medium_tank_chassis": "50"
+  },
+  "support": false,
+  "tech": [
+   "gwtank_chassis",
+   "basic_medium_tank_chassis",
+   "basic_medium_tank"
+  ],
+  "file": "medium_armor.txt"
+ },
+ {
+  "key": "amphibious_armor",
+  "abbr": "ATK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "amphibious_tank_chassis": "50"
+  },
+  "support": false,
+  "tech": [
+   "amphibious_tank_chassis",
+   "amphibious_tank"
+  ],
+  "file": "amphibious_armor.txt"
+ },
+ {
+  "key": "amphibious_light_armor",
+  "abbr": "LAM",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor",
+   "amphibious"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "light_tank_amphibious_chassis": "50"
+  },
+  "support": false,
+  "tech": [],
+  "file": "amphibious_armor.txt"
+ },
+ {
+  "key": "amphibious_medium_armor",
+  "abbr": "MAM",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor",
+   "amphibious"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "medium_tank_amphibious_chassis": "50"
+  },
+  "support": false,
+  "tech": [],
+  "file": "amphibious_armor.txt"
+ },
+ {
+  "key": "amphibious_heavy_armor",
+  "abbr": "HAM",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor",
+   "amphibious"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "heavy_tank_amphibious_chassis": "50"
+  },
+  "support": false,
+  "tech": [],
+  "file": "amphibious_armor.txt"
+ },
+ {
+  "key": "light_armor",
+  "abbr": "LTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "light_tank_chassis": "60"
+  },
+  "support": false,
+  "tech": [
+   "gwtank_chassis",
+   "basic_light_tank_chassis",
+   "gwtank",
+   "basic_light_tank"
+  ],
+  "file": "light_armor.txt"
+ },
+ {
+  "key": "hq_light_armor",
+  "abbr": "HLTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 10.0,
+  "org": 40.0,
+  "mp": 600.0,
+  "train": 180.0,
+  "need": {
+   "infantry_equipment": "40",
+   "light_tank_chassis": "30"
+  },
+  "support": false,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_medium_armor",
+  "abbr": "HMTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 10.0,
+  "org": 35.0,
+  "mp": 600.0,
+  "train": 180.0,
+  "need": {
+   "infantry_equipment": "40",
+   "medium_tank_chassis": "30"
+  },
+  "support": false,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_heavy_armor",
+  "abbr": "HHTK",
+  "group": "armor",
+  "active": "yes",
+  "type": [
+   "armor"
+  ],
+  "cw": 2.0,
+  "hp": 10.0,
+  "org": 30.0,
+  "mp": 600.0,
+  "train": 180.0,
+  "need": {
+   "infantry_equipment": "40",
+   "heavy_tank_chassis": "20"
+  },
+  "support": false,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "heavy_sp_artillery_brigade",
+  "abbr": "HAR",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "artillery"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "heavy_tank_artillery_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_heavy_art"
+  ],
+  "file": "sp_artillery_brigade.txt"
+ },
+ {
+  "key": "heavy_tank_destroyer_brigade",
+  "abbr": "HTD",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_tank"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "heavy_tank_destroyer_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_heavy_td"
+  ],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "medium_sp_artillery_brigade",
+  "abbr": "MAR",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "artillery"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "medium_tank_artillery_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_medium_art"
+  ],
+  "file": "sp_artillery_brigade.txt"
+ },
+ {
+  "key": "modern_sp_artillery_brigade",
+  "abbr": "OAR",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "artillery"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "modern_tank_artillery_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "modern_art"
+  ],
+  "file": "sp_artillery_brigade.txt"
+ },
+ {
+  "key": "medium_tank_destroyer_brigade",
+  "abbr": "MTD",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_tank"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "medium_tank_destroyer_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_medium_td"
+  ],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "modern_tank_destroyer_brigade",
+  "abbr": "OTD",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_tank"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "modern_tank_destroyer_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "modern_td"
+  ],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "light_sp_artillery_brigade",
+  "abbr": "LAR",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "artillery"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "light_tank_artillery_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_light_art"
+  ],
+  "file": "sp_artillery_brigade.txt"
+ },
+ {
+  "key": "light_tank_destroyer_brigade",
+  "abbr": "LTD",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_tank"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "light_tank_destroyer_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_light_td"
+  ],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "light_sp_anti_air_brigade",
+  "abbr": "LAA",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_air"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "light_tank_aa_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_light_spaa"
+  ],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "medium_sp_anti_air_brigade",
+  "abbr": "MAA",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_air"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "medium_tank_aa_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_medium_spaa"
+  ],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "heavy_sp_anti_air_brigade",
+  "abbr": "HAA",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_air"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "heavy_tank_aa_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "basic_heavy_spaa"
+  ],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "modern_sp_anti_air_brigade",
+  "abbr": "OAA",
+  "group": "armor_combat_support",
+  "active": "yes",
+  "type": [
+   "armor",
+   "anti_air"
+  ],
+  "cw": 2.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "modern_tank_aa_chassis": "40"
+  },
+  "support": false,
+  "tech": [
+   "modern_spaa"
+  ],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "rocket_artillery_brigade",
+  "abbr": "RRT",
+  "group": "combat_support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "artillery"
+  ],
+  "cw": 3.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "rocket_artillery_equipment": "24"
+  },
+  "support": false,
+  "tech": [],
+  "file": "artillery_brigade.txt"
+ },
+ {
+  "key": "artillery_brigade",
+  "abbr": "ART",
+  "group": "combat_support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "artillery"
+  ],
+  "cw": 3.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "artillery_equipment": "24"
+  },
+  "support": false,
+  "tech": [],
+  "file": "artillery_brigade.txt"
+ },
+ {
+  "key": "anti_tank_brigade",
+  "abbr": "ANT",
+  "group": "combat_support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "anti_tank"
+  ],
+  "cw": 1.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "anti_tank_equipment": "36"
+  },
+  "support": false,
+  "tech": [],
+  "file": "anti_tank_brigade.txt"
+ },
+ {
+  "key": "anti_air_brigade",
+  "abbr": "ANA",
+  "group": "combat_support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "anti_air"
+  ],
+  "cw": 1.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "anti_air_equipment": "36"
+  },
+  "support": false,
+  "tech": [],
+  "file": "anti-air_brigade.txt"
+ },
+ {
+  "key": "marine",
+  "abbr": "MRN",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 20.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "150"
+  },
+  "support": false,
+  "tech": [
+   "marines"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "marine_commando",
+  "abbr": "MRC",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 20.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "150"
+  },
+  "support": false,
+  "tech": [],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "mountaineers",
+  "abbr": "MTN",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 20.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "140"
+  },
+  "support": false,
+  "tech": [
+   "tech_mountaineers"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "ranger_battalion",
+  "abbr": "RANBAT",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 20.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "140"
+  },
+  "support": false,
+  "tech": [
+   "rangers_tech"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "infantry",
+  "abbr": "INF",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 25.0,
+  "org": 60.0,
+  "mp": 1000.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "100"
+  },
+  "support": false,
+  "tech": [
+   "infantry_weapons"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "bicycle_battalion",
+  "abbr": "BIC",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 25.0,
+  "org": 60.0,
+  "mp": 1000.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "100",
+   "support_equipment": "5"
+  },
+  "support": false,
+  "tech": [
+   "bicycle_infantry"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "penal_battalion",
+  "abbr": "PEN",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 15.0,
+  "org": 70.0,
+  "mp": 850.0,
+  "train": 50.0,
+  "need": {
+   "infantry_equipment": "85"
+  },
+  "support": false,
+  "tech": [
+   "penal_infantry"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "irregular_infantry",
+  "abbr": "IRR",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 30.0,
+  "org": 45.0,
+  "mp": 1000.0,
+  "train": 30.0,
+  "need": {
+   "infantry_equipment": "80"
+  },
+  "support": false,
+  "tech": [],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "militia",
+  "abbr": "MIL",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 25.0,
+  "org": 50.0,
+  "mp": 1000.0,
+  "train": 80.0,
+  "need": {
+   "infantry_equipment": "100"
+  },
+  "support": false,
+  "tech": [
+   "mechanised_infantry"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "paratrooper",
+  "abbr": "PAR",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 22.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 150.0,
+  "need": {
+   "infantry_equipment": "130"
+  },
+  "support": false,
+  "tech": [
+   "paratroopers"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "hq_infantry",
+  "abbr": "HINF",
+  "group": "infantry",
+  "active": "yes",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 15.0,
+  "org": 60.0,
+  "mp": 600.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "60"
+  },
+  "support": false,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_paratrooper",
+  "abbr": "HPAR",
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 14.0,
+  "org": 70.0,
+  "mp": 600.0,
+  "train": 150.0,
+  "need": {
+   "infantry_equipment": "80"
+  },
+  "support": false,
+  "tech": [
+   "paratroopers"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "fake_intel_unit",
+  "abbr": null,
+  "group": "infantry",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 1.0,
+  "hp": 1.0,
+  "org": 100.0,
+  "mp": 0.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "1"
+  },
+  "support": false,
+  "tech": [],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "bus",
+  "abbr": "BUS",
+  "group": "mobile",
+  "active": "no",
+  "type": [
+   "motorized"
+  ],
+  "cw": 2.0,
+  "hp": 400.0,
+  "org": 100.0,
+  "mp": 10.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "5",
+   "motorized_equipment": "1",
+   "infantry_equipment": "2"
+  },
+  "support": false,
+  "tech": [],
+  "file": "bus.txt"
+ },
+ {
+  "key": "amphibious_mechanized",
+  "abbr": "AMT",
+  "group": "mobile",
+  "active": "yes",
+  "type": [
+   "mechanized"
+  ],
+  "cw": 2.0,
+  "hp": 30.0,
+  "org": 60.0,
+  "mp": 1200.0,
+  "train": 120.0,
+  "need": {
+   "amphibious_mechanized_equipment": "50",
+   "infantry_equipment": "100"
+  },
+  "support": false,
+  "tech": [
+   "amphibious_mechanized_infantry"
+  ],
+  "file": "amphibious_mech.txt"
+ },
+ {
+  "key": "mechanized",
+  "abbr": "MEC",
+  "group": "mobile",
+  "active": "yes",
+  "type": [
+   "mechanized"
+  ],
+  "cw": 2.0,
+  "hp": 30.0,
+  "org": 60.0,
+  "mp": 1200.0,
+  "train": 120.0,
+  "need": {
+   "mechanized_equipment": "40",
+   "infantry_equipment": "100"
+  },
+  "support": false,
+  "tech": [
+   "mechanised_infantry"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "cavalry",
+  "abbr": "CAV",
+  "group": "mobile",
+  "active": "yes",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 25.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "120"
+  },
+  "support": false,
+  "tech": [],
+  "file": "cavalry.txt"
+ },
+ {
+  "key": "camelry",
+  "abbr": "CAM",
+  "group": "mobile",
+  "active": "no",
+  "type": [
+   "infantry"
+  ],
+  "cw": 2.0,
+  "hp": 30.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 160.0,
+  "need": {
+   "infantry_equipment": "150"
+  },
+  "support": false,
+  "tech": [
+   "camelry"
+  ],
+  "file": "cavalry.txt"
+ },
+ {
+  "key": "motorized",
+  "abbr": "MOT",
+  "group": "mobile",
+  "active": "no",
+  "type": [
+   "motorized"
+  ],
+  "cw": 2.0,
+  "hp": 27.5,
+  "org": 60.0,
+  "mp": 1200.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "100",
+   "motorized_equipment": "35"
+  },
+  "support": false,
+  "tech": [
+   "motorised_infantry"
+  ],
+  "file": "infantry.txt"
+ },
+ {
+  "key": "armored_car",
+  "abbr": "CAR",
+  "group": "mobile",
+  "active": "yes",
+  "type": [
+   "motorized"
+  ],
+  "cw": 2.0,
+  "hp": 5.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "armored_car_equipment": "60"
+  },
+  "support": false,
+  "tech": [
+   "armored_car1"
+  ],
+  "file": "armored_car_battalion.txt"
+ },
+ {
+  "key": "hq_motorized",
+  "abbr": "HMOT",
+  "group": "mobile",
+  "active": "no",
+  "type": [
+   "motorized"
+  ],
+  "cw": 2.0,
+  "hp": 15.0,
+  "org": 60.0,
+  "mp": 600.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "60",
+   "motorized_equipment": "20"
+  },
+  "support": false,
+  "tech": [
+   "tech_trucks"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_armored_car",
+  "abbr": "HCAR",
+  "group": "mobile",
+  "active": "yes",
+  "type": [
+   "motorized"
+  ],
+  "cw": 2.0,
+  "hp": 15.0,
+  "org": 60.0,
+  "mp": 600.0,
+  "train": 90.0,
+  "need": {
+   "infantry_equipment": "50",
+   "armored_car_equipment": "30"
+  },
+  "support": false,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "mot_rocket_artillery_brigade",
+  "abbr": "TRA",
+  "group": "mobile_combat_support",
+  "active": "yes",
+  "type": [
+   "motorized",
+   "artillery"
+  ],
+  "cw": 3.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "rocket_artillery_equipment": "24",
+   "motorized_equipment": "36"
+  },
+  "support": false,
+  "tech": [],
+  "file": "artillery_brigade.txt"
+ },
+ {
+  "key": "motorized_rocket_brigade",
+  "abbr": "MRA",
+  "group": "mobile_combat_support",
+  "active": "no",
+  "type": [
+   "artillery",
+   "motorized",
+   "rocket"
+  ],
+  "cw": 3.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "motorized_rocket_equipment": "16",
+   "motorized_equipment": "16"
+  },
+  "support": false,
+  "tech": [
+   "motorized_rocket_unit"
+  ],
+  "file": "artillery_brigade.txt"
+ },
+ {
+  "key": "mot_artillery_brigade",
+  "abbr": "MRT",
+  "group": "mobile_combat_support",
+  "active": "yes",
+  "type": [
+   "motorized",
+   "artillery"
+  ],
+  "cw": 3.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "artillery_equipment": "24",
+   "motorized_equipment": "36"
+  },
+  "support": false,
+  "tech": [
+   "tech_trucks"
+  ],
+  "file": "artillery_brigade.txt"
+ },
+ {
+  "key": "mot_anti_tank_brigade",
+  "abbr": "MAT",
+  "group": "mobile_combat_support",
+  "active": "yes",
+  "type": [
+   "motorized",
+   "anti_tank"
+  ],
+  "cw": 1.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "anti_tank_equipment": "36",
+   "motorized_equipment": "36"
+  },
+  "support": false,
+  "tech": [
+   "tech_trucks"
+  ],
+  "file": "anti_tank_brigade.txt"
+ },
+ {
+  "key": "mot_anti_air_brigade",
+  "abbr": "MAA",
+  "group": "mobile_combat_support",
+  "active": "yes",
+  "type": [
+   "motorized",
+   "anti_air"
+  ],
+  "cw": 1.0,
+  "hp": 1.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "anti_air_equipment": "36",
+   "motorized_equipment": "36"
+  },
+  "support": false,
+  "tech": [
+   "tech_trucks"
+  ],
+  "file": "anti-air_brigade.txt"
+ },
+ {
+  "key": "land_cruiser",
+  "abbr": "LCB",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor"
+  ],
+  "cw": 0.0,
+  "hp": 15.0,
+  "org": 60.0,
+  "mp": 1000.0,
+  "train": 250.0,
+  "need": {
+   "land_cruiser_chassis": "1"
+  },
+  "support": true,
+  "tech": [],
+  "file": "land_cruiser.txt"
+ },
+ {
+  "key": "super_heavy_armor",
+  "abbr": "STK",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "super_heavy_tank_chassis": "20"
+  },
+  "support": true,
+  "tech": [
+   "super_heavy_tank_chassis",
+   "super_heavy_tank"
+  ],
+  "file": "super_heavy_armor.txt"
+ },
+ {
+  "key": "super_heavy_sp_artillery_brigade",
+  "abbr": "SAR",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "artillery"
+  ],
+  "cw": 0.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "super_heavy_tank_artillery_chassis": "20"
+  },
+  "support": true,
+  "tech": [
+   "super_heavy_art"
+  ],
+  "file": "sp_artillery_brigade.txt"
+ },
+ {
+  "key": "super_heavy_tank_destroyer_brigade",
+  "abbr": "STD",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_tank"
+  ],
+  "cw": 0.0,
+  "hp": 0.6,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "super_heavy_tank_destroyer_chassis": "20"
+  },
+  "support": true,
+  "tech": [
+   "super_heavy_td"
+  ],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "heavy_tank_destroyer_support",
+  "abbr": "HTD",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_tank"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "heavy_tank_destroyer_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "medium_tank_destroyer_support",
+  "abbr": "MTD",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_tank"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 180.0,
+  "need": {
+   "medium_tank_destroyer_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "modern_tank_destroyer_support",
+  "abbr": "OTD",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_tank"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "modern_tank_destroyer_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "light_tank_destroyer_support",
+  "abbr": "LTD",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_tank"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "light_tank_destroyer_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "tank_destroyer_brigade.txt"
+ },
+ {
+  "key": "rocket_battery",
+  "abbr": "RBC",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "infantry"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "rocket_artillery_equipment": "6"
+  },
+  "support": true,
+  "tech": [
+   "rocket_artillery"
+  ],
+  "file": "fire_support.txt"
+ },
+ {
+  "key": "super_heavy_sp_anti_air_brigade",
+  "abbr": "SAA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_air"
+  ],
+  "cw": 0.0,
+  "hp": 0.5,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 180.0,
+  "need": {
+   "super_heavy_tank_aa_chassis": "20"
+  },
+  "support": true,
+  "tech": [
+   "super_heavy_spaa"
+  ],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "light_sp_anti_air_support",
+  "abbr": "LAA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_air"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "light_tank_aa_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "medium_sp_anti_air_support",
+  "abbr": "MAA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_air"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "medium_tank_aa_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "heavy_sp_anti_air_support",
+  "abbr": "HAA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_air"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "heavy_tank_aa_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "modern_sp_anti_air_support",
+  "abbr": "OAA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "support",
+   "armor",
+   "anti_air"
+  ],
+  "cw": null,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "modern_tank_aa_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "sp_anti-air_brigade.txt"
+ },
+ {
+  "key": "anti_air",
+  "abbr": "AA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.2,
+  "org": 0.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "anti_air_equipment": "24"
+  },
+  "support": true,
+  "tech": [],
+  "file": "anti-air.txt"
+ },
+ {
+  "key": "anti_tank",
+  "abbr": "AT",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.2,
+  "org": 0.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "anti_tank_equipment": "24"
+  },
+  "support": true,
+  "tech": [],
+  "file": "anti_tank.txt"
+ },
+ {
+  "key": "artillery",
+  "abbr": "ART",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.2,
+  "org": 0.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "artillery_equipment": "12"
+  },
+  "support": true,
+  "tech": [],
+  "file": "artillery.txt"
+ },
+ {
+  "key": "rocket_artillery",
+  "abbr": "RART",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.2,
+  "org": 0.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "rocket_artillery_equipment": "12"
+  },
+  "support": true,
+  "tech": [],
+  "file": "artillery.txt"
+ },
+ {
+  "key": "super_heavy_artillery",
+  "abbr": "SHART",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.2,
+  "org": 0.0,
+  "mp": 1000.0,
+  "train": 180.0,
+  "need": {
+   "super_heavy_artillery_equipment": "3"
+  },
+  "support": true,
+  "tech": [],
+  "file": "artillery.txt"
+ },
+ {
+  "key": "self_propelled_super_heavy_artillery",
+  "abbr": "SPSHART",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.2,
+  "org": 0.0,
+  "mp": 1000.0,
+  "train": 180.0,
+  "need": {
+   "self_propelled_super_heavy_artillery_equipment": "3"
+  },
+  "support": true,
+  "tech": [],
+  "file": "artillery.txt"
+ },
+ {
+  "key": "blackshirt_assault_battalion",
+  "abbr": "BAB",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 40.0,
+  "org": 10.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "100",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "blackshirt_assault_battalion_tech"
+  ],
+  "file": "blackshirt_assault_battalion.txt"
+ },
+ {
+  "key": "engineer",
+  "abbr": "ENG",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "10",
+   "support_equipment": "30"
+  },
+  "support": true,
+  "tech": [
+   "tech_engineers"
+  ],
+  "file": "engineer.txt"
+ },
+ {
+  "key": "pioneer_support",
+  "abbr": "PIO",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "10",
+   "support_equipment": "40"
+  },
+  "support": true,
+  "tech": [],
+  "file": "engineer.txt"
+ },
+ {
+  "key": "jungle_pioneers_support",
+  "abbr": "JLS",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "10",
+   "support_equipment": "40"
+  },
+  "support": true,
+  "tech": [
+   "lotta_svard_tech"
+  ],
+  "file": "engineer.txt"
+ },
+ {
+  "key": "assault_engineer",
+  "abbr": "ASEC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "armored_support_vehicle": "20",
+   "support_equipment": "20"
+  },
+  "support": true,
+  "tech": [],
+  "file": "engineer.txt"
+ },
+ {
+  "key": "armored_engineer",
+  "abbr": "AREC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "armored_support_vehicle": "30",
+   "support_equipment": "15"
+  },
+  "support": true,
+  "tech": [
+   "sp_armored_engineer_tech"
+  ],
+  "file": "engineer.txt"
+ },
+ {
+  "key": "field_hospital",
+  "abbr": "HOS",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "30",
+   "motorized_equipment": "20"
+  },
+  "support": true,
+  "tech": [
+   "tech_field_hospital"
+  ],
+  "file": "field_hospital.txt"
+ },
+ {
+  "key": "helicopter_field_hospital",
+  "abbr": "HELF",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "30",
+   "helicopter_equipment": "15",
+   "motorized_equipment": "15"
+  },
+  "support": true,
+  "tech": [
+   "sp_helicopter_med_evac_tech"
+  ],
+  "file": "field_hospital.txt"
+ },
+ {
+  "key": "fire_support",
+  "abbr": "FSC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.6,
+  "org": 30.0,
+  "mp": 240.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "30",
+   "support_equipment": "5"
+  },
+  "support": true,
+  "tech": [
+   "support_weapons"
+  ],
+  "file": "fire_support.txt"
+ },
+ {
+  "key": "mot_fire_support",
+  "abbr": "FSC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.6,
+  "org": 30.0,
+  "mp": 240.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "30",
+   "support_equipment": "5",
+   "motorized_equipment": "5"
+  },
+  "support": true,
+  "tech": [
+   "support_weapons"
+  ],
+  "file": "fire_support.txt"
+ },
+ {
+  "key": "field_guns",
+  "abbr": "IFG",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "artillery_equipment": "6"
+  },
+  "support": true,
+  "tech": [
+   "gw_artillery"
+  ],
+  "file": "fire_support.txt"
+ },
+ {
+  "key": "anti_air_battery",
+  "abbr": "RAA",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": 120.0,
+  "need": {
+   "anti_air_equipment": "16"
+  },
+  "support": true,
+  "tech": [
+   "interwar_antiair"
+  ],
+  "file": "fire_support.txt"
+ },
+ {
+  "key": "anti_tank_battery",
+  "abbr": "RAT",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 0.1,
+  "org": 0.0,
+  "mp": 180.0,
+  "train": null,
+  "need": {
+   "anti_tank_equipment": "16"
+  },
+  "support": true,
+  "tech": [
+   "interwar_antitank"
+  ],
+  "file": "fire_support.txt"
+ },
+ {
+  "key": "light_flame_tank",
+  "abbr": "LFT",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "flame",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "light_tank_flame_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "flame_tank.txt"
+ },
+ {
+  "key": "medium_flame_tank",
+  "abbr": "MFT",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "flame",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "medium_tank_flame_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "flame_tank.txt"
+ },
+ {
+  "key": "heavy_flame_tank",
+  "abbr": "HFT",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "flame",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 300.0,
+  "train": 120.0,
+  "need": {
+   "heavy_tank_flame_chassis": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "flame_tank.txt"
+ },
+ {
+  "key": "helicopter_brigade",
+  "abbr": "HELB",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "helicopter_equipment": "15",
+   "support_equipment": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "helicopter_brigade.txt"
+ },
+ {
+  "key": "hq_support_company",
+  "abbr": "HQ",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "20"
+  },
+  "support": true,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_engineer",
+  "abbr": "HQE",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "20",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_engineers"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_recon",
+  "abbr": "HQR",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "20",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_recon"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_military_police",
+  "abbr": "HQP",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_military_police"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_maintenance",
+  "abbr": "HQM",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_maintenance_company"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_field_hospital",
+  "abbr": "HQF",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_field_hospital"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_logistics",
+  "abbr": "HQL",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_logistics_company"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_signal",
+  "abbr": "HQS",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_signal_company"
+  ],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_naval_liaison",
+  "abbr": "HQNL",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_air_liaison",
+  "abbr": "HQAL",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "hq_specops",
+  "abbr": "HQSO",
+  "group": "support",
+  "active": "yes",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 30.0,
+  "mp": 200.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [],
+  "file": "hq_support.txt"
+ },
+ {
+  "key": "logistics_company",
+  "abbr": "LOG",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "20",
+   "motorized_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_logistics_company"
+  ],
+  "file": "logistics.txt"
+ },
+ {
+  "key": "helicopter_transport",
+  "abbr": "HELT",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 12.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "20",
+   "helicopter_equipment": "10",
+   "motorized_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "sp_helicopter_transport_pods_tech"
+  ],
+  "file": "logistics.txt"
+ },
+ {
+  "key": "maintenance_company",
+  "abbr": "MAIN",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "25"
+  },
+  "support": true,
+  "tech": [
+   "tech_maintenance_company"
+  ],
+  "file": "maintenance.txt"
+ },
+ {
+  "key": "armored_maintenance",
+  "abbr": "AMC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "15",
+   "armored_support_vehicle": "20"
+  },
+  "support": true,
+  "tech": [
+   "sp_armored_maintenance_tech"
+  ],
+  "file": "maintenance.txt"
+ },
+ {
+  "key": "military_police",
+  "abbr": "MP",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 0.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "10",
+   "infantry_equipment": "40"
+  },
+  "support": true,
+  "tech": [
+   "tech_military_police"
+  ],
+  "file": "military_police.txt"
+ },
+ {
+  "key": "motorized_military_police",
+  "abbr": "MMP",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 10.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "5",
+   "infantry_equipment": "20",
+   "motorbike_equipment": "20"
+  },
+  "support": true,
+  "tech": [
+   "sp_armored_motorized_military_police_tech"
+  ],
+  "file": "military_police.txt"
+ },
+ {
+  "key": "recon",
+  "abbr": "CREC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "40",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_recon"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "mot_recon",
+  "abbr": "MREC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "40",
+   "support_equipment": "10",
+   "motorized_equipment": "20"
+  },
+  "support": true,
+  "tech": [
+   "tech_recon"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "armored_car_recon",
+  "abbr": "AREC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "armored_car_equipment": "24"
+  },
+  "support": true,
+  "tech": [
+   "tech_recon"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "light_tank_recon",
+  "abbr": "TREC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "light_tank_chassis": "24"
+  },
+  "support": true,
+  "tech": [
+   "tech_recon"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "airborne_light_armor",
+  "abbr": "LTA",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "light_tank_chassis": "24"
+  },
+  "support": true,
+  "tech": [],
+  "file": "recon.txt"
+ },
+ {
+  "key": "rangers_support",
+  "abbr": "RAN",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 30.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "40",
+   "support_equipment": "15"
+  },
+  "support": true,
+  "tech": [],
+  "file": "recon.txt"
+ },
+ {
+  "key": "northern_territory_recon_support",
+  "abbr": "NTR",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 30.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "20",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "northern_territory_recon_support_tech"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "winter_logistics_support",
+  "abbr": "WIN",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 45.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "40",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "winter_logistics_support_tech"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "long_range_patrol_support",
+  "abbr": "LRP",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 10.0,
+  "org": 60.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "40",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "long_range_patrol_support_tech"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "helicopter_recon",
+  "abbr": "HELR",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "20",
+   "support_equipment": "10",
+   "helicopter_equipment": "20"
+  },
+  "support": true,
+  "tech": [
+   "sp_helicopter_artillery_observers_tech"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "elephantry",
+  "abbr": "ELE",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 2.0,
+  "org": 20.0,
+  "mp": 700.0,
+  "train": null,
+  "need": {
+   "infantry_equipment": "50",
+   "support_equipment": "35"
+  },
+  "support": true,
+  "tech": [
+   "elephantry"
+  ],
+  "file": "recon.txt"
+ },
+ {
+  "key": "signal_company",
+  "abbr": "SIG",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "20",
+   "motorized_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "tech_signal_company"
+  ],
+  "file": "signal.txt"
+ },
+ {
+  "key": "armored_signal",
+  "abbr": "ASC",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "armor",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 1.0,
+  "org": 20.0,
+  "mp": 500.0,
+  "train": 120.0,
+  "need": {
+   "support_equipment": "15",
+   "armored_support_vehicle": "20"
+  },
+  "support": true,
+  "tech": [
+   "sp_armored_signal_tech"
+  ],
+  "file": "signal.txt"
+ },
+ {
+  "key": "sturmtruppe_battalion",
+  "abbr": "STB",
+  "group": "support",
+  "active": "no",
+  "type": [
+   "infantry",
+   "support"
+  ],
+  "cw": 0.0,
+  "hp": 20.0,
+  "org": 70.0,
+  "mp": 1000.0,
+  "train": 120.0,
+  "need": {
+   "infantry_equipment": "150",
+   "support_equipment": "10"
+  },
+  "support": true,
+  "tech": [
+   "sturmtruppe_battalion_tech"
+  ],
+  "file": "sturmtruppe_battalion.txt"
+ }
+]

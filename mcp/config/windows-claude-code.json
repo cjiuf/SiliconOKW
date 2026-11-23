@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "hoi4": {
+      "command": "python",
+      "args": ["D:\\path\\to\\SiliconOKW\\clausewitz.py", "serve"],
+      "env": {
+        "HOI4_PATH": "D:\\SteamLibrary\\steamapps\\common\\Hearts of Iron IV",
+        "CLAUSEWITZ_CACHE": "D:\\path\\to\\SiliconOKW\\calling"
+      }
+    }
+  }
+}

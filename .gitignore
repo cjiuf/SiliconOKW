@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Machine-specific cache
+calling/date_addr.json
+
+# Large, regenerable object index (53 MB); rebuilds itself on first use.
+calling/objindex.pkl
+
+# Reverse-engineering dumps (regenerate with the scanners in research/)
+research/re-dumps/*
+!research/re-dumps/README.md
+
+# Logs
+*.log
+
+# Working files that should never be committed
+*.bak
+*.bak-*
+*.bak[0-9]*
+calling/objindex.pkl.tmpscan
+calling/prov_ptrs.json
+calling/console_table.json
+calling/front_snapshot.json
+calling/front_directives.json
+calling/staff_shadow.jsonl
+calling/subunit_pointers_live.json
+calling/pecmds.pkl
+calling/front_worker.json
+calling/front_worker.lock
+
+# generated from the installed game's events/*.txt + localisation
+research/windows/evdb_win.pkl
+*.bak_*
+
+# 2026-11-19: derived from the installed game files, rebuilt on first use
+calling/loc.pkl
+calling/decisions_meta.pkl
+calling/equipmeta.pkl
+calling/statemeta.pkl
+calling/assets_manifest.json
+calling/air_attach.json
+# 2026-11-21 (P0-2): journal of TIDs this server suspended; written next to the
+# injector (stage/winject_frozen.json) or in calling/process/ when imported there.
+winject_frozen.json
+winject_frozen.json.tmp
+calling/process/winject_frozen.json
+calling/process/winject_frozen.json.tmp
+calling/techids.pkl
+calling/turn_state.json
+calling/turn_state.json.tmp
+calling/reddots_state.json
+calling/reddots_state.json.tmp
+
+# Build outputs (bundles produced by tools/build_bundle.py)
+/dist/
+/tools/dist/
+native/*/target/
+calling/hoi4_fastmem.pyd
+tools/win/hoi4_recalc.exe
+calling/profiles/
+
+# 2026-11-20: 编辑器/工具状态目录
+.mimosa/

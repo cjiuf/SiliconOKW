@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "hoi4-fastmem"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Multi-core Win32 process memory scanner for Clausewitz-MCP (HOI4 1.19.5)"
+
+[tool.maturin]
+module-name = "hoi4_fastmem"
+features = ["pyo3/extension-module"]
