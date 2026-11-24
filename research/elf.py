@@ -49,7 +49,7 @@ class ELF:
         e = self.data.find(b'\0', o, o+maxlen)
         if e<0: return None
         try: return self.data[o:e].decode('utf-8','replace')
-        except: return None
+        except Exception: return None
 
     def relative_relocs(self):
         """returns dict: target_vaddr(addend) -> list of reloc slot vaddrs, and dict slot->addend"""

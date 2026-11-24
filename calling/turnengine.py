@@ -1187,7 +1187,7 @@ def _run_inspect_one(g, topic, q, tag):
         return _compact_staff_report(ind, arm, foc)
     if topic == "health":
         import macros as _mc
-        return _mc.strategic_health_board(g, tag=t)
+        return _mc.strategic_health_board(g, tag=tag)
     raise ValueError("unknown topic: %s" % topic)
 
 

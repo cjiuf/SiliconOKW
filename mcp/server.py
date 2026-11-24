@@ -354,8 +354,6 @@ def _win_screenshot(crop=None, focus=False) -> bytes:
         if m:
             w, h, x, y = (int(g) for g in m.groups())
             img = img.crop((x, y, x + w, y + h))
-    out = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    out.close()
     # 2026-11-21 (P2-6): a full 2048x1152 window as PNG is ~5 MB and the client
     # failed to render it.  An UNCROPPED shot is a "what is on screen" overview,
     # so downscale it until it is comfortably deliverable; an explicit `crop` is
@@ -374,10 +372,6 @@ def _win_screenshot(crop=None, focus=False) -> bytes:
             break
         img = img.resize((max(1, img.width * 3 // 4), max(1, img.height * 3 // 4)),
                          Image.LANCZOS)
-    try:
-        os.unlink(out.name)
-    except OSError:
-        pass
     return data
 
 
@@ -439,7 +433,10 @@ def screenshot(crop=None, focus=False) -> bytes:
         except Exception:
             pass
     if crop:
-        subprocess.run(["magick", out.name, "-crop", crop, out.name], capture_output=True)
+        crop_s = str(crop).strip()
+        if not re.match(r"^\d+x\d+\+-?\d+\+-?\d+$", crop_s):
+            raise ValueError("invalid crop geometry (expected WxH+X+Y): %r" % (crop,))
+        subprocess.run(["magick", out.name, "-crop", crop_s, out.name], capture_output=True)
     data = open(out.name, "rb").read()
     try: os.unlink(out.name)
     except OSError: pass
@@ -3140,7 +3137,7 @@ def _save_compare(a):
     else:
         files = sorted(glob.glob(S + "/*.hoi4"), key=os.path.getmtime, reverse=True)
         if not files:
-            return {"ok": False, "error": "save bulunamadi"}
+            return {"ok": False, "error": "save not found"}
         path = files[0]
     tokens = savereader.load_tokens()
     if not tokens:
@@ -4097,7 +4094,7 @@ def _read_mem(a):
           "i64": p.i64, "f32": p.f32, "f64": p.f64, "cstr": p.cstr,
           "stdstring": p.stdstring}.get(t)
     if not fn:
-        raise ValueError("bilinmeyen tip: %s" % t)
+        raise ValueError("unknown type: %s" % t)
     v = fn(addr)
     return {"value": v, "hex": hex(v) if isinstance(v, int) else None}
 
@@ -4234,9 +4231,24 @@ def handle(msg):
                 "Use hoi4_inspect / hoi4_run_plan instead, or set HOI4_MCP_COMPACT_STRICT=0."
                 % (tname, ", ".join(COMPACT_TOOL_NAMES)),
             )
+        if tname == "hoi4_debug_eval" and not (_ALLOW_DEBUG and _ALLOW_EVAL):
+            return rpc_error(
+                req_id,
+                -32601,
+                "tool 'hoi4_debug_eval' is disabled by default for security. "
+                "Set both HOI4_MCP_ALLOW_DEBUG=1 and HOI4_MCP_ALLOW_EVAL=1 only for local RE debugging.",
+            )
+        if isinstance(tname, str) and tname.startswith("hoi4_debug_") and not _ALLOW_DEBUG:
+            return rpc_error(
+                req_id,
+                -32601,
+                "debug/cheat tool '%s' is disabled by default. "
+                "Set HOI4_MCP_ALLOW_DEBUG=1 only for local reverse-engineering."
+                % tname,
+            )
         fn = HANDLERS.get(tname)
         if not fn:
-            return rpc_error(req_id, -32601, "bilinmeyen arac: %s" % tname)
+            return rpc_error(req_id, -32601, "unknown tool: %s" % tname)
         call_args = params.get("arguments") or {}
         if not isinstance(call_args, dict):
             call_args = {}
@@ -4260,7 +4272,7 @@ def handle(msg):
             out = _run_with_timeout(fn, call_args, tname)
         except Exception as e:
             return rpc_result(req_id, {"content": [{"type": "text",
-                "text": "HATA: %s\n%s" % (e, traceback.format_exc())}], "isError": True})
+                "text": "ERROR: %s\n%s" % (e, traceback.format_exc())}], "isError": True})
         content = []
         if isinstance(out, dict) and "_image" in out:
             content.append({"type": "image", "data": out.pop("_image"), "mimeType": "image/png"})
@@ -4269,7 +4281,7 @@ def handle(msg):
         return rpc_result(req_id, {"content": content})
     if req_id is None:
         return None
-    return rpc_error(req_id, -32601, "desteklenmeyen metot: %s" % method)
+    return rpc_error(req_id, -32601, "unsupported method: %s" % method)
 
 
 # ============================================================== staff layer
@@ -4406,6 +4418,14 @@ _COMPACT_STRICT = os.environ.get("HOI4_MCP_COMPACT_STRICT", "1").strip().lower()
 _SHOW_UNSUPPORTED = os.environ.get("HOI4_MCP_SHOW_UNSUPPORTED", "0").strip().lower() in (
     "1", "true", "yes", "on"
 )
+# 安全默认：hoi4_debug_*（控制台/任意函数调用/内存读）默认关闭，防止 Full 模式下被误用或提示词注入；
+# hoi4_debug_eval（Python exec/eval）需同时显式开启 HOI4_MCP_ALLOW_DEBUG=1 与 HOI4_MCP_ALLOW_EVAL=1。
+_ALLOW_DEBUG = os.environ.get("HOI4_MCP_ALLOW_DEBUG", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+_ALLOW_EVAL = os.environ.get("HOI4_MCP_ALLOW_EVAL", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
 _TOOL_REQUIRED_CACHE = None
 
 
@@ -4420,14 +4440,24 @@ def _tool_required_keys(name):
 
 
 def _active_tools():
-    """按运行档位与平台返回 tools/list：compact 模式仅暴露 5 个高层聚合工具（~1.5k tokens）。"""
+    """按运行档位、平台与安全开关返回 tools/list：compact 模式仅暴露 5 个高层聚合工具（~1.5k tokens）。"""
     if _MCP_PROFILE == "compact":
         want = set(COMPACT_TOOL_NAMES)
         return [t for t in TOOLS if t.get("name") in want]
+    hide = set()
     if sys.platform == "win32" and not _SHOW_UNSUPPORTED:
-        hide = set(LINUX_ONLY_TOOL_NAMES)
-        return [t for t in TOOLS if t.get("name") not in hide]
-    return TOOLS
+        hide.update(LINUX_ONLY_TOOL_NAMES)
+    out = []
+    for t in TOOLS:
+        nm = t.get("name") or ""
+        if nm in hide:
+            continue
+        if nm == "hoi4_debug_eval" and not (_ALLOW_DEBUG and _ALLOW_EVAL):
+            continue
+        if nm.startswith("hoi4_debug_") and not _ALLOW_DEBUG:
+            continue
+        out.append(t)
+    return out
 
 
 @tool(

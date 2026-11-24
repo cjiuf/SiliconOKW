@@ -2393,6 +2393,92 @@ def test_retest11_all_fixes():
         EW.can_execute = orig_ce
 
 
+def test_security_and_hard_bugs():
+    print("\n== 15. 公开仓安全审计与硬 Bug 回归验证 ==")
+    import diplomacy as DP
+    import turnengine as TE
+    import macros as MC
+    import server as MCP
+    from process import winject as WJ
+
+    # 1. diplomacy.justify_wargoal / declare_war 在 Windows 上干净返回提示，不抛 NameError
+    ok_jw, msg_jw = DP.justify_wargoal(None, "POL")
+    ok_dw, msg_dw = DP.declare_war(None, "POL")
+    check("diplomacy.justify_wargoal/declare_war 不再因缺 import sys 抛 NameError",
+          (ok_jw is False and "cmdwin" in msg_jw)
+          and (ok_dw is False and "cmdwin" in msg_dw),
+          ((ok_jw, msg_jw), (ok_dw, msg_dw)))
+
+    # 2. turnengine._run_inspect_one(topic="health") 不再因未定义变量 t 抛 NameError
+    orig_shb = MC.strategic_health_board
+    captured = {}
+    try:
+        def _fake_shb(g_, tag=None):
+            captured["tag"] = tag
+            return {"ok": True, "tag": tag}
+        MC.strategic_health_board = _fake_shb
+        r_hp = TE._run_inspect_one(object(), "health", {"topic": "health"}, "GER")
+        check("turnengine inspect topic='health' 正确透传 tag 且不抛 NameError",
+              r_hp == {"ok": True, "tag": "GER"} and captured.get("tag") == "GER",
+              (r_hp, captured))
+    finally:
+        MC.strategic_health_board = orig_shb
+
+    # 3. MCP 服务端默认隐藏并拒绝全部 hoi4_debug_*（特别是 hoi4_debug_eval）
+    orig_prof = MCP._MCP_PROFILE
+    orig_dbg, orig_ev = MCP._ALLOW_DEBUG, MCP._ALLOW_EVAL
+    try:
+        MCP._MCP_PROFILE = "full"
+        MCP._ALLOW_DEBUG = False
+        MCP._ALLOW_EVAL = False
+        names = {t["name"] for t in MCP._active_tools()}
+        check("默认 Full 模式 tools/list 隐藏全部 hoi4_debug_* 工具",
+              not any(n.startswith("hoi4_debug_") for n in names),
+              sorted(n for n in names if n.startswith("hoi4_debug_")))
+        resp_eval = MCP.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "hoi4_debug_eval", "arguments": {"expr": "1+1"}},
+        })
+        resp_con = MCP.handle({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "hoi4_debug_console", "arguments": {"command": "pp 1"}},
+        })
+        resp_unk = MCP.handle({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": "hoi4_no_such_tool", "arguments": {}},
+        })
+        check("默认 Full 模式 tools/call 拒绝 hoi4_debug_eval / hoi4_debug_console 且错误为英文",
+              resp_eval.get("error", {}).get("code") == -32601
+              and "disabled" in resp_eval["error"]["message"]
+              and resp_con.get("error", {}).get("code") == -32601
+              and "disabled" in resp_con["error"]["message"]
+              and resp_unk.get("error", {}).get("message") == "unknown tool: hoi4_no_such_tool",
+              (resp_eval, resp_con, resp_unk))
+
+        # 仅开 HOI4_MCP_ALLOW_DEBUG=1 仍不允许 hoi4_debug_eval，需双开关
+        MCP._ALLOW_DEBUG = True
+        MCP._ALLOW_EVAL = False
+        names_dbg = {t["name"] for t in MCP._active_tools()}
+        resp_eval2 = MCP.handle({
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": {"name": "hoi4_debug_eval", "arguments": {"expr": "1+1"}},
+        })
+        check("仅开启 ALLOW_DEBUG 不放行 hoi4_debug_eval（需同时开启 ALLOW_EVAL）",
+              "hoi4_debug_console" in names_dbg
+              and "hoi4_debug_eval" not in names_dbg
+              and resp_eval2.get("error", {}).get("code") == -32601,
+              (resp_eval2, "hoi4_debug_eval" in names_dbg))
+    finally:
+        MCP._MCP_PROFILE = orig_prof
+        MCP._ALLOW_DEBUG, MCP._ALLOW_EVAL = orig_dbg, orig_ev
+
+    # 4. winject.FROZEN_FILE 位于用户可写目录而非源码目录
+    src_dir = os.path.dirname(os.path.abspath(WJ.__file__))
+    check("winject.FROZEN_FILE 不再写入源码目录",
+          os.path.dirname(os.path.abspath(WJ.FROZEN_FILE)) != src_dir,
+          (WJ.FROZEN_FILE, src_dir))
+
+
 def main():
     test_b1_b7_wargoal_direct()
     test_b2_supply_model()
@@ -2408,6 +2494,7 @@ def main():
     test_retest9_d5_d6_and_e1_to_e6_fixes()
     test_retest10_all_fixes()
     test_retest11_all_fixes()
+    test_security_and_hard_bugs()
     print("\nSummary: %d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1
 

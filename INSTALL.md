@@ -31,7 +31,7 @@ setx HOI4_PATH "D:\SteamLibrary\steamapps\common\Hearts of Iron IV"
 
 ```
 calling/          核心调用层 + 命令表/符号表
-mcp/server.py     MCP 服务端（Full 177 工具 / --compact 5 工具模式）
+mcp/server.py     MCP 服务端（Full 174 合规工具 / --compact 5 工具模式）
 clausewitz.py     入口：python clausewitz.py serve [--compact]
 native/           可选 Rust 扫描扩展与偏移校验源码
 research/         PE 逆向工具链 + WINDOWS_1.19.5.md 反汇编笔记 + rtti_win.pkl + 回归测试

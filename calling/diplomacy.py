@@ -18,6 +18,7 @@ sig=11. Both constructors here take ONLY `this`; the sides and the war goal are
 plain fields, so they are written directly (no guessed varargs).
 """
 import struct
+import sys
 
 import offsets as O
 

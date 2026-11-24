@@ -1,4 +1,4 @@
-import struct, sys
+import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "calling"))
 import winject as W
 pid = W.find_pid(); print("pid", pid)

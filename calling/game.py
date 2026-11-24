@@ -10441,7 +10441,7 @@ class MacroMixin:
     def list_database(self, which: str, filter_text="", limit=200):
         """List any of the game's item databases by name."""
         if which not in self.DATABASE_ARRAYS:
-            return {"error": "bilinmeyen veritabani",
+            return {"error": "unknown database",
                     "available": sorted(self.DATABASE_ARRAYS)}
         cls, off, nameoff = self.DATABASE_ARRAYS[which]
         db = self.oi.singleton(cls)

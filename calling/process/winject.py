@@ -14,6 +14,7 @@ import ctypes.wintypes as wt
 import json
 import os
 import struct
+import tempfile
 import time
 
 k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -288,8 +289,18 @@ class _Ctx:
 #
 # Guard against PID REUSE: the record carries the target's creation time, and a
 # record is only honoured when the pid AND the creation time still match.
-FROZEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "winject_frozen.json")
+def _default_frozen_file():
+    """将孤儿线程恢复日志放在用户可写目录，避免源码目录只读时静默失效。"""
+    override = os.environ.get("HOI4_STATE_DIR")
+    if override:
+        base = override
+    else:
+        local_app = os.environ.get("LOCALAPPDATA")
+        base = os.path.join(local_app, "SiliconOKW") if local_app else tempfile.gettempdir()
+    return os.path.join(base, "winject_frozen.json")
+
+
+FROZEN_FILE = _default_frozen_file()
 
 
 def _proc_start_time(pid):
@@ -309,6 +320,9 @@ def _proc_start_time(pid):
 
 def _write_frozen(pid, tids):
     try:
+        parent = os.path.dirname(FROZEN_FILE)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         data = {"pid": int(pid), "start": _proc_start_time(pid),
                 "tids": sorted({int(t) for t in tids}), "ts": time.time()}
         tmp = FROZEN_FILE + ".tmp"
@@ -631,6 +645,8 @@ class Injector:
         # ... and the journal must stop claiming we still hold it.
         self._sync_frozen()
 
+        timed_out_in_stub = False
+        timed_out_rip = 0
         t0 = time.time()
         while time.time() - t0 < timeout:
             if self._read(flag, 4) != b"\0\0\0\0":
@@ -646,8 +662,7 @@ class Injector:
                 time.sleep(0.005)
             else:
                 # Still inside the call.  Two very different situations:
-                #   RIP inside the stub -> the thread is parked after the fact, so
-                #     restoring the whole context is safe and frees it.
+                #   RIP inside the stub -> restoring the whole context is safe and frees it.
                 #   RIP anywhere else -> it is executing game code; restoring would
                 #     rewind it, suspending it would freeze the game.  Leave it
                 #     alone and refuse further calls on this process until the
@@ -662,18 +677,37 @@ class Injector:
                         "was restored and the thread was left running. Wait for the "
                         "game to settle before the next call."
                         % (timeout, cand, func_addr, rip))
+                timed_out_in_stub = True
+                timed_out_rip = rip
 
         # Suspend the thread while it is parked on `jmp $` before restoring CONTEXT,
         # per Win32 SetThreadContext contract, then resume and close the handle so
         # _extra_handles does not leak across long sessions.
         _check(k32.SuspendThread(h) != 0xFFFFFFFF, "SuspendThread(restore)")
+        completed_flag = False
+        parked_at_jmp = False
         try:
+            if timed_out_in_stub:
+                # 在线程彻底停稳后复核 flag 与 RIP：仅当已置位 flag 或停在末尾 jmp $
+                # (stub + STUB_LEN - 2) 才说明 call rax 与 mov [res], rax 已执行完成。
+                completed_flag = self._read(flag, 4) != b"\0\0\0\0"
+                stopped_rip = self._get_ctx(h).get(OFF_RIP)
+                parked_at_jmp = (stopped_rip == stub + STUB_LEN - 2)
+                timed_out_rip = stopped_rip
             _check(k32.SetThreadContext(h, _Ctx(saved).ptr()), "SetThreadContext(restore)")
         finally:
             k32.ResumeThread(h)
         if h in self._extra_handles:
             self._extra_handles.remove(h)
             k32.CloseHandle(h)
+
+        if timed_out_in_stub and not (completed_flag or parked_at_jmp):
+            if own:
+                self._thaw()
+            raise CallError(
+                "timeout %.1fs: tid %d was still inside stub before completion "
+                "(RIP=%#x, flag=0); context restored without returning stale 0."
+                % (timeout, cand, timed_out_rip))
 
         self.call_count += 1
         self.last_tid = cand

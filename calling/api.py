@@ -650,7 +650,7 @@ class Country:
     def modifier(self, name_or_id) -> float:
         mid = self.game.modifier_id(name_or_id) if isinstance(name_or_id, str) else int(name_or_id)
         if mid is None:
-            raise KeyError("bilinmeyen modifier: %r" % (name_or_id,))
+            raise KeyError("unknown modifier: %r" % (name_or_id,))
         if sys.platform == "win32":
             return self._win_modifier_totals().get(mid, 0) / O.FIXED
         return self.game.read_modifier(self.ptr + O.CO_MODIFIERS, mid) / O.FIXED
@@ -1171,7 +1171,7 @@ class HOI4:
             self._tags = None
             self._load_tags()
         if tag not in self._tags:
-            raise KeyError("bilinmeyen tag: %s" % tag)
+            raise KeyError("unknown tag: %s" % tag)
         tid = self._tags.index(tag)
         ptrs = self.country_ptrs()
         # 2026-11-06: use the cached tag2index VALUE. The live read was tried for a

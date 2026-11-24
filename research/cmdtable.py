@@ -23,7 +23,7 @@ class CmdTable:
             name = b
         if not name or any(c < 0x20 or c > 0x7e for c in name): return None
         try: name = name.decode()
-        except: return None
+        except Exception: return None
         fn = struct.unpack_from("<Q", d, 0x60)[0]
         if not (self.TEXT_LO <= fn < self.TEXT_HI): return None
         return name, fn, d
