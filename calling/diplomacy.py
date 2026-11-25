@@ -21,6 +21,27 @@ import struct
 import sys
 
 import offsets as O
+import session_state as _SS
+
+# 进程级已知 CTimedWargoalActivity* 指针追踪集（用于 1.5s 轮询零深扫感知正当化结束）
+# key = int(pid) -> set[int]
+_TRACKED_ACTIVITIES = {}
+_SS.register_cache("diplomacy._TRACKED_ACTIVITIES", container=_TRACKED_ACTIVITIES)
+
+
+def track_activity_ptr(g, ptr):
+    """登记已知的 CTimedWargoalActivity* 指针，供 justifying_fast O(1) 跟踪其完成/消失。"""
+    try:
+        pid = int(getattr(getattr(g, "p", None), "pid", 0) or 0)
+        addr = int(ptr, 16) if isinstance(ptr, str) else int(ptr)
+    except Exception:
+        return
+    if not (0x10000 < addr < 0x7F0000000000):
+        return
+    bucket = _TRACKED_ACTIVITIES.setdefault(pid, set())
+    if len(bucket) >= 32:
+        bucket.clear()
+    bucket.add(addr)
 
 VT_DIPCMD           = 0x4358EB0   # CDiplomaticActionCommand
 VT_DECLAREWAR       = 0x4359288   # CDeclareWarAction
@@ -772,6 +793,10 @@ def justifying(g):
     旧实现逐 8 字节猜 (t1,t2) 并把 +0x10 当发起国，所以把 GER->HOL 印成了
     HOL->GER（方向反了），也没有 days_left / eta_date。
     """
+    custom = getattr(g, "_mock_justifying", None)
+    if custom is not None:
+        raw = custom(None) if callable(custom) else list(custom)
+        return [dict(r) for r in (raw or []) if isinstance(r, dict)]
     p = g.p
     idx2tag = {}
     for t in g.tags():
@@ -891,6 +916,7 @@ def justifying(g):
                 paused_by_pp = False
 
             eta = end_date_str if (end_date_str and cur_date_raw is not None and (end_date_raw - cur_date_raw) / 24.0 <= days_by_progress + 0.5) else (_add_game_days(g, days) if days is not None else None)
+            track_activity_ptr(g, a)
             out.append({
                 "ptr": hex(a),
                 "from": src_tag,
@@ -936,6 +962,195 @@ def justifying(g):
                                 "note": "queued, engine has not created the timed activity yet"})
             except Exception:
                 pass
+    return out
+
+
+def country_wargoals_fast(g, tag=None, valid_only=True):
+    """供 1.5s 轮询与红点 fast 巡检使用的 O(1) 纯只读 CB 查询（绝不触发全堆 deep_instances 慢扫）。
+
+    返回 (rows, ok)。支持离线单测通过 `g._mock_wargoals` 注入。
+    """
+    custom = getattr(g, "_mock_wargoals", None)
+    if custom is not None:
+        raw = custom(tag) if callable(custom) else list(custom)
+        want = str(tag).upper() if tag else None
+        out = []
+        for r in (raw or []):
+            if not isinstance(r, dict):
+                continue
+            if want and str(r.get("owner_tag") or "").upper() != want:
+                continue
+            if valid_only and r.get("valid") is False:
+                continue
+            out.append(dict(r))
+        return out, True
+
+    rows, ok = country_wargoals_direct(g, tag=tag, valid_only=valid_only)
+    if ok:
+        return rows, True
+    return [], False
+
+
+def justifying_fast(g, tag=None):
+    """供 1.5s 轮询与红点 fast 巡检使用的 O(1)/毫秒级正当化查询（绝不触发 deep_instances 全堆慢扫）。
+
+    Windows 上合并已知追踪指针 `_TRACKED_ACTIVITIES` 与已就绪 `g._oi` 的轻量 arena 查询，
+    并在解码时校验虚表类名与进度合法性，自动清理已释放或已完成的旧指针。
+    支持离线单测通过 `g._mock_justifying` 注入。
+    """
+    want = str(tag).upper() if tag else None
+    custom = getattr(g, "_mock_justifying", None)
+    if custom is not None:
+        raw = custom(tag) if callable(custom) else list(custom)
+        out = []
+        for r in (raw or []):
+            if not isinstance(r, dict):
+                continue
+            sc = r.get("source_class")
+            if sc and sc != "CTimedWargoalActivity":
+                continue
+            if want and str(r.get("from") or "").upper() != want:
+                continue
+            out.append(dict(r))
+        return out
+
+    p = getattr(g, "p", None)
+    if p is None:
+        return []
+
+    pid = int(getattr(p, "pid", 0) or 0)
+    cand_ptrs = []
+    seen = set()
+
+    def _add(addr):
+        try:
+            a = int(addr)
+        except Exception:
+            return
+        if (0x10000 < a < 0x7F0000000000) and a not in seen:
+            seen.add(a)
+            cand_ptrs.append(a)
+
+    if sys.platform == "win32":
+        for a in list(_TRACKED_ACTIVITIES.get(pid) or ()):
+            _add(a)
+        oi = getattr(g, "_oi", None)
+        if oi is not None:
+            for fn_name in ("instances", "live_instances"):
+                fn = getattr(oi, fn_name, None)
+                if not callable(fn):
+                    continue
+                try:
+                    for a in (fn("CTimedWargoalActivity") or ()):
+                        _add(a)
+                except Exception:
+                    continue
+    else:
+        for _owner, a in _country_timed_activities(g):
+            _add(a)
+
+    if not cand_ptrs:
+        return []
+
+    idx2tag = {}
+    try:
+        for t in (g.tags() or ()):
+            try:
+                idx2tag[tag_index(g, t)] = t
+            except Exception:
+                pass
+    except Exception:
+        return []
+    if not idx2tag:
+        return []
+
+    cur_date_raw = None
+    try:
+        cur_date_raw = int(g.date_raw())
+    except Exception:
+        cur_date_raw = None
+
+    oi = getattr(g, "_oi", None)
+    _pe = sys.platform == "win32"
+    out = []
+    stale = set()
+
+    def _raw_date_to_str(raw_val):
+        try:
+            rv = int(raw_val)
+            if not (16_000_000 <= rv <= 18_500_000):
+                return None
+            from api import date_to_parts
+            y, m, d, _h = date_to_parts(rv)
+            if 1930 <= y <= 2020:
+                return "%04d.%02d.%02d" % (y, m, d)
+        except Exception:
+            pass
+        return None
+
+    for a in cand_ptrs:
+        try:
+            if oi is not None:
+                cls_nm = oi.class_of(a)
+                if cls_nm is not None and cls_nm != "CTimedWargoalActivity":
+                    stale.add(a)
+                    continue
+            if _pe:
+                src_tag = idx2tag.get(p.i32(a + 0x10))
+                tgt_id = p.i32(a + 0x14)
+            else:
+                src_tag = idx2tag.get(p.i32(a + 0x0C))
+                tgt_id = p.i32(a + 0x10)
+            tgt_tag = idx2tag.get(tgt_id)
+            if not src_tag or not tgt_tag or src_tag == tgt_tag:
+                stale.add(a)
+                continue
+            total = p.i64(a + 0x18) / O.FIXED
+            per = p.i64(a + 0x20) / O.FIXED
+            done = p.i64(a + 0x28) / O.FIXED
+            if not (1.0 <= total <= 5000.0) or done < -1.0 or done > total + 10.0:
+                stale.add(a)
+                continue
+            rem_raw = max(0.0, total - done)
+            days_by_progress = (rem_raw / per) if per > 1e-6 else rem_raw
+            end_date_raw = None
+            try:
+                end_date_raw = int(p.i32(a + 0x50))
+            except Exception:
+                end_date_raw = None
+            end_date_str = _raw_date_to_str(end_date_raw) if end_date_raw is not None else None
+            days = days_by_progress
+            if end_date_str is not None and cur_date_raw is not None and end_date_raw is not None:
+                days_by_end = max(0.0, (end_date_raw - cur_date_raw) / 24.0)
+                if days_by_end < days:
+                    days = days_by_end
+            days = max(0.0, round(days, 2))
+            if days <= 0.0 and done >= total - 0.01:
+                stale.add(a)
+                continue
+            track_activity_ptr(g, a)
+            if want and str(src_tag).upper() != want:
+                continue
+            eta = end_date_str or _add_game_days(g, days)
+            out.append({
+                "ptr": hex(a),
+                "from": src_tag,
+                "target": tgt_tag,
+                "source_class": "CTimedWargoalActivity",
+                "days_left": days,
+                "eta_date": eta,
+                "progress_days": round(done, 2),
+                "total_days": round(total, 2),
+                "progress": round(min(1.0, done / total), 3) if total > 0 else None,
+            })
+        except Exception:
+            stale.add(a)
+            continue
+
+    if stale and pid in _TRACKED_ACTIVITIES:
+        _TRACKED_ACTIVITIES[pid].difference_update(stale)
+
+    out.sort(key=lambda r: (float("inf") if r.get("days_left") is None else float(r["days_left"]), str(r.get("target") or "")))
     return out
 
 

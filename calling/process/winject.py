@@ -759,6 +759,11 @@ class Injector:
                 % (timeout, cand, timed_out_rip))
 
         self.call_count += 1
+        try:
+            _pid_i = int(self.pid)
+            _CALL_COUNTS[_pid_i] = _CALL_COUNTS.get(_pid_i, 0) + 1
+        except Exception:
+            pass
         self.last_tid = cand
         out = struct.unpack("<Q", self._read(res, 8))[0]
         if own:
@@ -828,6 +833,30 @@ class Injector:
 #: happily hijack the same thread again while it is still inside the first one --
 #: that nests stubs and mangles the stack (seen: render thread wedged).
 _DIRTY_PIDS = set()
+
+#: 进程级累计注入计数（跨多次 attach/detach 持久统计，供 hoi4_status.injections 观测）
+_CALL_COUNTS = {}
+
+
+def call_count(pid=None):
+    """返回指定 pid（或全进程总计）在本会话内完成的真实线程劫持注入次数。"""
+    if pid is None:
+        return sum(_CALL_COUNTS.values())
+    try:
+        return int(_CALL_COUNTS.get(int(pid), 0))
+    except Exception:
+        return 0
+
+
+def reset_call_count(pid=None):
+    """重置累计注入计数（供单测或进程重建使用）。"""
+    if pid is None:
+        _CALL_COUNTS.clear()
+        return
+    try:
+        _CALL_COUNTS.pop(int(pid), None)
+    except Exception:
+        pass
 
 
 def clear_dirty(pid=None):

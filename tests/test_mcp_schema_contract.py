@@ -2,6 +2,7 @@
 """阶段 3 WP4 契约测试：MCP 181 工具 Schema / Handler / 双门禁 / Stdio JSON-RPC 契约守护。"""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,37 @@ class TestMCPSchemaContract(unittest.TestCase):
                 tools_list = r2["result"]["tools"]
                 self.assertEqual(len(tools_list), expected_cnt)
                 self.assertFalse(any(t["name"].startswith("hoi4_debug_") for t in tools_list))
+
+    def test_no_unknown_tool_names_in_reddots_and_briefings(self):
+        """红点/简报/参谋建议文案中引用的每个 hoi4_*() 工具名必须真实存在于 MCP.TOOLS。"""
+        valid_names = {t["name"] for t in MCP.TOOLS}
+        pat = re.compile(r"\b(hoi4_[a-z0-9_]+)\s*\(")
+        targets = [
+            os.path.join(CALLING, "reddots.py"),
+            os.path.join(CALLING, "turnengine.py"),
+            os.path.join(CALLING, "autopilot.py"),
+            os.path.join(CALLING, "macros.py"),
+            os.path.join(CALLING, "housekeep.py"),
+            os.path.join(CALLING, "domains", "overview.py"),
+        ]
+        unknown = []
+        for path in targets:
+            if not os.path.isfile(path):
+                continue
+            with open(path, "r", encoding="utf-8", errors="ignore") as _fh:
+                text = _fh.read()
+            for lineno, line in enumerate(text.splitlines(), 1):
+                for m in pat.finditer(line):
+                    nm = m.group(1)
+                    if nm not in valid_names:
+                        unknown.append(f"{os.path.basename(path)}:{lineno} -> {nm}")
+        self.assertEqual(unknown, [], f"文案中出现不存在的 MCP 工具名: {unknown}")
+
+    def test_compact_wait_and_brief_exposes_respect_red_dots(self):
+        tmap = {t["name"]: t for t in MCP.TOOLS}
+        props = tmap["hoi4_wait_and_brief"]["inputSchema"]["properties"]
+        self.assertIn("respect_red_dots", props)
+        self.assertEqual(props["respect_red_dots"].get("type"), "boolean")
 
 
 if __name__ == "__main__":

@@ -391,7 +391,7 @@ class ResearchMixin:
                 continue
             if nm in researched or nm in active:
                 continue
-            if d.get("always_no"):
+            if d.get("always_no") or d.get("special_project_gated"):
                 continue
             # Focus-granted modifier techs have no folder; they are not in the tree.
             if not d.get("folder"):
@@ -414,6 +414,65 @@ class ResearchMixin:
             rows.append((score, year, nm))
         rows.sort(key=lambda r: (-r[0], r[1], r[2]))
         return [nm for _, _, nm in rows]
+
+    def available_research_detailed(self, tag=None, max_ahead_years=None):
+        """带年份、超前年限、估算天数与互斥信息的纯只读可选科技目录（0 注入）。
+
+        相比 `available_research()` 仅返回科技名列表，本方法显式暴露 `start_year`、
+        `ahead_years`（按当前日期小数年份精确计算）、`cost_days`、`category`、`xor`，
+        供 Standing Orders 编译器与 `hoi4_inspect(research_available)` 诚实计算超前惩罚。
+        """
+        import techdata
+        names = list(self.available_research(tag) or [])
+        defs = techdata.load() or {}
+        d_now = {}
+        try:
+            d_now = self.date() or {}
+        except Exception:
+            d_now = {}
+        yr_now = int(d_now.get("year") or 1936)
+        mo_now = int(d_now.get("month") or 1)
+        day_now = int(d_now.get("day") or 1)
+        cur_year_frac = yr_now + (max(1, mo_now) - 1) / 12.0 + (max(1, day_now) - 1) / 365.0
+        my_tag = None
+        try:
+            my_tag = self._c(tag).tag
+        except Exception:
+            my_tag = tag
+        out = []
+        for nm in names:
+            info = techdata.tech_info(nm, defs=defs) or {}
+            sy = int(info.get("start_year") or 1936)
+            ahead = round(max(0.0, float(sy) - cur_year_frac), 2)
+            if max_ahead_years is not None and ahead > float(max_ahead_years) + 1e-6:
+                continue
+            cost_days = None
+            try:
+                cost_days = self.tech_cost_days(nm)
+            except Exception:
+                cost_days = None
+            if cost_days is None:
+                cost_days = info.get("base_cost_days")
+            score = techdata.score_tech(
+                nm,
+                info.get("folder") or "",
+                info.get("categories") or [],
+                sy,
+                yr_now,
+                tag=my_tag,
+            )
+            out.append({
+                "key": nm,
+                "start_year": sy,
+                "ahead_years": ahead,
+                "cost_days": cost_days,
+                "category": info.get("category") or "other",
+                "folder": info.get("folder") or "",
+                "categories": info.get("categories") or [],
+                "xor": info.get("xor") or [],
+                "score": score,
+            })
+        return out
 
     def _check_foreground_guard(self):
         """纯只读检查游戏窗口是否处于前台（绝不调用 SetForegroundWindow 抢焦点）。

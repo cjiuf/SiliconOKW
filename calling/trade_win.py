@@ -204,6 +204,70 @@ def world_trades(g):
     return rows
 
 
+_COMMON_EXPORTERS = {
+    "oil": ("ROM", "SOV", "VEN", "USA", "IRQ", "PER", "MEX", "INS"),
+    "rubber": ("INS", "MAL", "SIA", "BRA", "ENG", "FRA"),
+    "tungsten": ("POR", "SWE", "SOV", "USA", "CHI"),
+    "steel": ("SWE", "FRA", "USA", "SOV", "ENG", "GER"),
+    "aluminium": ("FRA", "HUN", "YUG", "USA", "SOV", "NOR"),
+    "chromium": ("TUR", "SOV", "SAF", "CUB", "YUG", "GRE"),
+    "coal": ("GER", "ENG", "USA", "SOV", "POL"),
+}
+
+
+def suggest_exporters(g, resource="oil", importer_tag=None, limit=3):
+    """纯只读推荐当前非敌对且有该资源出口能力/盈余的真实国家 TAG 列表（毫秒级，零注入）。"""
+    rkey = _RES_ALIASES.get(str(resource or "").strip().lower())
+    if not rkey:
+        return []
+    try:
+        me = str(importer_tag or g.player_tag() or "").upper()
+    except Exception:
+        me = str(importer_tag or "").upper()
+    enemies = set()
+    try:
+        import combat as _cb
+        enemies = {str(x).upper() for x in (_cb.enemy_tags(g, me) or ())}
+    except Exception:
+        enemies = set()
+    try:
+        all_tags = {str(t).upper() for t in (g.tags() or ())}
+    except Exception:
+        all_tags = set()
+
+    # 1. 优先从全球活跃贸易账本统计正在出口该资源的卖方（说明其贸易法允许出口且有供给）
+    active_export_amt = {}
+    try:
+        for row in (world_trades(g) or ()):
+            if row.get("resource") != rkey:
+                continue
+            src = str(row.get("from") or "").upper()
+            if not src or src == me or src in enemies:
+                continue
+            active_export_amt[src] = active_export_amt.get(src, 0.0) + float(row.get("amount") or 0.0)
+    except Exception:
+        pass
+
+    cands = set(active_export_amt.keys())
+    for t in _COMMON_EXPORTERS.get(rkey, ()):
+        if t != me and t not in enemies and (not all_tags or t in all_tags):
+            cands.add(t)
+
+    scored = []
+    for t in cands:
+        surplus = 0.0
+        try:
+            res = g.resources(t) or {}
+            surplus = float(res.get(rkey) or 0.0)
+        except Exception:
+            surplus = 0.0
+        exp_amt = float(active_export_amt.get(t) or 0.0)
+        if surplus >= 4.0 or exp_amt >= 8.0:
+            scored.append((surplus + exp_amt * 0.25, surplus, exp_amt, t))
+    scored.sort(key=lambda x: (-x[0], x[3]))
+    return [t for _s, _sur, _exp, t in scored[:max(1, int(limit))]]
+
+
 # ============================================================ CCreateTradeCommand (PE 1.19.5.0)
 # 2026-11-23 (C-5): 经 PE 反汇编确认（rtti_win.pkl -> .?AVCCreateTradeCommand@@）：
 #   vtable      = 0x2A5F388

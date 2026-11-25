@@ -268,6 +268,7 @@ class _EvalCtx:
         self._focuses = {}
         self._exists = {}
         self._gov = {}
+        self._ideas = {}
 
     def resolve_tag(self, token, cur_tag):
         s = str(token or "").strip().upper()
@@ -378,6 +379,20 @@ class _EvalCtx:
                     ide = None
             self._gov[tu] = str(ide).lower() if ide else None
         return self._gov[tu]
+
+    def active_ideas(self, tag):
+        """纯只读读取某国当前生效的 ideas/法案集合（0 注入）。"""
+        if self.g is None:
+            return None
+        tu = str(tag).upper()
+        if tu not in self._ideas:
+            try:
+                pol = self.g.politics(tu) or {}
+                ai = pol.get("active_ideas")
+                self._ideas[tu] = set(ai) if ai is not None else None
+            except Exception:
+                self._ideas[tu] = None
+        return self._ideas[tu]
 
     def has_capitulated(self, tag):
         """保守判定国家是否投降：不存在或未处于战争态时必为 False；战时未知返回 None。"""
@@ -600,6 +615,17 @@ def _trig1(k, v, tag, ctx=None, scope_tag=None, scope_state=None, in_or=False):
         if gov is None:
             return None
         return gov == str(v).strip().lower()
+    if kl == "has_idea":
+        ideas = ctx.active_ideas(cur_tag)
+        if ideas is None:
+            return None
+        return str(v).strip() in ideas
+    if kl == "has_war_with":
+        rel = ctx.relations(cur_tag)
+        if rel is None:
+            return None
+        want_t = ctx.resolve_tag(v, cur_tag)
+        return want_t in {str(x).upper() for x in (rel.get("at_war_with") or ())}
     if kl == "has_capitulated":
         want = _as_bool(v)
         actual = ctx.has_capitulated(cur_tag)

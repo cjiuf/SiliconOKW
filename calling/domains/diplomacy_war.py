@@ -398,11 +398,14 @@ class DiplomacyWarMixin:
                 except Exception:
                     pass
                 _pp = _q.get("current_pp")
-                _need = _q.get("estimated_total_pp")
+                _need = _q.get("estimated_upfront_pp", _q.get("estimated_total_pp"))
                 return {"ok": True, "dry_run": True, "posted": 0,
                         "target": target_tag, "wargoal": wargoal,
                         "political_power": _pp,
-                        "estimated_total_pp": _need,
+                        "estimated_upfront_pp": _need,
+                        "estimated_total_pp": _q.get("estimated_total_pp"),
+                        "estimated_pp_shortfall": _q.get("estimated_pp_shortfall"),
+                        "estimated_can_justify_now": _q.get("estimated_can_justify_now"),
                         "would_refuse": (None if (_pp is None or _need is None)
                                          else bool(_pp < float(_need))),
                         "quote": _q,
@@ -433,22 +436,29 @@ class DiplomacyWarMixin:
                 _pp = int(self.player().political_power)
             except Exception:
                 _pp = None
-            _need = _q.get("estimated_total_pp")
+            _need = _q.get("estimated_upfront_pp", _q.get("estimated_total_pp"))
             if _need is not None and _pp is not None and _pp < float(_need):
                 if not force:
                     return {"ok": False, "blocked_by": "political_power",
-                            "error": ("justifying against %s costs about %.0f political "
-                                      "power (%s days x %.2f/day) and you have %d. The game's "
-                                      "UI refuses this; the raw command path does not, and "
-                                      "taking it leaves the country at negative PP for weeks. "
-                                      "Wait for PP, pick a cheaper goal, or pass force=true."
+                            "error": ("justifying against %s requires about %.0f upfront political "
+                                      "power (%s days x %.2f/day estimate) and you have %d. "
+                                      "The game's UI refuses starting without enough PP; the raw "
+                                      "command channel does not and drives PP negative (measured: -36), "
+                                      "in addition to daily %.2f PP drain while running. "
+                                      "Wait for PP, pick a cheaper goal, or pass force=true to override."
                                       % (target_tag, float(_need),
                                          _q.get("estimated_days"),
-                                         float(_q.get("daily_pp_drain") or 0), _pp)),
-                            "political_power": _pp, "required_pp": _need,
+                                         float(_q.get("daily_pp_drain") or 0), _pp,
+                                         float(_q.get("daily_pp_drain") or 0))),
+                            "political_power": _pp,
+                            "estimated_upfront_pp": _need,
+                            "estimated_pp_shortfall": round(max(0.0, float(_need) - float(_pp)), 1),
+                            "required_pp": _need,
+                            "force_hint": "pass force=true to bypass the estimated upfront PP guard",
                             "quote": _q}
-                _warn = ("force=true: PP %d is below the ~%.0f this justification "
-                         "drains; PP will go negative" % (_pp, float(_need)))
+                _warn = ("force=true: PP %d is below estimated upfront ~%.0f PP; "
+                         "engine will deduct PP upfront (may go negative) and pause if PP < %.2f/day"
+                         % (_pp, float(_need), float(_q.get("daily_pp_drain") or 0.2)))
             import cmdwin
             c = self._c(target_tag)
             # Resolve the CWarGoalType* for the requested wargoal. take_state is
@@ -499,6 +509,8 @@ class DiplomacyWarMixin:
                                 break
                     except Exception:
                         pass
+            if mine and mine.get("ptr"):
+                diplomacy.track_activity_ptr(self, mine["ptr"])
             return {"ok": bool(r.get("ok")), "posted": r.get("posted"),
                     "warning": _warn,
                     "target": target_tag, "target_id": c.tag_id,
@@ -740,6 +752,14 @@ class DiplomacyWarMixin:
                 n = max(1, len(state_ids))
                 days = _D._estimate_days(n, concurrent)
                 total_pp = round(days * _D.WARGOAL_DAILY_PP, 1)
+                est_shortfall = (
+                    round(max(0.0, float(total_pp) - float(cur_pp)), 1)
+                    if cur_pp is not None else None
+                )
+                est_can_now = (
+                    bool(float(cur_pp) >= float(total_pp))
+                    if cur_pp is not None else None
+                )
                 return {
                     "ok": True, "mode": "pe-static-estimate",
                     "source": src, "target": target_tag, "wargoal": wargoal,
@@ -747,14 +767,26 @@ class DiplomacyWarMixin:
                     "current_pp": cur_pp,
                     "required_pp": None,
                     "pp_shortfall": None,
+                    "estimated_upfront_pp": total_pp,
+                    "estimated_pp_shortfall": est_shortfall,
+                    "estimated_can_justify_now": est_can_now,
+                    "justify_gate_note": (
+                        "hoi4_justify_wargoal defaults to guarding against negative PP using "
+                        "estimated_upfront_pp (~%.1f PP, matching game UI upfront check); "
+                        "pass force=true to override" % total_pp
+                    ),
                     "required_pp_note": (
                         "engine-exact PP threshold unavailable on PE: writing "
                         "political power and calling the diplomatic validator "
-                        "both crash hoi4.exe (crashes #6/#7, 2026-11-16)"),
+                        "both crash hoi4.exe (crashes #6/#7, 2026-11-16); "
+                        "use estimated_upfront_pp / estimated_can_justify_now"
+                    ),
                     "can_justify_now": None,
                     "can_justify_now_note": (
-                        "validator 0x11C2420 is fatal on this build; use "
-                        "hoi4_justify_wargoal (the proven command path) to test"),
+                        "validator 0x11C2420 is fatal on this build; see "
+                        "estimated_can_justify_now for the static PP check used by "
+                        "hoi4_justify_wargoal"
+                    ),
                     "allowed_by_rules": None,
                     "daily_pp_drain": _D.WARGOAL_DAILY_PP,
                     "concurrent_justifications": concurrent,

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 
 _STR = {"type": "string"}
@@ -21,7 +22,19 @@ MAX_PAUSE_HOURS = 300
 PAUSE_COOLDOWN_S = 20.0
 _PAUSE_LAST = [0.0]
 
-CALL_TIMEOUT_S = 50.0
+
+def _compute_call_timeout_s():
+    try:
+        raw = os.environ.get("HOI4_WAIT_MAX_S")
+        if raw and str(raw).strip():
+            wmax = max(5, min(120, int(float(str(raw).strip()))))
+            return max(50.0, float(wmax + 12))
+    except Exception:
+        pass
+    return 50.0
+
+
+CALL_TIMEOUT_S = _compute_call_timeout_s()
 _CALL = {"thread": None, "name": None, "started": 0.0, "cancel": None}
 
 

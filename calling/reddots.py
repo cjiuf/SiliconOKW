@@ -49,8 +49,15 @@ import session_state as _SS
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = _SS.state_path(_SS.REDDOTS_STATE_NAME)
 
-# 严控三项：默认拒绝普通 ack，必须显式 force=True + 非空 reason，且豁免期 <= 7 游戏日
-STRICT_CODES = frozenset({"PENDING_EVENT", "NO_FOCUS", "IDLE_RESEARCH"})
+# 严控五项：默认拒绝普通 ack，必须显式 force=True + 非空 reason，且豁免期 <= 7 游戏日
+# CB_AVAILABLE / JUSTIFY_LOST 绝不放进 AUTO_SOLVABLE_CODES，必须由决策者亲自处置
+STRICT_CODES = frozenset({
+    "PENDING_EVENT",
+    "NO_FOCUS",
+    "IDLE_RESEARCH",
+    "CB_AVAILABLE",
+    "JUSTIFY_LOST",
+})
 
 # 2026-11-23 (反糊弄升级 / 复测 8 防自锁校准):
 # 仅把 100% 确定可由工具 1 步清零的项放入 AUTO_SOLVABLE_CODES；
@@ -200,6 +207,9 @@ def _load_persisted():
                 "braked_sigs": dict(st.get("braked_sigs") or {}),
                 "ack_streaks": dict(st.get("ack_streaks") or {}),
                 "daily_ack_log": dict(st.get("daily_ack_log") or {}),
+                "active_justifying": set(st.get("active_justifying") or ()),
+                "lost_justifying": set(st.get("lost_justifying") or ()),
+                "last_date_raw": st.get("last_date_raw"),
             }
     except Exception:
         pass
@@ -217,6 +227,9 @@ def _save_persisted():
                 "braked_sigs": st.get("braked_sigs") or {},
                 "ack_streaks": st.get("ack_streaks") or {},
                 "daily_ack_log": st.get("daily_ack_log") or {},
+                "active_justifying": sorted(st.get("active_justifying") or ()),
+                "lost_justifying": sorted(st.get("lost_justifying") or ()),
+                "last_date_raw": st.get("last_date_raw"),
             }
         _SS.ensure_parent(STATE_PATH)
         tmp = STATE_PATH + ".tmp"
@@ -241,6 +254,9 @@ def _get_state(g):
                 "braked_sigs": {},
                 "ack_streaks": {},
                 "daily_ack_log": {},
+                "active_justifying": set(),
+                "lost_justifying": set(),
+                "last_date_raw": None,
             }
             _STATES[k] = st
         return st
@@ -656,7 +672,7 @@ def _scan_raw(g, fast=False):
                     "存在 %d/%d 个空闲科研槽（槽位 %s）" % (len(free_slots), len(slots), free_slots),
                     {"free_slots": free_slots, "total_slots": len(slots), "candidates": cands},
                     [
-                        "hoi4_available_research() 查看可研科技",
+                        "hoi4_research_available() 查看可研科技",
                         "hoi4_start_research(technology='<科技id>') 或 hoi4_housekeep() 自动补槽",
                     ],
                     severity="strict",
@@ -783,7 +799,7 @@ def _scan_raw(g, fast=False):
                 "refit_dockyards": int((_alloc or {}).get("naval_refit_used") or 0),
             },
             [
-                "hoi4_production_lines() 查看海军造船线行号",
+                "hoi4_production() 查看海军造船线行号",
                 "hoi4_set_production_amount(line=<船坞行号>, amount=<新船坞数>) 分配空闲船坞",
             ],
             severity="block",
@@ -801,7 +817,7 @@ def _scan_raw(g, fast=False):
                 "政治点数达 %.0f（触发阈值 >= %d，避免堆积浪费）" % (pp, pp_tier),
                 {"political_power": round(pp, 1), "tier": pp_tier},
                 [
-                    "hoi4_laws() 检查是否应切经济法案/征兵法/贸易法",
+                    "hoi4_available_ideas() 检查是否应切经济法案/征兵法/贸易法",
                     "hoi4_advisors() 雇佣内阁顾问或总参谋部",
                     "hoi4_decisions() 查看高价值决议",
                 ],
@@ -945,7 +961,7 @@ def _scan_raw(g, fast=False):
                             "top_free_generals": free_gens[:5],
                         },
                         [
-                            "hoi4_assign_general(...) 为无将领集团军任命指挥官",
+                            "hoi4_assign_commander(...) 为无将领集团军任命指挥官",
                             "或调用 hoi4_housekeep() 自动补齐集团军将领",
                         ],
                         severity="block",
@@ -1176,7 +1192,7 @@ def _scan_raw(g, fast=False):
         except Exception:
             pass
 
-    # FUEL_ZERO（复用 equipmeta.compute_fuel_zero_alert）
+    # FUEL_ZERO（复用 equipmeta.compute_fuel_zero_alert；绝不向模型输出不可执行的 <占位符>）
     try:
         import equipmeta as _em
         fz = _em.compute_fuel_zero_alert(fuel, wings_cache, fleets_cache)
@@ -1184,17 +1200,122 @@ def _scan_raw(g, fast=False):
             fz_txt = str(fz)
             if fz_txt.startswith("FUEL_ZERO:"):
                 fz_txt = fz_txt[len("FUEL_ZERO:"):].strip()
+            exporters = []
+            try:
+                import trade_win as _tw
+                exporters = _tw.suggest_exporters(g, resource="oil", importer_tag=tag, limit=3) or []
+            except Exception:
+                exporters = []
+            if exporters:
+                alt = ("（备选卖方: %s）" % ", ".join(exporters[1:])) if len(exporters) > 1 else ""
+                oil_act = (
+                    "hoi4_trade(partner='%s', resource='oil', amount=8) 紧急进口石油%s，或暂停非必要海空任务"
+                    % (exporters[0], alt)
+                )
+            else:
+                oil_act = (
+                    "先调用 hoi4_trade_routes() 查看非敌对石油卖方，再用该国 3 字母 TAG 调用 hoi4_trade 进口石油，"
+                    "或暂停非必要海空任务"
+                )
             items.append(_make_item(
                 "FUEL_ZERO",
                 fz_txt,
-                {"fuel": round(float(fuel or 0.0), 1), "alert": str(fz)},
+                {
+                    "fuel": round(float(fuel or 0.0), 1),
+                    "alert": str(fz),
+                    "suggested_oil_exporters": exporters,
+                },
                 [
-                    "hoi4_trade(partner='<卖方TAG，如ROM/SOV/VEN>', resource='oil', amount=8) 紧急进口石油，或暂停非必要海空任务",
+                    oil_act,
                     "如无可用卖方/民工，调用 hoi4_ack_red_dot(code='FUEL_ZERO', reason='说明节油/炼油对策')",
                 ],
                 severity="block",
                 tier=1,
                 signature="FUEL_ZERO:1",
+            ))
+    except Exception:
+        pass
+
+    # ------------------------------------------------------------------ 10. 宣战理由就绪 & 正当化丢失（严控）
+    try:
+        import diplomacy as _dip
+        enemies_now = set()
+        try:
+            import combat as _cb_wg
+            enemies_now = {str(x).upper() for x in (_cb_wg.enemy_tags(g, tag) or ())}
+        except Exception:
+            enemies_now = set()
+
+        wg_rows, wg_ok = _dip.country_wargoals_fast(g, tag=tag, valid_only=True)
+        cb_rows = []
+        if wg_ok:
+            for r in (wg_rows or []):
+                tgt_t = str(r.get("target_tag") or "").upper()
+                if not tgt_t or tgt_t == str(tag).upper() or tgt_t in enemies_now:
+                    continue
+                cb_rows.append({
+                    "target": tgt_t,
+                    "wargoal": r.get("wargoal") or "wargoal",
+                    "ptr": r.get("ptr"),
+                })
+        cb_rows.sort(key=lambda x: (x["target"], str(x["wargoal"])))
+        cb_targets = {x["target"] for x in cb_rows}
+
+        if cb_rows:
+            cb_labels = ["%s(%s)" % (x["target"], x["wargoal"]) for x in cb_rows[:5]]
+            first_tgt = cb_rows[0]["target"]
+            items.append(_make_item(
+                "CB_AVAILABLE",
+                "有未使用的宣战理由（会过期）(%d): %s" % (len(cb_rows), ", ".join(cb_labels)),
+                {"count": len(cb_rows), "wargoals": cb_rows[:8]},
+                [
+                    "hoi4_war_readiness(target='%s') 核验战备后再决定是否 hoi4_declare_war(target='%s')"
+                    % (first_tgt, first_tgt),
+                    "如暂不宣战，必须显式调用 hoi4_ack_red_dot(code='CB_AVAILABLE', force=True, reason='说明暂缓宣战理由')",
+                ],
+                severity="strict",
+                tier=len(cb_rows),
+                signature="CB_AVAILABLE:" + ",".join("%s:%s" % (x["target"], x["wargoal"]) for x in cb_rows),
+            ))
+
+        # 追踪正在正当化 -> 消失但未生成 CB（JUSTIFY_LOST）
+        prev_just = st.setdefault("active_justifying", set())
+        lost_just = st.setdefault("lost_justifying", set())
+        prev_date = st.get("last_date_raw")
+        date_jumped_back = (
+            prev_date is not None and date_raw is not None and int(date_raw) < int(prev_date) - 24
+        )
+        if date_jumped_back:
+            prev_just.clear()
+            lost_just.clear()
+        if date_raw is not None:
+            st["last_date_raw"] = int(date_raw)
+
+        just_rows = _dip.justifying_fast(g, tag=tag) or []
+        cur_just = {str(r.get("target") or "").upper() for r in just_rows if r.get("target")}
+        # 重新开造、已有 CB 或已开战的目标从 lost_just 移出
+        lost_just.difference_update(cur_just | cb_targets | enemies_now)
+        if prev_just:
+            disappeared = prev_just - cur_just
+            for tgt_d in disappeared:
+                if tgt_d not in cb_targets and tgt_d not in enemies_now:
+                    lost_just.add(tgt_d)
+        prev_just.clear()
+        prev_just.update(cur_just)
+
+        if lost_just:
+            lost_sorted = sorted(lost_just)
+            items.append(_make_item(
+                "JUSTIFY_LOST",
+                "正当化结束但没有产生宣战理由 (%d): %s" % (len(lost_sorted), ", ".join(lost_sorted[:5])),
+                {"targets": lost_sorted},
+                [
+                    "hoi4_wargoals() 与 hoi4_justifying() 核查宣战理由是否被取消或已过期",
+                    "确认后调用 hoi4_ack_red_dot(code='JUSTIFY_LOST', force=True, reason='已确认原因与后续对策')",
+                ],
+                severity="strict",
+                tier=len(lost_sorted),
+                signature="JUSTIFY_LOST:" + ",".join(lost_sorted),
             ))
     except Exception:
         pass
@@ -1268,13 +1389,15 @@ def _is_acked(item, acks, now_date_raw):
     if isinstance(old_tier, (int, float)) and isinstance(cur_tier, (int, float)):
         if cur_tier > old_tier:
             return False
-    # 3. 离散对象集合类（事件/新决议/限时任务/无将领集团军/过时产线）：只要签名变化立即重触发
+    # 3. 离散对象集合类（事件/新决议/限时任务/无将领集团军/过时产线/宣战理由）：只要签名变化立即重触发
     if code in (
         "PENDING_EVENT",
         "NEW_DECISION",
         "ACTIVE_MISSION",
         "ARMY_NO_GENERAL",
         "OBSOLETE_LINE",
+        "CB_AVAILABLE",
+        "JUSTIFY_LOST",
     ):
         if rec.get("signature") != item.get("signature"):
             return False
@@ -1489,6 +1612,10 @@ def ack(g, code, reason, snooze_days=None, force=False, persist=True):
             for d in (matched.get("detail") or {}).get("decisions") or []:
                 if d.get("key"):
                     st["seen_decisions"].add(d["key"])
+        # 签收 JUSTIFY_LOST 时清理已确认的丢失目标，避免永久卡死
+        if code == "JUSTIFY_LOST" and matched:
+            for tgt_l in (matched.get("detail") or {}).get("targets") or []:
+                st.setdefault("lost_justifying", set()).discard(tgt_l)
 
         expire_raw = (int(now_raw) + days * 24) if now_raw is not None else None
         rec = {

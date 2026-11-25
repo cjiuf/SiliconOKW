@@ -35,9 +35,11 @@ def _turn_brief(a):
 @tool(
     "hoi4_inspect",
     "Bounded read-only escape hatch (max 3 queries per call) for deep inspection "
-    "when hoi4_turn_brief lacks detail. Allowed topics (17): country, events, "
-    "selectable_focuses, research_available, advisors, decisions, armies, war_readiness, "
-    "combat, stockpile, resources, state, peace, air, navy, staff, health.",
+    "when hoi4_turn_brief lacks detail. Allowed topics (20): country, events, "
+    "selectable_focuses, research_available (includes start_year/ahead_years/cost_days), "
+    "advisors, idea_catalog (unified laws/ideas/advisors with slot & cost), decisions, "
+    "armies, war_readiness, combat, stockpile, resources, state, peace, air, navy, staff, "
+    "health, autopilot (active Standing Orders & journal), strategy_catalog (auditable strategy formulas).",
     dict(
         TAG_DEFAULT,
         queries={
@@ -49,6 +51,7 @@ def _turn_brief(a):
                     "tag": {"type": "string"},
                     "target": {"type": "string"},
                     "filter": {"type": "string"},
+                    "slot": {"type": "string"},
                     "state": {"type": "integer"},
                     "state_id": {"type": "integer"},
                     "which": {"type": "string"},
@@ -110,12 +113,30 @@ def _turn_execute_plan(a):
 @tool(
     "hoi4_wait_and_brief",
     "Sleep until the next game signal or max_days (auto-pauses on wake by default) "
-    "and immediately return the new turn's compact briefing in one round-trip.",
+    "and immediately return the new turn's compact briefing in one round-trip. "
+    "When Standing Orders are active (set via hoi4_run_plan set_standing_orders), autopilot "
+    "deterministically handles queued focus/research/construction/production/PP/divisions/trivial events "
+    "while enforcing the non-disableable Kernel Floor (CB/war/peace/decisive events/PP reserve/heartbeat/max_days/no_progress). "
+    "timeout_seconds is clamped to min(requested, HOI4_WAIT_MAX_S) (default 26s; set HOI4_WAIT_MAX_S=38..90 for longer clients) "
+    "and echoed in wait.timeout_seconds. "
+    "Pass respect_red_dots=false to bypass the red-dot gate for this wait only (wargoal/peace/Kernel Floor still force-pause).",
     dict(
         TAG_DEFAULT,
         max_days=_INT,
         timeout_seconds=_INT,
         pause_on_wake=_BOOL,
+        respect_red_dots=dict(
+            _BOOL,
+            description="Enforce red-dot gate during this wait (default true; also disabled globally when hoi4_red_dot_guard enabled=false)",
+        ),
+        autopilot=dict(
+            _BOOL,
+            description="Enable Standing Orders autopilot during wait (omit = auto when Standing Orders active; false = bypass for this wait)",
+        ),
+        fast_forward=dict(
+            _BOOL,
+            description="Set speed <= 3 (UI 4-bar cap) and unpause automatically after pre-run checks; Kernel Floor still polls continuously",
+        ),
         include_data=_BOOL,
         signals={"type": "array", "items": {"type": "string"}},
         until_date={"type": "array", "items": {"type": "integer"}},
@@ -129,8 +150,11 @@ def _turn_wait_and_brief(a):
         max_days=a.get("max_days", 14),
         until_date=a.get("until_date"),
         signals=a.get("signals"),
-        timeout_seconds=a.get("timeout_seconds", 45),
+        timeout_seconds=a.get("timeout_seconds"),
         pause_on_wake=a.get("pause_on_wake", True),
+        respect_red_dots=a.get("respect_red_dots", True),
         tag=a.get("tag"),
         include_data=bool(a.get("include_data", False)),
+        autopilot=a.get("autopilot"),
+        fast_forward=bool(a.get("fast_forward", False)),
     )

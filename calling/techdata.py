@@ -80,6 +80,9 @@ def _top_blocks(text):
 def _parse_block(body):
     m = re.search(r"\bstart_year\s*=\s*(\d+)", body)
     year = int(m.group(1)) if m else 1936
+    # 脚本 research_cost 通常为 1.0 / 1.5 / 2.0 等倍率（基础 1.0 ≈ 100 天）
+    m_rc = re.search(r"\bresearch_cost\s*=\s*([0-9]+(?:\.[0-9]+)?)", body)
+    research_cost = float(m_rc.group(1)) if m_rc else 1.0
     m = re.search(r"\bfolder\s*=\s*\{.*?\bname\s*=\s*([A-Za-z0-9_]+)", body, re.S)
     folder = m.group(1) if m else ""
     cats = []
@@ -99,8 +102,19 @@ def _parse_block(body):
     if m:
         xor.extend(re.findall(r"[A-Za-z0-9_]+", m.group(1)))
     xor = sorted(set(x for x in xor if x))
-    return {"year": year, "folder": folder, "categories": cats,
-            "leads_to": leads, "xor": xor}
+    # 2026-11-25 (E1): 解析需要特别工程解锁的科技（如 cavity_magnatron 需要 sp:sp_air_radar），
+    # 防止 available_research 将必被引擎 CanExecute 拒绝的 50 项特殊工程科技推入候选池引发死循环。
+    sp_gated = bool(
+        re.search(r"\bis_special_project_tech\s*=\s*yes\b", body)
+        or re.search(r"\bis_special_project_completed\s*=", body)
+    )
+    always_no = bool(re.search(r"\ballow\s*=\s*\{\s*always\s*=\s*no\s*\}", body, re.S))
+    return {"year": year, "research_cost": research_cost,
+            "base_cost_days": round(research_cost * 100.0, 1),
+            "folder": folder, "categories": cats,
+            "leads_to": leads, "xor": xor,
+            "special_project_gated": sp_gated,
+            "always_no": always_no}
 
 
 def _category(fname, folder, cats):
@@ -125,10 +139,18 @@ def build(force=False):
         cached = safe_cache.load(CACHE)
         # 2026-11-19: the pickle predates the `xor` table; rebuild once so
         # start_research can refuse mutually exclusive techs.
+        # 2026-11-25: 兼容补齐 `research_cost` / `base_cost_days`；无游戏目录时保留旧缓存不报错。
         if cached and all("xor" in v for v in cached.values()):
-            return cached
-    game = config.game_dir()
+            has_cost = all("research_cost" in v for v in cached.values())
+            has_sp = all("special_project_gated" in v for v in cached.values())
+            if (has_cost and has_sp) or not config.find_game_dir():
+                return cached
+    game = config.game_dir(required=False)
+    if not game:
+        return {}
     d = os.path.join(game, "common", "technologies")
+    if not os.path.isdir(d):
+        return {}
     techs = {}
     for fn in sorted(os.listdir(d)):
         if not fn.endswith(".txt"):
@@ -158,6 +180,27 @@ def load(force=False):
     if force or _MEM is None:
         _MEM = build(force)
     return _MEM
+
+
+def tech_info(tech_id, defs=None):
+    """查询单个科技的静态元数据（start_year / research_cost / base_cost_days / parents / xor）。"""
+    tbl = load() if defs is None else (defs or {})
+    d = tbl.get(tech_id)
+    if not isinstance(d, dict):
+        return None
+    rc = float(d.get("research_cost") or 1.0)
+    return {
+        "key": tech_id,
+        "start_year": int(d.get("year") or 1936),
+        "research_cost": rc,
+        "base_cost_days": round(float(d.get("base_cost_days") or rc * 100.0), 1),
+        "category": d.get("category") or "other",
+        "folder": d.get("folder") or "",
+        "categories": list(d.get("categories") or ()),
+        "parents": list(d.get("parents") or ()),
+        "xor": list(d.get("xor") or ()),
+        "special_project_gated": bool(d.get("special_project_gated", False)),
+    }
 
 def score_tech(tech_id, folder, categories, start_year, current_year, tag=None):
     """Veteran priority score (higher = research first).

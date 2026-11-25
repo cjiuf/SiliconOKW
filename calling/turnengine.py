@@ -62,15 +62,21 @@ ALLOWED_ACTIONS = {
     "pause",
     "resume",
     "ack_red_dot",
+    # 自动驾驶（Standing Orders v1）
+    "set_standing_orders",
+    "clear_standing_orders",
+    "autopilot_tick",
+    "ack_autopilot",
 }
 
-# 允许的只读按需深查（逃生舱）主题（17 个，含 events 与 health）
+# 允许的只读按需深查（逃生舱）主题（20 个，含 autopilot / strategy_catalog / idea_catalog）
 ALLOWED_INSPECT_TOPICS = {
     "country",
     "events",
     "selectable_focuses",
     "research_available",
     "advisors",
+    "idea_catalog",
     "decisions",
     "armies",
     "war_readiness",
@@ -83,6 +89,8 @@ ALLOWED_INSPECT_TOPICS = {
     "navy",
     "staff",
     "health",
+    "autopilot",
+    "strategy_catalog",
 }
 
 # 2026-11-22 (P1-1): 22 个动作的完整参数规范（标准名与公开 MCP 工具完全对齐，
@@ -297,6 +305,30 @@ ACTION_SPECS = {
         "aliases": {},
         "types": {"code": "str", "reason": "str", "snooze_days": "pos_int", "force": "bool"},
     },
+    "set_standing_orders": {
+        "required": ("profile",),
+        "optional": ("dry_run", "replace"),
+        "aliases": {},
+        "types": {"profile": "dict", "dry_run": "bool", "replace": "bool"},
+    },
+    "clear_standing_orders": {
+        "required": (),
+        "optional": ("reason",),
+        "aliases": {},
+        "types": {"reason": "str"},
+    },
+    "autopilot_tick": {
+        "required": (),
+        "optional": ("dry_run", "ack", "reason", "extend_max_days"),
+        "aliases": {},
+        "types": {"dry_run": "bool", "ack": "bool", "reason": "str", "extend_max_days": "bool"},
+    },
+    "ack_autopilot": {
+        "required": (),
+        "optional": ("reason", "extend_max_days"),
+        "aliases": {},
+        "types": {"reason": "str", "extend_max_days": "bool"},
+    },
 }
 
 
@@ -332,6 +364,10 @@ def _check_arg_type(kind, val):
         if not isinstance(val, list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in val):
             return False, val, "必须是整数列表"
         return True, [int(x) for x in val], None
+    if kind == "dict":
+        if not isinstance(val, dict) or not val:
+            return False, val, "必须是非空 JSON 对象"
+        return True, val, None
     return True, val, None
 
 
@@ -403,8 +439,13 @@ def _normalize_action_args(op, raw_args, prefix=""):
 
     return norm, errors
 
-# 纯只读类或无需前台窗口校验的动作（ack_red_dot 为纯内存/状态签收，无需游戏窗口前台）
-_NO_FOREGROUND_NEEDED = {"ack_red_dot"}
+# 纯只读/本地配置类，无需前台窗口校验的动作（0 引擎注入）
+_NO_FOREGROUND_NEEDED = {
+    "ack_red_dot",
+    "set_standing_orders",
+    "clear_standing_orders",
+    "ack_autopilot",
+}
 
 
 # ===================================================================== 状态持久化
@@ -667,6 +708,17 @@ def _render_brief_markdown(data):
         except Exception:
             pass
 
+    # 2026-11-25: Standing Orders 自动驾驶摘要（未激活时不占 token）
+    ap_summary = data.get("autopilot")
+    if isinstance(ap_summary, dict) and ap_summary.get("active"):
+        try:
+            import autopilot as _ap
+            ap_lines = _ap.format_briefing_section(ap_summary)
+            if ap_lines:
+                lines.extend(ap_lines)
+        except Exception:
+            pass
+
     if data.get("alerts"):
         # 单条长告警（如带长操作指引的提示）截断到 90 字，防止在 compact 简报中喧宾夺主
         slim_alerts = []
@@ -717,6 +769,27 @@ def _render_brief_markdown(data):
             if data["war"].get("enemies") else "",
         )
     )
+    # 宣战理由 (CB) 与正当化进度（显式展示，防止长跑遗漏 CB 过期）
+    wgs_b = data.get("wargoals") or []
+    if wgs_b:
+        wg_items = [
+            "%s(%s)" % (x.get("target") or x.get("target_tag"), x.get("wargoal") or "wargoal")
+            for x in wgs_b[:6]
+        ]
+        lines.append("- **宣战理由 (CB)**: %s（注意会过期！）" % ", ".join(wg_items))
+    just_b = data.get("justifying") or []
+    if just_b:
+        j_items = []
+        for x in just_b[:4]:
+            dl = x.get("days_left")
+            eta = x.get("eta_date")
+            extra = []
+            if dl is not None:
+                extra.append("剩%s天" % _fmt_num(dl, 0))
+            if eta:
+                extra.append("ETA %s" % eta)
+            j_items.append("%s(%s)" % (x.get("target"), ", ".join(extra)) if extra else str(x.get("target")))
+        lines.append("- **正当化中**: %s" % ", ".join(j_items))
 
     # 国策
     foc = data["focus"]
@@ -953,6 +1026,32 @@ def build_turn_brief(g, tag=None, memo=None, last_receipt=None, extra_inspect=No
     except Exception:
         pass
 
+    # 2.5 宣战理由 (CB) 与正当化进度（纯只读 O(1)/毫秒级，绝不触发深扫）
+    wargoals_brief = []
+    justifying_brief = []
+    try:
+        import diplomacy as _dip
+        enemies_set = {str(x).upper() for x in (war_info.get("enemies") or ())}
+        wg_rows, wg_ok = _dip.country_wargoals_fast(g, tag=my_tag, valid_only=True)
+        if wg_ok:
+            for r in (wg_rows or []):
+                tgt_t = str(r.get("target_tag") or "").upper()
+                if not tgt_t or tgt_t == str(my_tag or "").upper() or tgt_t in enemies_set:
+                    continue
+                wargoals_brief.append({
+                    "target": tgt_t,
+                    "wargoal": r.get("wargoal") or "wargoal",
+                    "ptr": r.get("ptr"),
+                })
+        for j in (_dip.justifying_fast(g, tag=my_tag) or []):
+            justifying_brief.append({
+                "target": j.get("target"),
+                "days_left": j.get("days_left"),
+                "eta_date": j.get("eta_date"),
+            })
+    except Exception:
+        pass
+
     # 3. 条件展开：国策空闲时自动列候选
     focus_info = ov.get("focus") or {}
     selectable_focuses = []
@@ -1009,6 +1108,15 @@ def build_turn_brief(g, tag=None, memo=None, last_receipt=None, extra_inspect=No
     except Exception:
         health_board = None
 
+    ap_status = None
+    try:
+        import autopilot as _ap
+        _st_ap = _ap.status(g, tag=my_tag, journal_limit=6)
+        if isinstance(_st_ap, dict) and _st_ap.get("active"):
+            ap_status = _st_ap
+    except Exception:
+        ap_status = None
+
     cons_all = ov.get("construction") or []
     prod_all = ov.get("production") or []
     data = {
@@ -1028,6 +1136,7 @@ def build_turn_brief(g, tag=None, memo=None, last_receipt=None, extra_inspect=No
         },
         "red_dots": rd_eval,
         "health_board": health_board,
+        "autopilot": ap_status,
         "alerts": list(ov.get("alerts") or []),
         "country": country_slim,
         "factories": ov.get("factories") or {},
@@ -1055,6 +1164,8 @@ def build_turn_brief(g, tag=None, memo=None, last_receipt=None, extra_inspect=No
         "events": events_compact,
         "events_total": events_total,
         "war": war_info,
+        "wargoals": wargoals_brief,
+        "justifying": justifying_brief,
         "memo": memo,
         "last_receipt": last_receipt,
         "extra_inspect": extra_inspect,
@@ -1123,9 +1234,26 @@ def _run_inspect_one(g, topic, q, tag):
                 )
                 if isinstance(sel_ro, dict):
                     ev_copy["recommended"] = sel_ro.get("recommended")
-                    ev_copy["auto_option"] = sel_ro.get("auto_option")
+                    ev_copy["recommendation_basis"] = sel_ro.get("recommendation_basis")
+                    ev_copy["recommendation_blocked"] = sel_ro.get("recommendation_blocked")
+                    ev_copy["auto_resolve_option"] = sel_ro.get("auto_resolve_option")
+                    ev_copy["auto_option"] = sel_ro.get("auto_resolve_option")
+                    ev_copy["unresolved_scope"] = sel_ro.get("unresolved_scope")
+                    # 2026-11-25: 合并而非覆写 options，保留静态 DB 中的 effects / ai_chance / name_key，
+                    # 避免模型查事件时丢失选项效果（例如 GER_inner_circle.01 动态占位符事件）。
                     if sel_ro.get("options"):
-                        ev_copy["options"] = sel_ro["options"]
+                        orig_by_idx = {
+                            o.get("index"): dict(o)
+                            for o in (ev_copy.get("options") or ())
+                            if isinstance(o, dict) and o.get("index") is not None
+                        }
+                        merged_opts = []
+                        for so in sel_ro["options"]:
+                            idx_o = so.get("index")
+                            base_o = orig_by_idx.get(idx_o, {})
+                            base_o.update(so)
+                            merged_opts.append(base_o)
+                        ev_copy["options"] = merged_opts
             enriched.append(ev_copy)
         out_ev = dict(res)
         out_ev["events"] = enriched
@@ -1133,8 +1261,19 @@ def _run_inspect_one(g, topic, q, tag):
     if topic == "selectable_focuses":
         return g.selectable_focuses(tag)
     if topic == "research_available":
-        out = g.available_research(tag) or []
         flt = str(q.get("filter") or "").lower()
+        details = None
+        if hasattr(g, "available_research_detailed"):
+            try:
+                details = g.available_research_detailed(tag) or []
+            except Exception:
+                details = None
+        if details is not None:
+            if flt:
+                details = [x for x in details if flt in str(x.get("key") or "").lower() or flt in str(x.get("category") or "").lower()]
+            names = [x["key"] for x in details]
+            return {"count": len(details), "technologies": names[:40], "details": details[:40]}
+        out = g.available_research(tag) or []
         if flt:
             out = [x for x in out if flt in str(x).lower()]
         return {"count": len(out), "technologies": out[:40]}
@@ -1142,7 +1281,19 @@ def _run_inspect_one(g, topic, q, tag):
         if hasattr(g, "available_advisors"):
             rows = g.available_advisors(tag)
             return rows[:30] if isinstance(rows, list) else rows
+        if hasattr(g, "idea_catalog"):
+            return g.idea_catalog(tag, slot=q.get("slot"), filter_text=q.get("filter") or "", include_advisors=True, limit=40)
         return g.politics(tag)
+    if topic == "idea_catalog":
+        if hasattr(g, "idea_catalog"):
+            return g.idea_catalog(tag, slot=q.get("slot"), filter_text=q.get("filter") or "", include_advisors=True, limit=60)
+        return g.politics(tag)
+    if topic == "autopilot":
+        import autopilot as _ap
+        return _ap.status(g, tag=tag, journal_limit=20)
+    if topic == "strategy_catalog":
+        import autopilot as _ap
+        return _ap.strategy_catalog(domain=q.get("filter") or q.get("slot"))
     if topic == "decisions":
         which = q.get("which") or "visible"
         rows = g.decisions(tag, which=which, rich=True) or []
@@ -1508,6 +1659,41 @@ def _dispatch_action(g, op, args, tag):
             snooze_days=args.get("snooze_days"),
             force=bool(args.get("force", False)),
         )
+    if op == "set_standing_orders":
+        import autopilot as _ap
+        return _ap.set_standing_orders(
+            g,
+            profile=args["profile"],
+            dry_run=bool(args.get("dry_run", False)),
+            replace=bool(args.get("replace", True)),
+            tag=t,
+        )
+    if op == "clear_standing_orders":
+        import autopilot as _ap
+        return _ap.clear_standing_orders(g, reason=args.get("reason") or "", tag=t)
+    if op == "autopilot_tick":
+        import autopilot as _ap
+        if bool(args.get("ack", False)):
+            ack_res = _ap.acknowledge_wakeup(
+                g,
+                tag=t,
+                reason=args.get("reason") or "autopilot_tick(ack=true)",
+                extend_max_days=bool(args.get("extend_max_days", False)),
+            )
+            if bool(args.get("dry_run", False)):
+                tick_res = _ap.run_tick(g, tag=t, dry_run=True)
+                tick_res["ack"] = ack_res
+                return tick_res
+            return ack_res
+        return _ap.run_tick(g, tag=t, dry_run=bool(args.get("dry_run", False)))
+    if op == "ack_autopilot":
+        import autopilot as _ap
+        return _ap.acknowledge_wakeup(
+            g,
+            tag=t,
+            reason=args.get("reason") or "manual_checkin_ok",
+            extend_max_days=bool(args.get("extend_max_days", False)),
+        )
     if op == "resume":
         empty = _has_empty_orders(g, t)
         if empty:
@@ -1587,8 +1773,17 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
     if not _process_alive(g):
         return {"ok": False, "blocked_by": "process_dead", "error": "游戏进程已不可读"}
 
-    # 前台窗口守卫：有任何写动作时强制检查（不抢焦点）
-    need_fg = any(a["op"] not in _NO_FOREGROUND_NEEDED for a in actions)
+    # 前台窗口守卫：有任何实写引擎命令时强制检查（不抢焦点）；
+    # 纯配置/签收/干跑（set_standing_orders、clear_standing_orders、ack_autopilot、
+    # autopilot_tick dry_run 或 ack=true）免前台。
+    need_fg = any(
+        (a["op"] not in _NO_FOREGROUND_NEEDED)
+        and not (
+            a["op"] == "autopilot_tick"
+            and (bool((a.get("args") or {}).get("dry_run")) or bool((a.get("args") or {}).get("ack")))
+        )
+        for a in actions
+    )
     if need_fg:
         fg_ok, fg_reason, ws = _window_guard(g)
         if not fg_ok:
@@ -1661,6 +1856,16 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
         st["updated_at"] = time.time()
         save_turn_state(st)
 
+    # 模型亲自执行完有效动作后刷新自动驾驶心跳与无进展计数（不重置 max_autopilot_days 总上限；
+    # 若本回合仅调用 ack_autopilot 已完成显式签收则不重复覆盖）
+    if results and not aborted and any(r["op"] != "ack_autopilot" for r in results):
+        try:
+            import autopilot as _ap
+            if _ap.is_active(g, tag=tag):
+                _ap.acknowledge_wakeup(g, tag=tag)
+        except Exception:
+            pass
+
     ok_count = sum(1 for r in results if r["ok"])
     return {
         "ok": not aborted,
@@ -1676,32 +1881,49 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
 
 # ===================================================================== 等钟 + 简报合一
 def wait_and_brief(g, max_days=14, until_date=None, signals=None,
-                   timeout_seconds=45, pause_on_wake=True, tag=None,
-                   include_data=False):
+                   timeout_seconds=None, pause_on_wake=True,
+                   respect_red_dots=True, tag=None, include_data=False,
+                   autopilot=None, fast_forward=False):
     """睡到下一个唤醒信号（并自动暂停），醒来后立即附带新一回合紧凑简报。"""
     import turnloop
     tl = turnloop.TurnLoop(g, poll=1.5)
-    ts = max(5, min(int(timeout_seconds or 38), 38))
-    sigs = tuple(signals) if signals else turnloop.ALL_SIGNALS
+    tm = turnloop.resolve_wait_timeout(requested=timeout_seconds)
+    sigs = turnloop.ALL_SIGNALS if signals is None else tuple(signals)
     wait_res = tl.wait(
         max_days=int(max_days or 14),
         until_date=tuple(until_date) if until_date else None,
         signals=sigs,
-        timeout_seconds=ts,
+        timeout_seconds=tm["effective"],
         pause_on_wake=bool(pause_on_wake),
+        respect_red_dots=bool(respect_red_dots),
+        timeout_meta=tm,
+        autopilot=autopilot,
+        fast_forward=bool(fast_forward),
     )
     brief_res = build_turn_brief(g, tag=tag, include_data=include_data)
+    wait_block = {
+        "woke_because": wait_res.get("woke_because"),
+        "days_elapsed": wait_res.get("waited_game_days", wait_res.get("days_elapsed")),
+        "waited_s": wait_res.get("waited_real_seconds", wait_res.get("waited_s")),
+        "timeout_seconds": wait_res.get("effective_timeout_seconds", tm["effective"]),
+        "requested_timeout_seconds": tm["requested"],
+        "timeout_max_seconds": tm["max_s"],
+        "timeout_clamped": tm["clamped"],
+        "paused": wait_res.get("paused"),
+        "blocked_by": wait_res.get("blocked_by"),
+        "red_dot_paused": wait_res.get("red_dot_paused"),
+        "red_dot_codes": wait_res.get("red_dot_codes") or wait_res.get("blocking_codes"),
+    }
+    if wait_res.get("wargoal_woke"):
+        wait_block["wargoal_woke"] = True
+        wait_block["wargoals"] = wait_res.get("wargoals")
+    if wait_res.get("autopilot") is not None:
+        wait_block["autopilot"] = wait_res.get("autopilot")
+        if wait_res.get("autopilot_woke"):
+            wait_block["autopilot_woke"] = True
     out = {
         "ok": wait_res.get("ok", True),
-        "wait": {
-            "woke_because": wait_res.get("woke_because"),
-            "days_elapsed": wait_res.get("waited_game_days", wait_res.get("days_elapsed")),
-            "waited_s": wait_res.get("waited_real_seconds", wait_res.get("waited_s")),
-            "paused": wait_res.get("paused"),
-            "blocked_by": wait_res.get("blocked_by"),
-            "red_dot_paused": wait_res.get("red_dot_paused"),
-            "red_dot_codes": wait_res.get("red_dot_codes") or wait_res.get("blocking_codes"),
-        },
+        "wait": wait_block,
         "markdown": brief_res["markdown"],
         "approx_tokens": brief_res["approx_tokens"],
     }

@@ -29,6 +29,18 @@ class Proc:
         self.image_size = getattr(self.be, "image_size", 0)
         self.maps = self.be.regions()
 
+    @property
+    def call_count(self):
+        """当前进程在本会话内完成的真实函数注入总次数（穿透后端与 winject 全局计数器）。"""
+        be_cnt = int(getattr(self.be, "call_count", 0) or 0)
+        if sys.platform == "win32":
+            try:
+                from process import winject as _wj
+                return max(be_cnt, int(_wj.call_count(self.pid)))
+            except Exception:
+                pass
+        return be_cnt
+
     def va(self, file_vaddr):
         """Address in the binary -> address in the running process."""
         return self.base + file_vaddr

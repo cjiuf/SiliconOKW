@@ -361,6 +361,133 @@ class PoliticsMixin:
                 out.append(e)
         return out
 
+    def idea_catalog(self, tag=None, slot=None, filter_text="", include_advisors=True, limit=120):
+        """统一返回当前国家的法案 / 工业设计商 / 顾问完整目录（纯只读 0 注入）。
+
+        每条记录统一携带 `(key, kind, slot, cost, active, available, mutually_exclusive_with)`，
+        让 Standing Orders 编译器与 `hoi4_inspect(idea_catalog)` 可以在声明期做存在性、
+        槽位冲突与 PP 费用校验。
+        """
+        import advisors as _adv
+
+        c = self._c(tag)
+        my_tag = c.tag
+        try:
+            pol = self.politics(my_tag) or {}
+        except Exception:
+            pol = {}
+        active_set = set(pol.get("active_ideas") or ())
+        live_all = {}
+        try:
+            for e in self._idea_entries(my_tag, "all") or ():
+                if e.get("key"):
+                    live_all[e["key"]] = e
+        except Exception:
+            live_all = {}
+
+        static_cat = _adv.load_ideas_catalog()
+        slot_flt = str(slot or "").strip().lower()
+        txt_flt = str(filter_text or "").strip().lower()
+
+        rows = []
+        seen = set()
+
+        # 1) 合并本国 live ideas 与静态法案/工业槽位元数据
+        candidate_keys = list(live_all.keys())
+        for k in active_set:
+            if k not in live_all:
+                candidate_keys.append(k)
+        # 无 live ideas（如离线测试）时仍纳入核心法案表
+        if not candidate_keys:
+            for k, meta in static_cat.items():
+                if meta.get("is_law"):
+                    candidate_keys.append(k)
+
+        for k in candidate_keys:
+            if k in seen:
+                continue
+            meta = static_cat.get(k) or {}
+            sl = meta.get("slot") or "unknown"
+            # 跳过纯国家精神（country），除非显式请求或处于 active 状态
+            if sl == "country" and slot_flt != "country" and k not in active_set:
+                continue
+            if slot_flt and sl.lower() != slot_flt:
+                continue
+            if txt_flt and txt_flt not in k.lower() and txt_flt not in sl.lower():
+                continue
+            seen.add(k)
+            is_law = bool(meta.get("is_law") or k in self._LAW_GATE)
+            cost = int(meta.get("cost")) if meta.get("cost") is not None else (150 if is_law else 150)
+            gate_reason = self._idea_block_reason(k, c, my_tag) if is_law else None
+            rows.append({
+                "key": k,
+                "kind": "law" if is_law else "idea",
+                "slot": sl,
+                "cost": cost,
+                "active": k in active_set,
+                "available": (k in active_set) or (gate_reason is None),
+                "block_reason": gate_reason,
+                "mutually_exclusive_with": list(meta.get("mutually_exclusive_with") or ()),
+            })
+
+        # 2) 合并本国顾问角色表（common/characters）
+        if include_advisors:
+            try:
+                adv_rows = _adv.load_advisors(my_tag) or []
+            except Exception:
+                adv_rows = []
+            for a in adv_rows:
+                ck = a.get("character") or ""
+                tok = a.get("idea_token") or ck
+                sl = a.get("slot") or "political_advisor"
+                if slot_flt and sl.lower() != slot_flt:
+                    continue
+                if txt_flt and txt_flt not in ck.lower() and txt_flt not in tok.lower() and txt_flt not in sl.lower():
+                    continue
+                if ck in seen:
+                    continue
+                seen.add(ck)
+                cost = int(a.get("cost")) if a.get("cost") is not None else 150
+                is_active = (ck in active_set) or (tok in active_set)
+                avail_ok = True
+                blk = None
+                try:
+                    import legality as _leg
+                    _st = _leg._state(self, my_tag)
+                    for bname in ("visible_block", "available_block"):
+                        blk_txt = a.get(bname)
+                        if not blk_txt:
+                            continue
+                        unk = []
+                        if not _leg._eval(blk_txt, _st, unk) and not unk:
+                            avail_ok = False
+                            blk = "%s unmet" % bname
+                            break
+                except Exception:
+                    pass
+                rows.append({
+                    "key": ck,
+                    "idea_token": tok,
+                    "kind": "advisor",
+                    "slot": sl,
+                    "cost": cost,
+                    "active": is_active,
+                    "available": is_active or avail_ok,
+                    "block_reason": blk,
+                    "traits": list(a.get("traits") or ()),
+                    "mutually_exclusive_with": [],
+                })
+
+        rows.sort(key=lambda r: (0 if r["kind"] == "law" else (1 if r["kind"] == "advisor" else 2),
+                                 r["slot"], r["key"]))
+        return {
+            "tag": my_tag,
+            "political_power": pol.get("political_power", getattr(c, "political_power", None)),
+            "active_ideas": sorted(active_set),
+            "total": len(rows),
+            "items": rows[:max(1, int(limit or 120))],
+        }
+
     def _find_idea(self, key, tag=None):
         for e in self._idea_entries(tag, "all"):
             if e["key"] == key:

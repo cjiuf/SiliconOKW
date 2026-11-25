@@ -19,6 +19,7 @@ Signals, all taken from game state rather than the UI:
   war           CWarRelation / battles  -> war declared, new battle, battle lost
   political_power                       -> threshold reached (advisor or decision)
 """
+import os
 import time
 
 import combat
@@ -31,9 +32,50 @@ DEP_QUEUE      = 0x80         # CPdxArray<CMilitaryDeployment*>
 DEP_PROGRESS   = 0x60         # training progress (fixed point)
 DEP_TARGET     = 0x68         # target (fixed point, usually 1.0)
 
+# 统一单次等待实时刹车上限（可通过 HOI4_WAIT_MAX_S 环境变量覆盖，范围 5..120s；
+# 默认 26s 以安全避开常见 30s MCP 客户端超时 -32001，60s+ 客户端可设 HOI4_WAIT_MAX_S=38..90）
+DEFAULT_WAIT_MAX_S = 26
+
+
+def wait_max_seconds():
+    """读取全工具链统一的 wait 实时上限（HOI4_WAIT_MAX_S，默认 26s，范围 5..120s）。"""
+    raw = os.environ.get("HOI4_WAIT_MAX_S")
+    if raw is None or str(raw).strip() == "":
+        return DEFAULT_WAIT_MAX_S
+    try:
+        val = int(float(str(raw).strip()))
+    except Exception:
+        return DEFAULT_WAIT_MAX_S
+    return max(5, min(120, val))
+
+
+def resolve_wait_timeout(requested=None, default=None, max_s=None):
+    """统一计算并回显 wait 工具的有效 timeout_seconds，消除多处硬编码互相截断。"""
+    cap = int(wait_max_seconds() if max_s is None else max(5, min(120, int(max_s))))
+    base_default = cap if default is None else min(int(default), cap)
+    req_raw = requested
+    if requested is None:
+        val = base_default
+        req_num = None
+    else:
+        try:
+            req_num = int(float(requested))
+            val = req_num
+        except Exception:
+            req_num = None
+            val = base_default
+    eff = max(5, min(val, cap))
+    return {
+        "requested": req_num if req_raw is not None else None,
+        "effective": eff,
+        "max_s": cap,
+        "clamped": bool(req_num is not None and eff != req_num),
+    }
+
+
 ALL_SIGNALS = ("focus", "research", "decisions", "events", "production",
-               "construction", "deployment", "war", "peace", "political_power",
-               "housekeep")
+               "construction", "deployment", "war", "peace", "wargoal",
+               "political_power", "housekeep")
 
 
 def _fx(p, a):
@@ -224,6 +266,32 @@ def snapshot(g, signals=ALL_SIGNALS):
             s["peace_open"] = bool(_pw.live_conference_readonly(g))
         except Exception:
             s["peace_open"] = False
+    if "wargoal" in signals:
+        me = s.get("tag")
+        try:
+            import diplomacy as _dip
+            wg_rows, wg_ok = _dip.country_wargoals_fast(g, tag=me, valid_only=True)
+            if wg_ok:
+                s["wargoals"] = frozenset(
+                    (
+                        str(r.get("target_tag") or "").upper(),
+                        str(r.get("wargoal") or "wargoal"),
+                    )
+                    for r in (wg_rows or [])
+                    if r.get("target_tag")
+                )
+        except Exception:
+            pass
+        try:
+            import diplomacy as _dip
+            just_rows = _dip.justifying_fast(g, tag=me) or []
+            s["justifying"] = frozenset(
+                str(r.get("target") or "").upper()
+                for r in just_rows
+                if r.get("target")
+            )
+        except Exception:
+            pass
     if "political_power" in signals:
         try:
             s["political_power"] = g.player().political_power
@@ -297,6 +365,28 @@ def wake_reasons(prev, cur, pp_threshold=None, wake_on_battle=False):
     # 2026-11-23 (复测 7 B-9): 0 注入纯只读 O(1) 监测和平会议，出现第一帧即唤醒并停表
     if cur.get("peace_open") and not prev.get("peace_open"):
         out.append("peace conference opened")
+    # 2026-11-25 (长跑实测 P0): 0 注入 O(1) 双向监测宣战理由（CB）与正当化完成/丢失
+    fresh_cb_targets = set()
+    if "wargoals" in prev and "wargoals" in cur:
+        fresh_cb = cur["wargoals"] - prev["wargoals"]
+        if fresh_cb:
+            for tgt, wg_name in sorted(fresh_cb):
+                fresh_cb_targets.add(tgt)
+                out.append("wargoal ready (CB available): %s (%s)" % (tgt, wg_name))
+    if "justifying" in prev and "justifying" in cur:
+        ended_just = prev["justifying"] - cur["justifying"]
+        if ended_just:
+            cur_wg_targets = {tgt for tgt, _wg in (cur.get("wargoals") or ())}
+            cur_enemies = cur.get("enemies") or frozenset()
+            for tgt in sorted(ended_just):
+                if tgt in cur_wg_targets:
+                    if tgt not in fresh_cb_targets:
+                        out.append("justification completed -> CB ready: %s" % tgt)
+                elif tgt not in cur_enemies:
+                    out.append(
+                        "JUSTIFY_LOST: justification against %s ended without producing a wargoal"
+                        % tgt
+                    )
     # 2026-11-23 (复测 6 P1-3): 战时每天都有零星新战斗，默认不再把 "new battle" 当成
     # 必醒事件打断长跑（仍会在新宣战/停战时立刻唤醒）；仅在显式开启 wake_on_battle=True
     # 或 signals 包含 "battles" 时按新战斗唤醒。
@@ -354,7 +444,10 @@ class TurnLoop:
              pp_threshold=None, poll=None, timeout_seconds=900,
              pause_on_wake=None, wartime_micro=False, wartime_enemy=None,
              wartime_interval_days=3, wartime_report_days=15,
-             stop_event=None, respect_red_dots=True, wake_on_battle=False):
+             stop_event=None, respect_red_dots=True, wake_on_battle=False,
+             housekeep_interval_days=10, timeout_meta=None,
+             autopilot=None, autopilot_interval_days=1,
+             fast_forward=False, fast_forward_speed=3):
         """Wait for a signal, for the date, or for max_days: whichever first.
 
         max_days       : in-game days. Even with "do not disturb me", it ALWAYS
@@ -365,9 +458,62 @@ class TurnLoop:
         wartime_micro  : while at war, run one local wartime_step every
                          `wartime_interval_days` game days; do not wake the model
                          unless the front moved >=4 provinces or 15 days passed.
+        autopilot      : None (default) = auto-enable when Standing Orders are active
+                         in this session; True = enable if active; False = bypass.
+        fast_forward   : when True, safely set speed <= 3 (UI 4-bar cap) and unpause
+                         after pre-run checks; Kernel Floor still polls every cycle.
         """
         import api
         g = self.g
+
+        # 2026-11-25 (Standing Orders v1): 检查自动驾驶是否启用；若启用则在闸门 B 前
+        # 先消化可由 Standing Orders 合法处理的空国策/空科研/建造/军工/新兵/无分歧事件，
+        # 命中内核熔断地板时直接强制停表返回。
+        ap_mod = None
+        ap_on = False
+        ap_ticks = 0
+        ap_actions_total = 0
+        ap_wake_triggers = []
+        if autopilot is not False:
+            try:
+                import autopilot as _ap
+                if _ap.is_active(g):
+                    ap_mod = _ap
+                    ap_on = True
+            except Exception:
+                ap_mod = None
+                ap_on = False
+
+        if ap_on and ap_mod is not None:
+            pre_ap = ap_mod.run_tick(g)
+            ap_ticks += 1
+            ap_actions_total += len(pre_ap.get("actions") or ())
+            if pre_ap.get("wake_triggers"):
+                ap_wake_triggers = list(pre_ap["wake_triggers"])
+                paused_pre = self._force_pause_safe(g)
+                ap_st_now = ap_mod.status(g)
+                return {
+                    "ok": bool(pre_ap.get("ok", True)),
+                    "woke_because": [
+                        "autopilot[%s]: %s" % (t.get("floor"), t.get("detail"))
+                        for t in ap_wake_triggers[:5]
+                    ],
+                    "waited_game_days": 0.0,
+                    "waited_real_seconds": 0.0,
+                    "timed_out": False,
+                    "paused": paused_pre,
+                    "autopilot_woke": True,
+                    "autopilot": {
+                        "active": True,
+                        "phase": ap_st_now.get("current_phase"),
+                        "ticks": ap_ticks,
+                        "actions_taken": ap_actions_total,
+                        "wake_triggers": ap_wake_triggers,
+                        "days_elapsed": ap_st_now.get("days_elapsed"),
+                        "journal_tail": ap_st_now.get("journal_tail", [])[-8:],
+                    },
+                }
+
         # 2026-11-23: 闸门 A/B 开跑前硬拦截 —— 若当前已有未解决且未签收的阻塞红点
         # （待决事件/空国策/空科研/PP>=500/XP>=100/空闲工厂/新决议/限时任务等），
         # 直接强制停表并返回红点清单，严禁带病偷跑。
@@ -385,10 +531,31 @@ class TurnLoop:
                     return gate
             except Exception:
                 pass
+
+        # fast_forward: 过闸门后安全提速（上限 speed=3 即 UI 4 速）并自动解暂停
+        if fast_forward:
+            try:
+                if hasattr(g, "set_game_speed"):
+                    g.set_game_speed(min(3, max(0, int(fast_forward_speed or 3))), measure_seconds=0)
+            except Exception:
+                pass
+            try:
+                import session as _sess_ff
+                if _sess_ff.is_paused(g):
+                    _sess_ff.pause(g, False)
+            except Exception:
+                pass
+
         poll = float(poll if poll is not None else self.poll)
         signals = tuple(signals)
         if wartime_micro:
             signals = tuple(sorted(set(signals) | {"war"}))
+        if ap_on:
+            # 自动驾驶期间强制保留内核地板所需信号（CB/战争/和会/事件/国策/科研/产线/建造/新兵）
+            signals = tuple(sorted(set(signals) | {
+                "wargoal", "war", "peace", "events",
+                "focus", "research", "production", "construction", "deployment",
+            }))
         base = snapshot(g, signals)
         start_hours = base.get("date_raw")
         target_hours = None
@@ -408,6 +575,7 @@ class TurnLoop:
         t_start = time.time()
         prev = base
         last_housekeep_date = start_hours
+        last_ap_tick_h = start_hours
         war_enemy = (wartime_enemy or "").upper() or None
         last_war_tick = start_hours
         last_war_report = start_hours
@@ -476,11 +644,13 @@ class TurnLoop:
                     last_stamp = cur.get("date")
                     if stuck_paused >= 3:
                         # 2026-11-23: 若当前是因为红点门禁/待决事件暂停，绝不擅自解暂停！
+                        # 2026-11-25: 同步检查 reddots.CONFIG['enabled'] 总开关，避免关掉总开关后闸门 A 仍误拦。
                         _has_rd = False
                         if respect_red_dots:
                             try:
                                 import reddots as _rd
-                                _has_rd = bool(_rd.evaluate(g, fast=True).get("has_blocking"))
+                                if _rd.CONFIG.get("enabled", True):
+                                    _has_rd = bool(_rd.evaluate(g, fast=True).get("has_blocking"))
                             except Exception:
                                 _has_rd = False
                         if not _has_rd:
@@ -496,16 +666,69 @@ class TurnLoop:
                 prev, cur, pp_threshold,
                 wake_on_battle=bool(wake_on_battle or ("battles" in signals)),
             )
+
+            # 2026-11-25 (Standing Orders v1): 自动驾驶循环内调度 + 不可关闭 Kernel Floor 高频巡检。
+            # 若出现常规运营变更（国策/科研/建造/军工/新兵/事件）或到达 tick 周期，先交由
+            # autopilot 确定性消化；仅当命中 Kernel Floor、硬信号或剩余阻塞红点时才停表唤醒模型。
+            ap_floor_woke = False
+            if ap_on and ap_mod is not None:
+                _ROUTINE_PREFIXES = (
+                    "focus finished/changed:",
+                    "research finished:",
+                    "research slot freed",
+                    "idle military factories:",
+                    "construction queue empty",
+                    "divisions ready to deploy:",
+                    "new event:",
+                )
+                routine_hits = [r for r in reasons if r.startswith(_ROUTINE_PREFIXES)]
+                hard_reasons = [r for r in reasons if not r.startswith(_ROUTINE_PREFIXES)]
+                now_h_ap = cur.get("date_raw")
+                ap_interval_h = max(24, int(autopilot_interval_days or 1) * 24)
+                ap_due = (
+                    bool(routine_hits)
+                    or (now_h_ap is not None and last_ap_tick_h is not None
+                        and (now_h_ap - last_ap_tick_h) >= ap_interval_h)
+                )
+                if ap_due:
+                    ap_res = ap_mod.run_tick(g, prev_snap=prev, cur_snap=cur)
+                    ap_ticks += 1
+                    ap_actions_total += len(ap_res.get("actions") or ())
+                    if now_h_ap is not None:
+                        last_ap_tick_h = now_h_ap
+                    if ap_res.get("actions"):
+                        # 动作执行后刷新快照，确保下方红点巡检读取到最新已消解状态
+                        cur = snapshot(g, signals)
+                    if ap_res.get("wake_triggers"):
+                        ap_floor_woke = True
+                        ap_wake_triggers = list(ap_res["wake_triggers"])
+                        for _t in ap_wake_triggers[:5]:
+                            hard_reasons.append("autopilot[%s]: %s" % (_t.get("floor"), _t.get("detail")))
+                    # 常规运营原因若已被自动驾驶平稳接管，则不再唤醒模型；只保留硬原因
+                    reasons = hard_reasons
+                else:
+                    # 非 tick 轮次依然 0 注入高速检查 Kernel Floor（CB / 开战 / 分歧事件 / 心跳 / 上限）
+                    ap_st_cur = ap_mod.get_active_state(g)
+                    fl_hits = ap_mod.check_kernel_floor(g, ap_st_cur, prev_snap=prev, cur_snap=cur)
+                    if fl_hits:
+                        ap_floor_woke = True
+                        ap_wake_triggers = list(fl_hits)
+                        for _t in ap_wake_triggers[:5]:
+                            reasons.append("autopilot[%s]: %s" % (_t.get("floor"), _t.get("detail")))
+
             # 2026-11-23: 闸门 A 跑表期红点巡检 —— 任意新阻塞红点立即强制停表唤醒模型
+            # 2026-11-25: 尊重全局开关 reddots.CONFIG['enabled']，使 hoi4_red_dot_guard(enabled=false)
+            # 与闸门 B/C 语义完全统一。
             red_dot_blocking = []
             if respect_red_dots:
                 try:
                     import reddots as _rd
-                    _rd_ev = _rd.evaluate(g, fast=True)
-                    if _rd_ev.get("has_blocking"):
-                        red_dot_blocking = _rd_ev.get("blocking") or []
-                        for _it in red_dot_blocking[:5]:
-                            reasons.append("red_dot[%s]: %s" % (_it["code"], _it["title"]))
+                    if _rd.CONFIG.get("enabled", True):
+                        _rd_ev = _rd.evaluate(g, fast=True)
+                        if _rd_ev.get("has_blocking"):
+                            red_dot_blocking = _rd_ev.get("blocking") or []
+                            for _it in red_dot_blocking[:5]:
+                                reasons.append("red_dot[%s]: %s" % (_it["code"], _it["title"]))
                 except Exception:
                     pass
             # 2026-11-22 (复测 5 §8.4 时刻 ①): 科研完成的瞬间立刻比对新解锁装备是否
@@ -525,10 +748,11 @@ class TurnLoop:
                             reasons.append(_em.format_obsolete_alert(_it))
                     except Exception:
                         pass
-            if "housekeep" in signals and cur.get("housekeep"):
+            if (not ap_on) and "housekeep" in signals and cur.get("housekeep"):
                 h = cur["housekeep"]
+                hk_hours = max(24, int(housekeep_interval_days or 10) * 24)
                 due = (last_housekeep_date is None or
-                       (cur.get("date_raw") is not None and cur["date_raw"] - last_housekeep_date >= 240))
+                       (cur.get("date_raw") is not None and cur["date_raw"] - last_housekeep_date >= hk_hours))
                 hot = (h.get("empty_research", 0) > 0 or not h.get("focus") or
                        h.get("pp", 0) >= 180 or h.get("military_idle", 0) >= 2 or
                        h.get("construction_queue", 0) <= 1 or h.get("unassigned", 0) >= 3)
@@ -606,8 +830,13 @@ class TurnLoop:
                 want_pause = self.pause_on_wake if pause_on_wake is None else pause_on_wake
                 # 2026-11-22 (复测 5 P1 §3.2): 超时或被看门狗中断时无条件暂停；
                 # 2026-11-23: 命中红点门禁或和平会议开启同样无条件强制停表！
+                # 2026-11-25: 宣战理由就绪/正当化结束同样无条件强制停表，防止长跑期 CB 过期！
                 peace_woke = bool(cur.get("peace_open") and not prev.get("peace_open"))
-                if want_pause or timed_out or cancelled or red_dot_blocking or peace_woke:
+                wargoal_woke = bool(
+                    ("wargoals" in prev and "wargoals" in cur and (cur["wargoals"] - prev["wargoals"]))
+                    or ("justifying" in prev and "justifying" in cur and (prev["justifying"] - cur["justifying"]))
+                )
+                if want_pause or timed_out or cancelled or red_dot_blocking or peace_woke or wargoal_woke or ap_floor_woke:
                     paused = self._force_pause_safe(g)
                 else:
                     try:
@@ -623,6 +852,7 @@ class TurnLoop:
                 ret = {
                     "woke_because": reasons,
                     "timed_out": bool(timed_out or cancelled),
+                    "effective_timeout_seconds": timeout_seconds,
                     "waited_game_days": round(((now_h or start_hours or 0)
                                                - (start_hours or 0)) / 24.0, 2),
                     "waited_real_seconds": round(time.time() - t_start, 1),
@@ -635,6 +865,26 @@ class TurnLoop:
                                 "last_tick": war_last} if wartime_micro else None,
                     "state": _public(cur),
                 }
+                if ap_on and ap_mod is not None:
+                    ap_st_ret = ap_mod.status(g)
+                    ret["autopilot"] = {
+                        "active": bool(ap_st_ret.get("active")),
+                        "phase": ap_st_ret.get("current_phase"),
+                        "ticks": ap_ticks,
+                        "actions_taken": ap_actions_total,
+                        "wake_triggers": ap_wake_triggers,
+                        "days_elapsed": ap_st_ret.get("days_elapsed"),
+                        "journal_tail": ap_st_ret.get("journal_tail", [])[-8:],
+                    }
+                    if ap_floor_woke:
+                        ret["autopilot_woke"] = True
+                if isinstance(timeout_meta, dict):
+                    ret["requested_timeout_seconds"] = timeout_meta.get("requested")
+                    ret["timeout_max_seconds"] = timeout_meta.get("max_s")
+                    ret["timeout_clamped"] = bool(timeout_meta.get("clamped"))
+                if wargoal_woke:
+                    ret["wargoal_woke"] = True
+                    ret["wargoals"] = sorted(cur.get("wargoals") or ())
                 if sp_now.get("speed") == 4:
                     ret["speed_warning"] = (
                         "game is currently at UI speed 5 (uncapped CPU); call "
@@ -664,9 +914,10 @@ class TurnLoop:
             if cancelled else
             "real-time safety brake (%ds), paused to prevent background drift" % int(timeout_seconds)
         )
-        return {
+        out_to = {
             "woke_because": [reason_txt],
             "timed_out": True,
+            "effective_timeout_seconds": timeout_seconds,
             "waited_game_days": round(((now_h or start_hours or 0)
                                        - (start_hours or 0)) / 24.0, 2),
             "waited_real_seconds": round(time.time() - t_start, 1),
@@ -679,6 +930,22 @@ class TurnLoop:
                         "last_tick": war_last} if wartime_micro else None,
             "state": _public(cur),
         }
+        if isinstance(timeout_meta, dict):
+            out_to["requested_timeout_seconds"] = timeout_meta.get("requested")
+            out_to["timeout_max_seconds"] = timeout_meta.get("max_s")
+            out_to["timeout_clamped"] = bool(timeout_meta.get("clamped"))
+        if ap_on and ap_mod is not None:
+            ap_st_to = ap_mod.status(g)
+            out_to["autopilot"] = {
+                "active": bool(ap_st_to.get("active")),
+                "phase": ap_st_to.get("current_phase"),
+                "ticks": ap_ticks,
+                "actions_taken": ap_actions_total,
+                "wake_triggers": ap_wake_triggers,
+                "days_elapsed": ap_st_to.get("days_elapsed"),
+                "journal_tail": ap_st_to.get("journal_tail", [])[-8:],
+            }
+        return out_to
 
 
 def _public(s):

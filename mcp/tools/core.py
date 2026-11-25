@@ -9,7 +9,7 @@ import sys
 from .common import TAG, _BOOL, _INT, _STR, game, tool
 from .common import (
     MAX_PAUSE_HOURS, PAUSE_COOLDOWN_S, _PAUSE_LAST,
-    _CALL, CALL_TIMEOUT_S,
+    _CALL,
     _is_pid_alive, _looks_like_dead_read, _refuse_unpause_with_empty_orders,
     _srv, _win_hwnd, screenshot,
 )
@@ -75,8 +75,30 @@ def _housekeep(a):
                             a.get("technologies") or [])
 
 
+def _resolve_injections_count(p):
+    """统一读取本会话累计注入次数（兼容 Proc.call_count、Backend.call_count 与 winject 进程计数）。"""
+    if p is None:
+        return None
+    cnt = getattr(p, "call_count", None)
+    if cnt is not None:
+        return int(cnt)
+    be = getattr(p, "be", None)
+    be_cnt = getattr(be, "call_count", None) if be is not None else None
+    if be_cnt is not None:
+        return int(be_cnt)
+    if sys.platform == "win32":
+        pid = getattr(p, "pid", None)
+        if pid is not None:
+            try:
+                from process import winject as _wj
+                return int(_wj.call_count(pid))
+            except Exception:
+                pass
+    return 0
+
+
 @tool("hoi4_status", "Connection status: process, version, date, country count, "
-                    "and how many ptrace injections this session has made. "
+                    "and how many ptrace/thread-hijack injections this session has made. "
                     "`date` is the SAME dict hoi4_date returns (both call Game.date()), "
                     "so the two can never disagree -- if they look different, the "
                     "value changed between the calls, not the code path.",
@@ -85,7 +107,7 @@ def _status(a):
     g = game()
     out = {"pid": g.p.pid, "image_base": hex(g.p.base), "version": O.VERSION,
            "date": g.date(), "player": g.player_tag(), "countries": len(g.tags()),
-           "injections": getattr(g.p, "call_count", None),
+           "injections": _resolve_injections_count(g.p),
            "winject_recovery": _srv()._WINJECT_RECOVERY}
     try:
         sp = g.game_speed()
@@ -703,15 +725,15 @@ def _pause_game(a):
                                    "idler+0x6C1, written exactly the way the game's own "
                                    "SPACE handler writes it (hoi4.exe+0xE48C36: "
                                    "'cmp [rbx+0x6C1],0 / sete al / mov [rbx+0x6C1],al'). "
-                                   "Both directions verified live on pid 29864: 1 freezes "
-                                   "the clock, 0 lets it run. Success is judged by the "
+                                   "Both directions verified on 1.19.5.0 PE (current pid %s): "
+                                   "1 freezes the clock, 0 lets it run. Success is judged by the "
                                    "clock, not the flag, so a frozen clock with the flag "
                                    "already 0 is reported as a second pause source (event "
                                    "popup / menu) instead of a fake success; when the "
                                    "process's date reader is itself stuck on game.log the "
                                    "reply carries clock_verified:false rather than inventing "
                                    "either verdict. In a real multiplayer session the host "
-                                   "owns this state.")
+                                   "owns this state." % getattr(getattr(g, "p", None), "pid", "?"))
         if (not ok) and (not a.get("paused", True)):
             # 2026-11-21 (P0-3 completeness): the flag is 0 but the clock is frozen.
             # That is the ONE failure mode the byte cannot clear, because something
@@ -763,7 +785,8 @@ def _world_snapshot(a):
        "signals": {"type": "array", "items": {"type": "string"},
                    "description": "Signals to watch: focus, research, decisions, events, production, "
                                   "construction, deployment, war (war declared/ended), peace (peace conference opened), "
-                                  "battles, political_power. Pass [] to wait purely until max_days / until_date "
+                                  "wargoal (new CB available or justification ended/lost; always force-pauses), "
+                                  "battles, political_power, housekeep. Pass [] to wait purely until max_days / until_date "
                                   "(no signal wakes except red dots if respect_red_dots=true)."},
        "wake_on_battle": {"type": "boolean",
                           "description": "Wake on every new individual land battle (default false; "
@@ -772,11 +795,11 @@ def _world_snapshot(a):
                            "description": "Wake when political power reaches this value"},
        "poll_seconds": {"type": "number", "description": "Poll interval in seconds (default 1.5; auto-tightened near max_days to avoid overshoot)"},
        "timeout_seconds": {"type": "integer",
-                           "description": "Real-time safety brake in seconds (default 24, "
-                                          "capped at 26 so the call cleanly pauses and returns "
-                                          "JSON well before typical 30s MCP client timeouts and the 50s server watchdog)"},
+                           "description": "Real-time safety brake in seconds, clamped to min(requested, HOI4_WAIT_MAX_S) "
+                                          "(default 26s, shared with hoi4_wait_and_brief; set HOI4_WAIT_MAX_S=38..90 for longer clients). "
+                                          "Actual effective value is echoed in effective_timeout_seconds."},
        "pause_on_wake": {"type": "boolean",
-                         "description": "Pause on wake (timeout always pauses unconditionally to prevent background drift)"},
+                         "description": "Pause on wake (timeout, red dots, peace conference, and wargoal/CB always pause unconditionally)"},
        "wartime_micro": {"type": "boolean",
                          "description": "While at war, run one local wartime_step every 3 game "
                                         "days without waking the model; only report after >=4 "
@@ -788,20 +811,16 @@ def _world_snapshot(a):
        "wartime_report_days": {"type": "integer",
                                "description": "Force a report after this many war days (default 15)"},
        "respect_red_dots": {"type": "boolean",
-                            "description": "Enforce red-dot gate & auto-pause on events/decisions/PP/XP/idle factories/empty focus/research (default true)"}})
+                            "description": "Enforce red-dot gate & auto-pause during this wait (default true; also bypassed globally when hoi4_red_dot_guard enabled=false)"},
+       "autopilot": {"type": "boolean",
+                     "description": "Enable Standing Orders autopilot during wait (omit = auto when active; false = bypass)"},
+       "fast_forward": {"type": "boolean",
+                        "description": "Safely set speed <= 3 (UI 4-bar cap) and unpause after pre-run checks"}})
 def _wait_for(a):
     import turnloop
     tl = turnloop.TurnLoop(game(), poll=a.get("poll_seconds", 1.5))
     until = a.get("until_date")
-    # 2026-11-23 (复测 7 B-4): 将 wait_for 软上限从 38s 收紧至 26s（默认 24s），
-    # 彻底避开常见 MCP 客户端 30s 请求超时引发的 `-32001` 协议中断，确保超时必返回结构化 JSON 且停表。
-    CLIENT_BUDGET_S = min(26, max(5, int(CALL_TIMEOUT_S - 12)))
-    DEFAULT_WAIT_S = min(24, CLIENT_BUDGET_S)
-    try:
-        _ts = int(a.get("timeout_seconds") or DEFAULT_WAIT_S)
-    except Exception:
-        _ts = DEFAULT_WAIT_S
-    _ts = max(5, min(_ts, CLIENT_BUDGET_S))
+    tm = turnloop.resolve_wait_timeout(requested=a.get("timeout_seconds"))
     # 2026-11-23 (复测 6 P1-3): 显式传 signals=[] 必须保持空元组 ()，
     # 不可用 `a.get("signals") or ALL_SIGNALS` 把空列表 falsy 吞回全量信号。
     _raw_sigs = a.get("signals")
@@ -810,7 +829,7 @@ def _wait_for(a):
                    until_date=tuple(until) if until else None,
                    signals=_signals,
                    pp_threshold=a.get("political_power"),
-                   timeout_seconds=_ts,
+                   timeout_seconds=tm["effective"],
                    pause_on_wake=a.get("pause_on_wake", False),
                    wartime_micro=a.get("wartime_micro", False),
                    wartime_enemy=a.get("wartime_enemy"),
@@ -818,7 +837,10 @@ def _wait_for(a):
                    wartime_report_days=a.get("wartime_report_days", 15),
                    stop_event=_CALL.get("cancel"),
                    respect_red_dots=bool(a.get("respect_red_dots", True)),
-                   wake_on_battle=bool(a.get("wake_on_battle", False)))
+                   wake_on_battle=bool(a.get("wake_on_battle", False)),
+                   timeout_meta=tm,
+                   autopilot=a.get("autopilot"),
+                   fast_forward=bool(a.get("fast_forward", False)))
 
 
 @tool("hoi4_red_dots",
@@ -855,10 +877,13 @@ def _ack_red_dot(a):
 
 
 @tool("hoi4_red_dot_guard",
-      "Inspect or configure the red-dot gatekeeper and background read-only brake guard "
-      "(enable/disable gate or background guard, toggle peacetime air/navy blocking, tune poll interval).",
-      {"enabled": {"type": "boolean", "description": "Master switch for red-dot unpause/wait blocking"},
-       "guard_enabled": {"type": "boolean", "description": "Enable/disable background auto-pause thread"},
+      "Inspect or configure the red-dot gatekeeper and background read-only brake guard. "
+      "`enabled` is the master switch for ALL blocking gates (unpause gate, wait_for/wait_and_brief "
+      "polling gate, and background brake thread) without affecting read-only hoi4_red_dots inspection; "
+      "`guard_enabled` toggles only the background brake thread; per-call `respect_red_dots=false` on "
+      "hoi4_wait_for/hoi4_wait_and_brief overrides only that wait.",
+      {"enabled": {"type": "boolean", "description": "Master switch for all red-dot unpause/wait/background blocking (hoi4_red_dots read-only scan remains active)"},
+       "guard_enabled": {"type": "boolean", "description": "Enable/disable only the background auto-pause thread"},
        "peace_air_navy_block": {"type": "boolean", "description": "Also block peacetime idle air/navy (default false: wartime only)"},
        "guard_poll_seconds": {"type": "number", "description": "Background guard poll interval in seconds (default 1.5)"}})
 def _red_dot_guard(a):

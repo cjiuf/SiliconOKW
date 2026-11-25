@@ -523,6 +523,45 @@ class Game(
             out.append({"offset": off, "size": size, "cap": cap, "elem": elem})
         return out
 
+    # ------------------------------------------------- Standing Orders v1 薄封装
+    def compile_standing_orders(self, profile, tag=None):
+        """干跑编译校验 Standing Orders profile（纯只读 0 注入）。"""
+        import autopilot as _ap
+        return _ap.compile_profile(self, profile, tag=tag)
+
+    def set_standing_orders(self, profile, dry_run=False, replace=True, tag=None):
+        """声明、编译并激活 Standing Orders。"""
+        import autopilot as _ap
+        return _ap.set_standing_orders(self, profile, dry_run=dry_run, replace=replace, tag=tag)
+
+    def clear_standing_orders(self, reason="", tag=None):
+        """停用并清空当前会话的 Standing Orders。"""
+        import autopilot as _ap
+        return _ap.clear_standing_orders(self, reason=reason, tag=tag)
+
+    def autopilot_status(self, tag=None, journal_limit=15):
+        """查询当前会话 Standing Orders 状态与执行日志。"""
+        import autopilot as _ap
+        return _ap.status(self, tag=tag, journal_limit=journal_limit)
+
+    def autopilot_tick(self, tag=None, dry_run=False):
+        """立即执行一次 Standing Orders 确定性 tick。"""
+        import autopilot as _ap
+        return _ap.run_tick(self, tag=tag, dry_run=dry_run)
+
+    def ack_autopilot(self, reason="", extend_max_days=False, tag=None):
+        """只读签收自动驾驶心跳或熔断唤醒（0 引擎注入、免前台窗口）。"""
+        import autopilot as _ap
+        return _ap.acknowledge_wakeup(
+            self, tag=tag, reason=reason, extend_max_days=extend_max_days
+        )
+
+    @staticmethod
+    def strategy_catalog(domain=None):
+        """列出 Standing Orders Strategy Registry 的全部可审计策略公式与参数。"""
+        import autopilot as _ap
+        return _ap.strategy_catalog(domain=domain)
+
 
 # ============================================================================
 #  历史测试夹具向后兼容 Mixin 别名（纯 Mixin 组合，不继承 HOI4.__init__）

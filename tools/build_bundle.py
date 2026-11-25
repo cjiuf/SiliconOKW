@@ -35,6 +35,8 @@ SKIP_FILES = {
     # 历史遗留运行态文件路径（已统一迁至 %LOCALAPPDATA%\SiliconOKW，保留作打包防御）
     "calling/turn_state.json",
     "calling/turn_state.json.tmp",
+    "calling/autopilot_state.json",
+    "calling/autopilot_state.json.tmp",
     "calling/reddots_state.json",
     "calling/reddots_state.json.tmp",
     "calling/front_snapshot.json",
