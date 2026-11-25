@@ -187,6 +187,19 @@ def rebuild(
 
     cleared = clear_memory_caches()
     mf = manifest(mpath)
+    # 自动登记 hoi4_recalc 本次生成的本地 .pkl SHA256，供 safe_cache 校验与 Mod 优先加载
+    try:
+        import safe_cache
+        assets_map = (mf or {}).get("assets") if isinstance(mf, dict) else None
+        if isinstance(assets_map, dict):
+            for entry in assets_map.values():
+                if isinstance(entry, dict):
+                    p_out = entry.get("path") or entry.get("pkl")
+                    if p_out and str(p_out).lower().endswith(".pkl") and os.path.isfile(p_out):
+                        safe_cache.record_pickle_hash(p_out)
+    except Exception as _he:
+        import diag as _diag
+        _diag.warn("assets.rebuild.record_pickle_hash", _he)
     return {
         "ok": True,
         "manifest_path": mpath,

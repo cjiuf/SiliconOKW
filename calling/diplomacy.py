@@ -388,7 +388,7 @@ def country_wargoals_direct(g, tag=None, valid_only=True):
     if p is None:
         return [], False
 
-    co_dip_off = getattr(O, "CO_DIPLOMACY", 0xF88)
+    co_dip_off = O.CO_DIPLOMACY_STATUS
     resolve_tag = _ensure_tags_map(g)
     try:
         types = wargoal_types(g)
@@ -595,10 +595,19 @@ def declare_war(g, target_tag, wargoal_ptr=None, flag=0, dry_run=False):
             g.detach()
 
 
+def _load_action_cache():
+    """读取预生成的 diploactions 缓存（Linux ELF diploscan 已迁出 calling/）。"""
+    import os
+    import safe_cache
+    cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "diploactions.pkl")
+    if not safe_cache.exists(cache):
+        return {}
+    return safe_cache.load(cache)
+
+
 def action_catalog():
     """All diplomatic action classes: {name: {vtable, ctor, size}}"""
-    import diploscan
-    raw = diploscan.build()
+    raw = _load_action_cache()
     out = {}
     allmap = raw.get("_all") if isinstance(raw, dict) else None
     if isinstance(allmap, dict):

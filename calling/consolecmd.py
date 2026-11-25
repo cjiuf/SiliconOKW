@@ -46,14 +46,26 @@ import os
 import struct
 import sys
 
-STRIDE = 0x1C8
-CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "console_table.json")
-ALLOC_OFF = 0x4505128          # CPdxNewDeleteAllocator (Linux, type-erased)
+import offsets_win as _OW
+import session_state as _SS
+
+STRIDE = _OW.CMD_STRIDE
+CACHE = _SS.state_path(_SS.CONSOLE_TABLE_NAME)
+ALLOC_OFF = _OW.G_DEFAULT_ALLOC
 
 _WIN = sys.platform == "win32"
 WIN_TEXT_LO, WIN_TEXT_SPAN = 0x1000, 0x3900000   # whole .text of hoi4.exe 1.19.5.0
 
 _cache = {"pid": None, "base": 0, "count": 0}
+
+
+def _clear_console_cache():
+    _cache.update(pid=None, base=0, count=0)
+    if "_index" in globals():
+        _index.cache = None
+
+
+_SS.register_cache("consolecmd._cache", _clear_console_cache)
 
 
 def _text_range(g):
@@ -176,8 +188,9 @@ def table(g):
     while _looks_like_entry(g, cur):
         count += 1
         cur += STRIDE
-    _cache = {"pid": p.pid, "base": start, "count": count}
+    _cache.update(pid=p.pid, base=start, count=count)
     try:
+        _SS.ensure_parent(CACHE)
         with open(CACHE, "w") as _fh:
             json.dump(_cache, _fh)
     except Exception:

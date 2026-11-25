@@ -51,21 +51,22 @@ Read-only: no command objects, no ctor calls, no writes.
 from __future__ import annotations
 
 import struct
+import offsets_win as _OW
 
 #: CCountry -> CCountryResources
-COUNTRY_RESOURCES = 0x11F8
+COUNTRY_RESOURCES = _OW.CO_RESOURCES
 #: CCountryResources -> data ptr of CPdxArray<CPdxArray<CResourceExchange*>>
-TRADE_BOOK = 0x728
-TRADE_BOOK_CAP = 0x730
-TRADE_BOOK_SIZE = 0x734
-SLOT_STRIDE = 0x18
+TRADE_BOOK = _OW.TRADE_BOOK
+TRADE_BOOK_CAP = _OW.TRADE_BOOK_CAP
+TRADE_BOOK_SIZE = _OW.TRADE_BOOK_SIZE
+SLOT_STRIDE = _OW.TRADE_SLOT_STRIDE
 #: CResourceExchange fields
-EX_PARTNER = 0x88
-EX_RESOURCE = 0x90
-EX_AMOUNT = 0x98
-EX_SIZE = 0xF0
+EX_PARTNER = _OW.TRADE_EX_PARTNER
+EX_RESOURCE = _OW.TRADE_EX_RESOURCE
+EX_AMOUNT = _OW.TRADE_EX_AMOUNT
+EX_SIZE = _OW.TRADE_EX_SIZE
 #: CStrategicResource -> its own index (1..7)
-RES_INDEX = 0xD8
+RES_INDEX = _OW.TRADE_RES_INDEX
 
 FIXED = 100000.0
 
@@ -211,9 +212,9 @@ def world_trades(g):
 #   Execute     = 0x16DA8A0  调用 0xD15640(ecx=[+0x2C] 卖方, edx=[+0x28] 买方,
 #                                          r8=[+0x30] CStrategicResource*, r9d=[+0x38] 单位数)
 #                            内部乘以 100000 (0x186A0) 写入卖方出口账本；amount=0 则取消贸易。
-VT_CREATE_TRADE = 0x2A5F388
-SIZE_CREATE_TRADE = 0x40
-CANEXEC_CREATE_TRADE = 0x16DABF0
+VT_CREATE_TRADE = _OW.TRADE_VT_CREATE
+SIZE_CREATE_TRADE = _OW.TRADE_SIZE_CREATE
+CANEXEC_CREATE_TRADE = _OW.TRADE_CANEXEC_CREATE
 
 _RES_ALIASES = {
     "oil": "oil",
@@ -226,7 +227,10 @@ _RES_ALIASES = {
     "coal": "coal",
 }
 
+import session_state as _SS
+
 _RES_PTR_CACHE = {}
+_SS.register_cache("trade_win._RES_PTR_CACHE", container=_RES_PTR_CACHE)
 
 
 def resource_pointers(g, force=False):
@@ -269,8 +273,9 @@ def resource_pointers(g, force=False):
                         out[rname] = rp
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as _e:
+            import diag as _diag
+            _diag.warn("trade_win.resource_pointers.scan", _e)
     if pid is not None and out:
         _RES_PTR_CACHE[pid] = dict(out)
     return out
@@ -321,47 +326,46 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
 
     before_amt = _current_import_amount(g, exp.ptr, imp.tag_id, ridx)
 
-    own = g._inj is None
-    if own:
-        g.attach()
-    try:
-        cmd = cmdwin.build_by_vt(g, VT_CREATE_TRADE, SIZE_CREATE_TRADE, [
+    import win_pipeline as _wp
+    pipe = _wp.WinCommandPipeline(g, only_if_live=True)
+    res = pipe.run(
+        build_fn=lambda _g: cmdwin.build_by_vt(_g, VT_CREATE_TRADE, SIZE_CREATE_TRADE, [
             (0x28, "<i", int(imp.tag_id)),
             (0x2C, "<i", int(exp.tag_id)),
             (0x30, "<Q", int(rptr)),
             (0x38, "<i", amt),
-        ])
-        can_ok = bool(cmdwin.can_exec(g, cmd, CANEXEC_CREATE_TRADE))
-        if dry_run:
-            return {
-                "ok": can_ok,
-                "dry_run": True,
-                "can_execute": can_ok,
-                "importer": imp.tag,
-                "exporter": exp.tag,
-                "resource": rkey,
-                "amount_requested": amt,
-                "amount_before": before_amt,
-                "resource_ptr": hex(rptr),
-            }
-        if not can_ok:
-            return {
-                "ok": False,
-                "blocked_by": "can_execute_refused",
-                "can_execute": False,
-                "importer": imp.tag,
-                "exporter": exp.tag,
-                "resource": rkey,
-                "amount_requested": amt,
-                "amount_before": before_amt,
-                "error": "CCreateTradeCommand::CanExecute refused (%s <- %s, %s=%d)"
-                % (imp.tag, exp.tag, rkey, amt),
-            }
-        pr = cmdwin.post_drained(g, cmd, seconds=1.5)
-        posted = bool(pr.get("posted") if isinstance(pr, dict) else pr)
-    finally:
-        if own:
-            g.detach()
+        ]),
+        can_exec_rva=CANEXEC_CREATE_TRADE,
+        drain=True,
+        seconds=1.5,
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return {
+            "ok": bool(res.can_execute),
+            "dry_run": True,
+            "can_execute": bool(res.can_execute),
+            "importer": imp.tag,
+            "exporter": exp.tag,
+            "resource": rkey,
+            "amount_requested": amt,
+            "amount_before": before_amt,
+            "resource_ptr": hex(rptr),
+        }
+    if res.can_execute is False:
+        return {
+            "ok": False,
+            "blocked_by": "can_execute_refused",
+            "can_execute": False,
+            "importer": imp.tag,
+            "exporter": exp.tag,
+            "resource": rkey,
+            "amount_requested": amt,
+            "amount_before": before_amt,
+            "error": "CCreateTradeCommand::CanExecute refused (%s <- %s, %s=%d)"
+            % (imp.tag, exp.tag, rkey, amt),
+        }
+    posted = bool(res.posted)
 
     after_amt = before_amt
     if posted:

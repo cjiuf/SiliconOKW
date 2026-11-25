@@ -22,17 +22,17 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NAME = sys.argv[1] if len(sys.argv) > 1 else "SiliconOKW-win-1.19.5-20261123"
+NAME = sys.argv[1] if len(sys.argv) > 1 else "SiliconOKW-win-1.19.5-20261125"
 OUT = os.path.join(ROOT, "dist")
 STAGE = os.path.join(OUT, NAME)
 ZIP = os.path.join(OUT, NAME + ".zip")
 
-KEEP_BIG_PKL = {"research/windows/rtti_win.pkl"}
-SKIP_DIRS = {"__pycache__", ".git", "dist", ".idea", ".vscode", "target", "profiles"}
+KEEP_BIG_PKL = {"research/windows/rtti_win.pkl", "research/windows/rtti_win.json.gz"}
+SKIP_DIRS = {"__pycache__", ".git", "dist", ".idea", ".vscode", "target", "profiles", "legacy"}
 SKIP_EXT = {".pyc", ".pyo", ".lock"}
 SKIP_SUFFIX = (".bak_20261118", ".bak", ".jsonl", ".tmp")
 SKIP_FILES = {
-    "calling/_peek_adj.py",
+    # 历史遗留运行态文件路径（已统一迁至 %LOCALAPPDATA%\SiliconOKW，保留作打包防御）
     "calling/turn_state.json",
     "calling/turn_state.json.tmp",
     "calling/reddots_state.json",
@@ -45,6 +45,9 @@ SKIP_FILES = {
     "calling/air_attach.json",
     "calling/assets_manifest.json",
     "calling/techids.pkl",
+    "calling/techids.json",
+    "calling/objindex.pkl",
+    "calling/objindex.json.gz",
     "calling/winject_frozen.json",
     "calling/process/winject_frozen.json",
     "calling/subunit_pointers_live.json",
@@ -52,7 +55,7 @@ SKIP_FILES = {
 BIG_PKL_LIMIT = 1 << 20          # 1 MB
 
 # only these top-level trees go in
-TREES = ["assets", "calling", "mcp", "native", "research", "docs"]
+TREES = ["assets", "calling", "mcp", "native", "research", "docs", "tests"]
 ROOT_FILES = ["README.md", "README_EN.md", "INSTALL.md", "requirements.txt", "LICENSE", "clausewitz.py",
               "subunit_catalog.json", "subunit_pointers.json"]
 DOCS = []
@@ -162,30 +165,30 @@ HOI4 1.19.5.0 (Windows x64 PE) 独立自动化工具集：核心调用层、逆�
 
 | 路径 | 内容 |
 |---|---|
-| `calling/` | **核心调用层**（88 模块）：`game.py`、`api.py`、`mem.py` + `process/`（Win32 读写与单线程劫持注入）、`cmdwin.py`、`armyops_win.py`、`airops_win.py`、`navalops_win.py`、`combat.py`、`events_win.py`、`peacewin.py`、`trade_win.py`、`movemicro.py`、`ragemicro.py`、`frontd.py`、`macros.py`、`housekeep.py`、`reddots.py`、`turnengine.py`、`offsets_win.py` |
-| `calling/*.pkl`、`*.json` | **预生成命令表**：`cmdvts.json`、`cmdctors.pkl`、`cmdsigs.pkl`、`cmdfields.pkl`、`tokens.pkl` 等 |
-| `calling/hoi4_fastmem.pyd` | **可选 Rust 原生扫描扩展**（PyO3 + Rayon 多核 Win32 扫描，Windows x64 / CPython 3.11+ `abi3`）；缺失时自动回落至纯 Python/numpy |
+| `calling/` | **核心调用层**（`game.py` 薄门面 + `calling/domains/` 14 领域模块 + `calling/micro/` 4 微操模块 + `win_pipeline.py`、`safe_cache.py`、`session_state.py`、`fastmem.py`、`diag.py`、`process/` W^X 双页注入与 Win32 读写等） |
+| `calling/*.json`、`*.json.gz` | **预生成纯 JSON 安全数据表（0 入库 `.pkl`）**：`cmdvts.json`、`cmdctors.json`、`cmdsigs.json`、`cmdfields.json`、`tokens.json.gz`、`focusplans.json.gz` 等 |
+| `calling/hoi4_fastmem.pyd` | **可选 Rust 原生扫描与批量直读扩展**（`0.2.0`，PyO3 + Rayon 多核 Win32 批读，Windows x64 / CPython 3.11+ `abi3`）；缺失或 `HOI4_NO_FASTMEM=1` 时自动无损回落至纯 Python/numpy |
 | `native/` | `hoi4_fastmem` 与 `hoi4_recalc` 两个 Rust crate 完整源码及构建脚本 |
-| `mcp/server.py` | **MCP 服务端**（Full 模式 **177 个** `hoi4_*` 工具；加 `--compact` 切至 5 工具极简模式，Schema < 1k tokens）；`mcp/config/windows-*.json` 为客户端模板 |
-| `research/` | **PE 逆向层**与 342 KB 反汇编笔记 `WINDOWS_1.19.5.md`、`console_commands.json` |
-| `research/windows/` | PE 离线反汇编/扫描工具链（`pedis.py`、`vtscan.py`、`rtti_win.py`）、`rtti_win.pkl` 符号表与 **22 套离线回归测试** `test_*.py` |
-| `docs/` | 操作手册 `AGENTS.md`、策略提示词 `STRATEGY_PROMPT.md`、崩溃/缺陷排查日志与已知问题清单 |
+| `mcp/server.py` | **MCP 服务端**（共注册 **181 个** `hoi4_*` 工具，Full 默认开放 174 项 + 默认禁用的调试/兼容工具；加 `--compact` 切至 5 工具极简模式，Schema < 1k tokens）；`mcp/config/windows-*.json` 为客户端模板 |
+| `research/` | **PE 逆向层**与反汇编笔记 `WINDOWS_1.19.5.md`、`console_commands.json` |
+| `research/windows/` | PE 离线反汇编/扫描工具链（`pedis.py`、`vtscan.py`、`rtti_win.py`）、`rtti_win.json.gz` 符号表与 **25 套历史回归测试** `test_*.py`（另含根目录 `tests/` 统一契约与离线单测） |
+| `docs/` | 策略提示词 `STRATEGY_PROMPT.md` 与定点数/动态变量技术文档 |
 
-## 未打入（首次运行自动重建）
+## 未打入（首次运行自动重建于 `%LOCALAPPDATA%\SiliconOKW` 或按需缓存）
 
 | 文件 | 说明 |
 |---|---|
-| `calling/objindex.pkl`（~50 MB） | RTTI 实例快照，绑定单次游戏进程，重启即失效 |
+| `%LOCALAPPDATA%\SiliconOKW\objindex.json.gz`（紧凑模式 ~230 KB） | RTTI 实例快照（纯 JSON.GZ，绑定单次游戏进程/会话，重启即失效） |
 | `calling/loc.pkl`（~14 MB） | 本地化文本索引，从游戏 `localisation/` 自动生成 |
 | `research/windows/evdb_win.pkl`（~12 MB） | 事件定义库，从游戏 `events/` 自动生成 |
-| 本机运行状态 `turn_state.json` / `reddots_state.json` / `front_*.json` | 按对局实时生成 |
+| `%LOCALAPPDATA%\SiliconOKW\` 下 `turn_state.json` / `reddots_state.json` / `front_*.json` / `techids.json` | 按对局实时生成，与源码目录完全隔离 |
 
 ## 快速启动
 
 ```powershell
 python -m pip install -r requirements.txt
 python clausewitz.py doctor
-python clausewitz.py serve            # Full 模式（177 工具）
+python clausewitz.py serve            # Full 模式（181 注册工具，默认开放 174 项）
 python clausewitz.py serve --compact  # Compact 模式（5 工具极简）
 ```
 

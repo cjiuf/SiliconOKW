@@ -120,9 +120,9 @@ def _category(fname, folder, cats):
 
 
 def build(force=False):
-    if not force and os.path.exists(CACHE):
-        with open(CACHE, "rb") as f:
-            cached = pickle.load(f)
+    import safe_cache
+    if not force and safe_cache.exists(CACHE):
+        cached = safe_cache.load(CACHE)
         # 2026-11-19: the pickle predates the `xor` table; rebuild once so
         # start_research can refuse mutually exclusive techs.
         if cached and all("xor" in v for v in cached.values()):
@@ -148,8 +148,7 @@ def build(force=False):
             parents.setdefault(child, set()).add(name)
     for name, info in techs.items():
         info["parents"] = sorted(parents.get(name, ()))
-    with open(CACHE, "wb") as f:
-        pickle.dump(techs, f)
+    safe_cache.save(CACHE, techs, fmt="json")
     return techs
 
 

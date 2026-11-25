@@ -9,6 +9,7 @@ calling/date_addr.json
 
 # Large, regenerable object index (53 MB); rebuilds itself on first use.
 calling/objindex.pkl
+calling/objindex.json.gz
 
 # Reverse-engineering dumps (regenerate with the scanners in research/)
 research/re-dumps/*
@@ -50,6 +51,7 @@ winject_frozen.json.tmp
 calling/process/winject_frozen.json
 calling/process/winject_frozen.json.tmp
 calling/techids.pkl
+calling/techids.json
 calling/turn_state.json
 calling/turn_state.json.tmp
 calling/reddots_state.json

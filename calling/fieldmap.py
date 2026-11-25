@@ -5,7 +5,7 @@ The token id can be turned into a string at runtime with `3471B20(id)`.
 This module parses the serialize function and produces {offset: (field_name, type)},
 so field names come from the developers rather than from guesswork.
 """
-import os, pickle, re, subprocess, bisect, sys
+import os, re, subprocess, bisect, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 import config
@@ -37,8 +37,9 @@ _rtti = _funcs = None
 def _load():
     global _rtti, _funcs
     if _rtti is None:
-        _rtti = pickle.load(open(os.path.join(RE_DIR, "rtti.pkl"), "rb"))["vtables"]
-        f = pickle.load(open(os.path.join(RE_DIR, "funcs.pkl"), "rb"))
+        import safe_cache
+        _rtti = safe_cache.load(os.path.join(RE_DIR, "rtti.pkl"))["vtables"]
+        f = safe_cache.load(os.path.join(RE_DIR, "funcs.pkl"))
         _funcs = sorted(x[0] if isinstance(x, (tuple, list)) else x for x in f)
     return _rtti, _funcs
 
@@ -56,34 +57,10 @@ def _dis(start, end):
 
 
 def find_serializer(class_name, all_of=False):
-    """Find a class's serialize function: the virtual with the most token constants."""
-    rt, _ = _load()
-    key = next((k for k in rt if re.match(r"^\d+%s$" % re.escape(class_name), k)), None)
-    if key is None:
-        return None
-    sys.path.insert(0, RE_DIR)
-    from elf import ELF
-    e = ELF(BIN)
-    allvt = sorted({a for v in rt.values() for a in v})
-    best = (0, None)
-    found = []
-    for vt in rt[key]:
-        # end of the vtable: the start of the next one (0x10 allowance for its header)
-        k = bisect.bisect_right(allvt, vt)
-        limit = min(0x400, max(0x10, (allvt[k] - 0x10 - vt) if k < len(allvt) else 0x400))
-        for off in range(0, limit, 8):
-            f = e.u64(vt + off)
-            if not f or f < 0x400000 or f > 0x3500000:
-                continue
-            end = min(_fn_end(f), f + 0x8000)
-            n = len(re.findall(r"mov +esi,0x[0-9a-f]{3,4}\n", _dis(f, end)))
-            if n >= 6:
-                found.append((n, f))
-            if n > best[0]:
-                best = (n, f)
-    if all_of:
-        return sorted({f for _, f in found})
-    return best[1] if best[0] >= 6 else None
+    """原 Linux ELF/objdump 序列化器扫描已移除；请使用预生成 fieldmaps.pkl。"""
+    raise NotImplementedError(
+        "Linux ELF/objdump serializer scanner removed; use prebuilt fieldmaps.pkl."
+    )
 
 
 _RE_LINE = re.compile(r"^\s*[0-9a-f]+:\s+(?:[0-9a-f]{2} )+\s*(.*)$")
@@ -159,10 +136,13 @@ def resolve_tokens(g, tokmap):
 
 def field_map(g, class_name, force=False):
     """A class's {offset: (field_name, type)} map, cached to disk."""
+    import safe_cache
     cache = {}
-    if os.path.exists(CACHE):
-        try: cache = pickle.load(open(CACHE, "rb"))
-        except Exception: cache = {}
+    if safe_cache.exists(CACHE):
+        try:
+            cache = safe_cache.load(CACHE)
+        except Exception:
+            cache = {}
     if class_name in cache and not force:
         return cache[class_name]
     sers = find_serializer(class_name, all_of=True) or []
@@ -170,7 +150,7 @@ def field_map(g, class_name, force=False):
     for ser in sers:                 # ALL of the class's serializers, base and derived
         merged.update(parse_serializer(ser))
     cache[class_name] = resolve_tokens(g, merged) if merged else {}
-    pickle.dump(cache, open(CACHE, "wb"))
+    safe_cache.save(CACHE, cache, fmt="json")
     return cache[class_name]
 
 

@@ -47,18 +47,12 @@ def va_of(rva):
 
 
 def vt_class(vt_rva):
-    """Class name for a vtable, from the cached RTTI scan (rtti_win.pkl).
-
-    `pedis.vtable_class` imports `rtti_win`, and in this directory that name
-    resolves to the scanner *script* rather than the library, so go to the
-    pickle directly.
-    """
-    import pickle
+    """Class name for a vtable, from the cached RTTI scan (rtti_win.json.gz / .pkl)."""
+    import safe_cache
     path = os.path.join(HERE, "rtti_win.pkl")
-    if not os.path.exists(path):
-        return "<no rtti_win.pkl>"
-    with open(path, "rb") as f:
-        raw = pickle.load(f).get("vt", {}).get(vt_rva)
+    if not safe_cache.exists(path):
+        return "<no rtti_win>"
+    raw = safe_cache.load(path).get("vt", {}).get(vt_rva)
     # MSVC decorated name: ".?AVCResourceExchange@@"
     if raw and raw.startswith(".?AV"):
         return raw[4:].split("@@")[0]
@@ -160,14 +154,17 @@ def test_air_ownership():
 # ------------------------------------------------------------------- attach
 def test_attach_wiring():
     print("\n[attach]  hoi4_attach_air_wings no longer refuses")
-    import io as _io
-    src = _io.open(os.path.join(CALLING, "..", "mcp", "server.py"),
-                   encoding="utf-8").read()
-    blk = src.split('@tool("hoi4_attach_air_wings"', 1)[1].split("@tool(", 1)[0]
+    import inspect
+    mcp_dir = os.path.abspath(os.path.join(CALLING, "..", "mcp"))
+    if mcp_dir not in sys.path:
+        sys.path.insert(0, mcp_dir)
+    import server as _srv
+    blk = inspect.getsource(_srv._attach_air)
+    desc = next(t["description"] for t in _srv.TOOLS if t["name"] == "hoi4_attach_air_wings")
     check("the win32 refusal gate is gone", "win32 and not a.get" not in blk)
     check("it always routes to the verified attach path",
           "_air_ger_attach(a)" in blk)
-    check("the docstring no longer claims it refuses", "Refuses by default" not in blk)
+    check("the docstring no longer claims it refuses", "Refuses by default" not in desc)
 
 
 if __name__ == "__main__":

@@ -329,7 +329,10 @@ def test_python_integration():
     import statemeta
 
     st = _assets.summary()
-    check("assets.summary() 正常返回", st.get("recalc_cli") is True and st.get("assets_count") == 11, str(st))
+    has_cli = os.path.isfile(RECALC_EXE)
+    check("assets.summary() 正常返回",
+          st.get("recalc_cli") is has_cli and (not has_cli or st.get("assets_count") == 11),
+          str(st))
 
     # 验证 clear_memory_caches 生效
     statemeta.reset_cache()

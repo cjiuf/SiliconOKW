@@ -42,7 +42,9 @@ PROCESS_ALL = 0x1F0FFF
 MEM_COMMIT = 0x1000
 MEM_RESERVE = 0x2000
 MEM_RELEASE = 0x8000
-PAGE_EXECUTE_READWRITE = 0x40
+PAGE_READWRITE = 0x04
+PAGE_EXECUTE_READ = 0x20
+PAGE_SIZE = 0x1000
 
 CONTEXT_AMD64 = 0x00100000
 CONTEXT_FULL = CONTEXT_AMD64 | 0x1 | 0x2 | 0x8          # 0x10000B
@@ -53,13 +55,19 @@ OFF_FLAGS = 0x30
 OFF_RAX, OFF_RCX, OFF_RDX, OFF_R8, OFF_R9 = 0x78, 0x80, 0x88, 0xB8, 0xC0
 OFF_RSP, OFF_RIP = 0x98, 0xF8
 
-STUB_OFF, RES_OFF, FLAG_OFF = 0x00, 0x200, 0x210   # stub grew: stack args
-STACK_OFF, STACK_SIZE = 0x1000, 0x8000           # 32 KiB; stacks grow down, so the
-                                                 # stub at 0x00 can never be reached
+# 阶段 3 W^X 双页分离内存布局（全程零 PAGE_EXECUTE_READWRITE）：
+# - Page 0 [0x0000..0x0FFF]：纯代码页，仅存放 stub；写前切 RW，写完切 RX + 刷新 I-Cache。
+# - Page 1+ [0x1000..SCRATCH_SIZE)：纯数据/栈/载荷页，全程保持 PAGE_READWRITE（不可执行）。
+CODE_PAGE_SIZE = PAGE_SIZE                        # 0x1000 (4 KiB)
+STUB_OFF = 0x00                                   # Page 0 独占，绝不与 res/flag 共页
+DATA_OFF = CODE_PAGE_SIZE                         # 0x1000 数据区起点
+RES_OFF = DATA_OFF + 0x00                         # 0x1000 返回值槽（u64）
+FLAG_OFF = DATA_OFF + 0x10                        # 0x1010 完成标志槽（u32）
+STACK_OFF, STACK_SIZE = 0x2000, 0x8000            # 32 KiB 栈（向下生长至 0x2000，与 Page 0 隔一整页数据）
 #: control area cleared before every call; caller payload must live at or above this
-CONTROL_SIZE = STACK_OFF + STACK_SIZE + 0x200      # 0x9200
+CONTROL_SIZE = STACK_OFF + STACK_SIZE + 0x200     # 0xA200
 #: payload offsets handed out by :meth:`Injector.payload`
-PAYLOAD_OFF = CONTROL_SIZE                          # 0x9200
+PAYLOAD_OFF = CONTROL_SIZE                        # 0xA200
 SCRATCH_SIZE = 0x20000
 
 ARG_REGS = (OFF_RCX, OFF_RDX, OFF_R8, OFF_R9)
@@ -97,6 +105,8 @@ for _f, _a, _r in (
     (k32.SetThreadContext, (ctypes.c_void_p, ctypes.c_void_p), wt.BOOL),
     (k32.VirtualAllocEx, (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD, wt.DWORD),
      ctypes.c_void_p),
+    (k32.VirtualProtectEx, (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD,
+                            ctypes.POINTER(wt.DWORD)), wt.BOOL),
     (k32.VirtualFreeEx, (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD), wt.BOOL),
     (k32.WriteProcessMemory, (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
                               ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)), wt.BOOL),
@@ -291,13 +301,17 @@ class _Ctx:
 # record is only honoured when the pid AND the creation time still match.
 def _default_frozen_file():
     """将孤儿线程恢复日志放在用户可写目录，避免源码目录只读时静默失效。"""
-    override = os.environ.get("HOI4_STATE_DIR")
-    if override:
-        base = override
-    else:
-        local_app = os.environ.get("LOCALAPPDATA")
-        base = os.path.join(local_app, "SiliconOKW") if local_app else tempfile.gettempdir()
-    return os.path.join(base, "winject_frozen.json")
+    try:
+        import session_state as _ss
+        return _ss.state_path(_ss.WINJECT_FROZEN_NAME)
+    except Exception:
+        override = os.environ.get("HOI4_STATE_DIR")
+        if override:
+            base = override
+        else:
+            local_app = os.environ.get("LOCALAPPDATA")
+            base = os.path.join(local_app, "SiliconOKW") if local_app else tempfile.gettempdir()
+        return os.path.join(base, "winject_frozen.json")
 
 
 FROZEN_FILE = _default_frozen_file()
@@ -329,8 +343,12 @@ def _write_frozen(pid, tids):
         with open(tmp, "w") as fh:
             json.dump(data, fh)
         os.replace(tmp, FROZEN_FILE)
-    except Exception:
-        pass
+    except Exception as _e:
+        try:
+            import diag as _diag
+            _diag.warn("winject.write_frozen", _e, detail=str(FROZEN_FILE))
+        except Exception:
+            pass
 
 
 def clear_frozen():
@@ -396,6 +414,7 @@ class Injector:
         self.call_count = 0
         self.last_tid = None
         self.dirty = False
+        self._code_prot = None    # Page 0 当前页保护（PAGE_READWRITE / PAGE_EXECUTE_READ）
         self.frozen = []          # [(handle, tid)] still suspended by us
         self._extra_handles = []  # hijacked threads we resumed: keep the handle open
 
@@ -409,13 +428,31 @@ class Injector:
                 raise CallError("OpenProcess(%d) failed, GetLastError=%d" %
                                 (self.pid, ctypes.get_last_error()))
         if not self.scratch:
+            # 严格 W^X：整块 scratch 先以 PAGE_READWRITE 分配，绝不使用 PAGE_EXECUTE_READWRITE
             self.scratch = k32.VirtualAllocEx(self.h, None, SCRATCH_SIZE,
-                                              MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+                                              MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
             if not self.scratch:
                 err = ctypes.get_last_error()
                 k32.CloseHandle(self.h)
                 self.h = None
                 raise CallError("VirtualAllocEx failed, GetLastError=%d" % err)
+            self._code_prot = PAGE_READWRITE
+
+    def _set_code_protect(self, prot):
+        """切换 Page 0（stub 代码页）的页保护属性，严格维持 W^X（RW <-> RX）。"""
+        old = wt.DWORD(0)
+        _check(
+            k32.VirtualProtectEx(
+                self.h,
+                ctypes.c_void_p(self.scratch + STUB_OFF),
+                CODE_PAGE_SIZE,
+                prot,
+                ctypes.byref(old),
+            ),
+            "VirtualProtectEx(%#x, prot=%#x)" % (self.scratch + STUB_OFF, prot),
+        )
+        self._code_prot = prot
+        return old.value
 
     def detach(self):
         self._thaw()
@@ -427,9 +464,11 @@ class Injector:
             print("[clausewitz] injector dirty - thread left inside game code, "
                   "scratch page leaked on purpose", file=_s.stderr)
             self.scratch = None
+            self._code_prot = None
         elif self.scratch and self.h:
             k32.VirtualFreeEx(self.h, ctypes.c_void_p(self.scratch), 0, MEM_RELEASE)
             self.scratch = None
+            self._code_prot = None
         if self.h:
             k32.CloseHandle(self.h)
             self.h = None
@@ -556,9 +595,10 @@ class Injector:
                 self._thaw()
             raise
 
-        # Zero only the control area (stub / result / flag / stack).  Callers may
-        # park ABI payloads above CONTROL_SIZE and must not have them wiped.
-        buf = bytearray(CONTROL_SIZE)
+        # Zero only the data control area (res / flag / stack) on Page 1+; Page 0
+        # is written separately with explicit RW -> RX protection transitions (W^X).
+        # Callers may park ABI payloads above CONTROL_SIZE and must not have them wiped.
+        data_buf = bytearray(CONTROL_SIZE - DATA_OFF)
         # The stub loads the arguments itself.  Setting RCX/RDX/R8/R9 through
         # SetThreadContext is not reliable here: the values read back correctly
         # right after the call but the thread starts with them clobbered (RCX ==
@@ -604,12 +644,21 @@ class Injector:
                 # resumes with them destroyed (measured: render thread wedged and
                 # the whole process stopped responding).
                 + b"\xeb\xfe")                                       # jmp  $
-        assert len(code) < RES_OFF, "stub (%d bytes) would overwrite the result slot" % len(code)
-        buf[STUB_OFF:STUB_OFF + len(code)] = code
+        assert len(code) <= CODE_PAGE_SIZE, "stub (%d bytes) exceeds code page" % len(code)
+        code_page = bytearray(CODE_PAGE_SIZE)
+        code_page[:len(code)] = code
         STUB_LEN = len(code)
-        struct.pack_into("<Q", buf, rsp - sc, 0)
-        self._write(sc, buf)
-        k32.FlushInstructionCache(self.h, ctypes.c_void_p(sc), SCRATCH_SIZE)
+
+        # W^X 写入代码页：仅在写 stub 瞬间设为 RW，写完立即切 RX 并刷新指令缓存
+        if self._code_prot != PAGE_READWRITE:
+            self._set_code_protect(PAGE_READWRITE)
+        self._write(sc + STUB_OFF, code_page)
+        self._set_code_protect(PAGE_EXECUTE_READ)
+        k32.FlushInstructionCache(self.h, ctypes.c_void_p(sc + STUB_OFF), CODE_PAGE_SIZE)
+
+        # 数据/栈区（Page 1+）恒定为 PAGE_READWRITE，清零 res/flag/stack 绝不触碰 Page 0
+        struct.pack_into("<Q", data_buf, rsp - (sc + DATA_OFF), 0)
+        self._write(sc + DATA_OFF, data_buf)
         self._write(flag, b"\0\0\0\0")
         self._write(res, b"\0" * 8)
 

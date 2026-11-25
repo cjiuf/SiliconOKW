@@ -424,9 +424,12 @@ def load(game_dir: str | None = None):
     if sig in _MEM_CACHE:
         return _MEM_CACHE[sig]
     cpath = _cache_path()
+    import safe_cache
     try:
-        with open(cpath, "rb") as f:
-            cached = pickle.load(f)
+        if safe_cache.exists(cpath):
+            cached = safe_cache.load(cpath)
+        else:
+            cached = None
         if (isinstance(cached, dict)
                 and cached.get("version") == _CACHE_VERSION
                 and isinstance(cached.get("equipments"), dict)):
@@ -435,21 +438,22 @@ def load(game_dir: str | None = None):
             recalc_mod = (
                 cached.get("source") == "hoi4_recalc"
                 and bool(cached.get("mods"))
-                and isinstance(cached.get("sig"), tuple)
+                and isinstance(cached.get("sig"), (tuple, list))
                 and len(cached["sig"]) >= 1
                 and os.path.normcase(str(cached["sig"][0])) == os.path.normcase(str(gd))
             )
             if same_sig or recalc_mod:
                 _MEM_CACHE[sig] = cached
                 return cached
+    except (safe_cache.UnsafePickleError, safe_cache.CacheIntegrityError):
+        raise
     except Exception:
         pass
     data = _parse_all(gd)
     data["sig"] = sig
     _MEM_CACHE[sig] = data
     try:
-        with open(cpath, "wb") as f:
-            pickle.dump(data, f)
+        safe_cache.save(cpath, data, fmt="json")
     except Exception:
         pass
     return data

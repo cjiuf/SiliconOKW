@@ -1,7 +1,8 @@
 """Detect CPdxArrays and their element types inside an unknown object."""
 import struct
+import offsets_win as _OW
 
-ALLOC_OFF = 0x43591B8
+ALLOC_OFF = _OW.G_DEFAULT_ALLOC
 
 
 def find_arrays(p, obj, span=0x400, alloc=None):

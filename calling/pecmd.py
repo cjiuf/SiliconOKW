@@ -354,9 +354,9 @@ def build(force=False, verbose=False):
                 return out
         except Exception:
             pass
-    if os.path.exists(CACHE) and not force:
-        with open(CACHE, "rb") as fh:
-            return pickle.load(fh)
+    import safe_cache
+    if safe_cache.exists(CACHE) and not force:
+        return safe_cache.load(CACHE)
     import rtti_win
     m = rtti_win.build()
     wanted = {}
@@ -390,8 +390,7 @@ def build(force=False, verbose=False):
     calls = scan_calls(set(e["ctor"] for e in out.values()))
     for e in out.values():
         e["size"] = object_size(e["ctor"], e["fields"], calls.get(e["ctor"], []))
-    with open(CACHE, "wb") as fh:
-        pickle.dump(out, fh)
+    safe_cache.save(CACHE, out, fmt="json")
     if verbose:
         for k in sorted(out):
             e = out[k]

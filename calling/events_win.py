@@ -31,15 +31,17 @@ import struct
 import subprocess
 import sys
 
+import offsets_win as _OW
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-EVT_VTS = (0x2A16008, 0x2A16060)   # CEvent primary / secondary vtable
-WND_VTS = (0x2A20830, 0x2A20858, 0x2A20890, 0x2A208A8)  # CEventWindow's four
-WND_OFF_EVENT = 0x68               # CEventWindow -> CEvent*
-EVT_OFF_ID = 0x20                  # CEvent -> std::string id
-EVT_OFF_OPTS = 0x368               # CEvent -> CPdxArray<CEventOption*>
-EVT_OFF_COUNT = 0x374              # u32 option count (+0x370 is NOT the count)
+EVT_VTS = _OW.EVENT_EVT_VTS        # CEvent primary / secondary vtable
+WND_VTS = _OW.EVENT_WND_VTS        # CEventWindow's four vtables
+WND_OFF_EVENT = _OW.EVENT_WND_OFF_EVENT  # CEventWindow -> CEvent*
+EVT_OFF_ID = _OW.EVENT_OFF_ID            # CEvent -> std::string id
+EVT_OFF_OPTS = _OW.EVENT_OFF_OPTS        # CEvent -> CPdxArray<CEventOption*>
+EVT_OFF_COUNT = _OW.EVENT_OFF_COUNT      # u32 option count (+0x370 is NOT the count)
 
 _DB = None
 
@@ -63,13 +65,13 @@ def load_db(auto_build=True):
     global _DB
     if _DB is not None:
         return _DB
+    import safe_cache
     path = db_path()
-    if not os.path.exists(path):
+    if not safe_cache.exists(path):
         if not auto_build:
             raise RuntimeError("event db missing: run `python research/windows/wevdb.py build`")
         build_db()
-    with open(path, "rb") as _ef:
-        _DB = pickle.load(_ef)
+    _DB = safe_cache.load(path)
     return _DB
 
 
@@ -655,10 +657,10 @@ def _wnd_needles(g):
 #       +0x00 u32   record id            -> CSelectEventOptionCommand+0x28
 #       +0x08 CEvent*                    (its handle sits at CEvent+0x08)
 #       +0x10 pointer                    (country / scope of the event)
-GS_HANDLE_RVA = 0x33DD6B0
-GS_PENDING = 0x560
-GS_PENDING_N = 0x56C
-PEND_STRIDE = 0x38
+GS_HANDLE_RVA = _OW.G_GAMESTATE
+GS_PENDING = _OW.EVENT_GS_PENDING
+GS_PENDING_N = _OW.EVENT_GS_PENDING_N
+PEND_STRIDE = _OW.EVENT_PEND_STRIDE
 
 
 def pending(g, only_player=True):
@@ -722,11 +724,11 @@ def pending(g, only_player=True):
 
 
 # ------------------------------------------------------------- option select
-SEL_VT = 0x29B6CE0        # CSelectEventOptionCommand
-SEL_SIZE = 0xF0
-SEL_CTOR = 0xA590D0
-SEL_CANEXEC = 0x15D66C0
-SEL_EXECUTE = 0x15D53E0
+SEL_VT = _OW.EVENT_SEL_VT          # CSelectEventOptionCommand
+SEL_SIZE = _OW.EVENT_SEL_SIZE
+SEL_CTOR = _OW.EVENT_SEL_CTOR
+SEL_CANEXEC = _OW.EVENT_SEL_CANEXEC
+SEL_EXECUTE = _OW.EVENT_SEL_EXECUTE
 
 # --- 2026-11-19: the empty-scope bug -------------------------------------
 # `CSelectEventOptionCommand::Execute` ends with
@@ -745,9 +747,9 @@ SEL_EXECUTE = 0x15D53E0
 # before posting, then put the factory's original bytes back once the queue
 # has drained, so the command's destructor still owns exactly what it built
 # (no double free of the source scope's heap block).
-SEL_SCOPE_OFF = 0x38
-SEL_SCOPE_SIZE = 0xB0     # 0x57BEE0 writes up to +0xAC, so 0xB0 covers it
-SCOPE_VT = 0x2852168      # CEventScope vtable (RVA)
+SEL_SCOPE_OFF = _OW.EVENT_SEL_SCOPE_OFF
+SEL_SCOPE_SIZE = _OW.EVENT_SEL_SCOPE_SIZE
+SCOPE_VT = _OW.EVENT_SCOPE_VT      # CEventScope vtable (RVA)
 
 # 第二期数据驱动覆盖：从 calling/profile.py 读取事件虚表与选事件命令 RVA
 try:
@@ -761,8 +763,9 @@ try:
         SEL_SIZE = _prof.command_field("CSelectEventOptionCommand", "size", SEL_SIZE)
         SEL_CANEXEC = _prof.command_field("CSelectEventOptionCommand", "can_execute", SEL_CANEXEC)
         SEL_EXECUTE = _prof.command_field("CSelectEventOptionCommand", "execute", SEL_EXECUTE)
-except Exception:
-    pass
+except Exception as _e:
+    import diag as _diag
+    _diag.warn("events_win.apply_profile", _e)
 
 
 def scope_copy_in(g, cmd, src):
@@ -791,8 +794,9 @@ def scope_copy_out(g, cmd, orig):
     """Restore the factory-built inline scope (see scope_copy_in)."""
     try:
         g.p.write(cmd + SEL_SCOPE_OFF, orig)
-    except Exception:
-        pass
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("events_win.scope_copy_out", _e, detail="cmd=%#x" % int(cmd))
 
 
 def make_select_option(g, slot_id, event_ptr, index, option_name=""):
@@ -1024,35 +1028,47 @@ def select_option(g, index=None, event_id=None, slot=None, lang="zh", tag="GER",
                 out["ok"] = False
                 out["error"] = "CanExecute refused; nothing was sent"
             else:
-                import cmdwin
+                import win_pipeline as _wp
                 before = len(pending(g))
-                orig_scope = None
                 sc = row.get("scope")
-                if sc:
+
+                def _pre_scope(_g, _cmd):
+                    if not sc:
+                        out["scope_copied"] = False
+                        return None
                     src = int(sc, 16)
                     try:
-                        if src and g.p.u64(src) == g.p.base + SCOPE_VT:
-                            orig_scope = scope_copy_in(g, cmd, src)
+                        if src and _g.p.u64(src) == _g.p.base + SCOPE_VT:
+                            orig = scope_copy_in(_g, _cmd, src)
                             out["scope_copied"] = True
-                        else:
-                            out["scope_copied"] = False
-                            out["scope_warning"] = (
-                                "pending record's +0x10 is not a CEventScope; "
-                                "effects that need a scope will not run")
+                            return orig
+                        out["scope_copied"] = False
+                        out["scope_warning"] = (
+                            "pending record's +0x10 is not a CEventScope; "
+                            "effects that need a scope will not run")
+                        return None
                     except Exception as e:
                         out["scope_copied"] = False
                         out["scope_error"] = repr(e)
-                else:
-                    out["scope_copied"] = False
+                        return None
+
+                def _post_scope(_g, _cmd, orig_scope):
+                    if orig_scope is not None:
+                        scope_copy_out(_g, _cmd, orig_scope)
+
                 # Swap slot 0 deleting destructor to no-op BEFORE post_drained so
                 # the command queue does not destroy/free `cmd` (and double-free the
                 # copied CEventScope pointers) before scope_copy_out restores it.
-                cmdwin.attach_fake_vtable(g, cmd, SEL_VT)
-                try:
-                    out["posted"] = cmdwin.post_drained(g, cmd, seconds=2.5)
-                finally:
-                    if orig_scope is not None:
-                        scope_copy_out(g, cmd, orig_scope)
+                pipe = _wp.WinCommandPipeline(g, only_if_live=True)
+                pres = pipe.run(
+                    build_fn=lambda _g: cmd,
+                    vt_rva=SEL_VT,
+                    pre_post_hook=_pre_scope,
+                    post_cleanup_hook=_post_scope,
+                    drain=True,
+                    seconds=2.5,
+                )
+                out["posted"] = pres.extra.get("post_result", {"posted": pres.posted, "drained": pres.drained})
                 after = len(pending(g))
                 out["pending_before"] = before
                 out["pending_after"] = after

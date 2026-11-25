@@ -66,14 +66,16 @@ def build(force=False):
     if not dirs:
         return {"schema": SCHEMA, "lang": None, "count": 0, "keys": {}}
     lang_dir = dirs[0]
-    if not force and os.path.exists(CACHE):
+    import safe_cache
+    if not force and safe_cache.exists(CACHE):
         try:
-            with open(CACHE, "rb") as f:
-                cached = pickle.load(f)
+            cached = safe_cache.load(CACHE)
             if (isinstance(cached, dict) and cached.get("schema") == SCHEMA
                     and (cached.get("lang") == os.path.basename(lang_dir)
                          or (cached.get("source") == "hoi4_recalc" and cached.get("lang")))):
                 return cached
+        except (safe_cache.UnsafePickleError, safe_cache.CacheIntegrityError):
+            raise
         except Exception:
             pass
     keys = {}
@@ -84,8 +86,7 @@ def build(force=False):
     data = {"schema": SCHEMA, "lang": os.path.basename(lang_dir),
             "files": n, "count": len(keys), "keys": keys}
     try:
-        with open(CACHE, "wb") as f:
-            pickle.dump(data, f, protocol=4)
+        safe_cache.save(CACHE, data, fmt="json.gz")
     except OSError:
         pass
     return data

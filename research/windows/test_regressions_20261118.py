@@ -77,8 +77,14 @@ def test_focus_detail():
 # --------------------------------------------------------- research occupancy
 def test_research_occupancy():
     print("\n[research]  a busy slot is never reported as empty")
+    import inspect
     import game
-    src = open(os.path.join(CALLING, "game.py"), encoding="utf-8").read()
+    src = (
+        inspect.getsource(game.Game.fill_all_research_slots)
+        + inspect.getsource(game.Game.start_research)
+        + inspect.getsource(game.Game._load_tech_db)
+        + inspect.getsource(game.Game._light_alerts)
+    )
     check("fill_all_research_slots uses slot_busy",
           'empty = [s["slot"] for s in slots if not s.get("slot_busy")]' in src)
     # 2026-11-19: the expression was re-wrapped over two lines and now also
@@ -180,17 +186,28 @@ def test_create_template_cost():
     check("PE_CREATE_CANEXE still points at the verified slot",
           G.Game.PE_CREATE_CANEXE == 0x1C2DBF0)
 
-    src = open(os.path.join(CALLING, "game.py"), "r", encoding="utf-8").read()
+    import inspect
+    src = (
+        inspect.getsource(G.Game._pe_duplicate_template)
+        + inspect.getsource(G.Game.duplicate_division_template)
+    )
     check("the cost gate is reported as blocked_by=army_xp", 'blocked_by"] = "army_xp"' in src)
 
     tsrc = open(os.path.join(CALLING, "templedit.py"), "r", encoding="utf-8").read()
     check("template edit compares compacted slot lists",
           "_compact(" in tsrc and "ok:false on a perfectly good edit" in tsrc)
 
-    ssrc = open(os.path.join(os.path.dirname(HERE), "..", "mcp", "server.py"),
-                "r", encoding="utf-8").read()
+    _mcp_dir = os.path.abspath(os.path.join(os.path.dirname(HERE), "..", "mcp"))
+    if _mcp_dir not in sys.path:
+        sys.path.insert(0, _mcp_dir)
+    import server as _mcp_srv
+    _dup_src = inspect.getsource(_mcp_srv._dup_template)
+    _dup_props = next(
+        t["inputSchema"]["properties"] for t in _mcp_srv.TOOLS
+        if t["name"] == "hoi4_duplicate_division_template"
+    )
     check("duplicate_division_template exposes new_name",
-          '"new_name"' in ssrc and 'a.get("new_name")' in ssrc)
+          "new_name" in _dup_props and 'a.get("new_name")' in _dup_src)
 
 
 def test_event_option_scope():

@@ -46,11 +46,12 @@ def _candidates():
 
 
 def pickle_path():
+    import safe_cache
     for p in _candidates():
-        if p and os.path.isfile(p):
-            return p
+        if p and safe_cache.exists(p):
+            return safe_cache.resolve_path(p) or p
     raise RuntimeError(
-        "rtti_win.pkl not found (the MSVC RTTI map of hoi4.exe).\n"
+        "rtti_win cache (.json.gz/.json/.pkl) not found (the MSVC RTTI map of hoi4.exe).\n"
         "Generate it with:  python research/windows/rtti_win.py\n"
         "or point CLAUSEWITZ_RTTI_WIN at an existing dump.")
 
@@ -94,9 +95,9 @@ def build(path=None):
                 return _MAP
         except Exception:
             pass
+    import safe_cache
     p = path or pickle_path()
-    with open(p, "rb") as f:
-        raw = pickle.load(f)
+    raw = safe_cache.load(p)
     classes = {}
     for dec, vts in raw["classes"].items():
         classes.setdefault(plain_name(dec), []).extend(vts)

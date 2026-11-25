@@ -20,7 +20,7 @@ MEMORY (this file used to OOM-kill the machine):
 """
 from __future__ import annotations
 import bisect
-import os, pickle, re, struct, sys
+import os, re, struct, sys
 import time as _time
 from array import array
 import numpy as np
@@ -343,11 +343,13 @@ class ObjectIndex:
         不再因为 region 数量小幅变化而整份作废：恢复 `_seen_regions` 后由调用方
         对新增 region 执行毫秒级增量 `refresh()`；同 PID 读档/重开新局或超过 TTL 时重扫。
         """
-        if not self.cache_path or not os.path.exists(self.cache_path):
+        if not self.cache_path:
             return None
         try:
-            with open(self.cache_path, "rb") as f:
-                data = pickle.load(f)
+            import safe_cache
+            if not safe_cache.exists(self.cache_path):
+                return None
+            data = safe_cache.load(self.cache_path)
         except Exception:
             return None
         if not isinstance(data, dict):
@@ -404,7 +406,7 @@ class ObjectIndex:
         if not self.cache_path:
             return
         try:
-            tmp = self.cache_path + ".tmp"
+            import safe_cache
             base_int = int(self.p.base)
             sess_sig, clk_tick = self._game_session_sig()
             payload = {
@@ -424,11 +426,13 @@ class ObjectIndex:
                 "n": len(self._byvptr or {}),
                 "rel": self._to_rel(self._byvptr),
             }
-            with open(tmp, "wb") as f:
-                pickle.dump(payload, f, protocol=4)
-            os.replace(tmp, self.cache_path)
-        except Exception:
-            pass
+            safe_cache.save(self.cache_path, payload, fmt="json.gz")
+        except Exception as _e:
+            try:
+                import diag as _diag
+                _diag.warn("objindex.save_cache", _e, detail=self.cache_path)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------ scanning
     def _rss_mb(self):

@@ -38,8 +38,12 @@ ORDER_PARADROP = 4
 
 PARA_NAME_KEYS = ("paratroop", "parachut", "fallschirm", "伞", "空降")
 
+import session_state as _SS
+
 _TMPL_CACHE = {}           # (pid, template_ptr) -> bool
 _TMPL_NAME = {}            # (pid, template_ptr) -> str
+_SS.register_cache("divreserve._TMPL_CACHE", container=_TMPL_CACHE)
+_SS.register_cache("divreserve._TMPL_NAME", container=_TMPL_NAME)
 
 
 def _pid(g):
@@ -89,15 +93,24 @@ def order_type(g, div_ptr):
         return None
 
 
-def is_paradrop_division(g, div_ptr):
-    """(reserved, reason) for one division pointer."""
-    try:
-        tmpl = g.p.u64(div_ptr + CDIV_TEMPLATE)
-    except Exception:
-        tmpl = 0
+_UNSET = object()
+
+
+def is_paradrop_division(g, div_ptr, *, tmpl=None, order_type_val=_UNSET):
+    """(reserved, reason) for one division pointer.
+
+    可选关键字参数 `tmpl` 与 `order_type_val` 供批量扫描热路径复用已读快照，
+    省略时退回原有内存读取行为，保持 100% 向后兼容。
+    """
+    if tmpl is None:
+        try:
+            tmpl = g.p.u64(div_ptr + CDIV_TEMPLATE)
+        except Exception:
+            tmpl = 0
     if is_para_template(g, tmpl):
         return True, "template:%s" % template_name(g, tmpl)
-    if order_type(g, div_ptr) == ORDER_PARADROP:
+    ot = order_type(g, div_ptr) if order_type_val is _UNSET else order_type_val
+    if ot == ORDER_PARADROP:
         return True, "order:paradrop"
     return False, None
 

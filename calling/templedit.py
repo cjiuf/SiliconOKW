@@ -142,7 +142,17 @@ def subunit_name(p, entry):
         return ""
 
 
+import session_state as _SS
+
 _LIVE_POOL = {"pid": None, "by_name": {}}
+
+
+def _clear_live_pool():
+    _LIVE_POOL["pid"] = None
+    _LIVE_POOL["by_name"] = {}
+
+
+_SS.register_cache("templedit._LIVE_POOL", _clear_live_pool)
 
 
 _VALID_SUBUNIT_KEY_RE = None
@@ -156,8 +166,76 @@ def _is_valid_subunit_key(nm):
     return bool(nm and _VALID_SUBUNIT_KEY_RE.match(nm))
 
 
+def _batch_subunit_names_win(p, cands):
+    """Windows 下通过 `fastmem.read_batch` 批量解码候选 CSubUnitDefinition 名称（与 `subunit_name` 100% 等价）。"""
+    import fastmem as _fm
+    if not cands:
+        return []
+    # MSVC std::string 布局：+0x18 处 16 字节 SSO/指针，+0x28 处 8 字节 size（共 24 字节）
+    hdrs = _fm.read_batch(p, [(c + 0x18, 24) for c in cands])
+    if hdrs is None:
+        return [subunit_name(p, c) for c in cands]
+
+    names = [""] * len(cands)
+    long_reqs = []  # [(idx, ptr, length), ...]
+    for idx, raw in enumerate(hdrs):
+        if not raw or len(raw) < 24:
+            continue
+        n = struct.unpack_from("<Q", raw, 16)[0]
+        if not (0 < n < 64):
+            continue
+        if n <= 15:
+            names[idx] = raw[:n].decode("utf-8", "replace")
+        else:
+            q = struct.unpack_from("<Q", raw, 0)[0]
+            if q >= 0x10000:
+                long_reqs.append((idx, q, n))
+
+    if long_reqs:
+        long_raws = _fm.read_batch(p, [(q, n) for _, q, n in long_reqs])
+        if long_raws is not None:
+            for (idx, _q, n), sraw in zip(long_reqs, long_raws):
+                if sraw and len(sraw) == n:
+                    names[idx] = sraw.decode("utf-8", "replace")
+        else:
+            for idx, _q, _n in long_reqs:
+                names[idx] = subunit_name(p, cands[idx])
+    return names
+
+
 def _scan_pool_range(p, needle, lo=None, hi=None):
+    import sys as _sys
     found = {}
+    # 优先走 Rust 多核并行虚表扫描 + 批量名称解包（不可用时无缝回落纯 Python 路径）
+    if isinstance(needle, (bytes, bytearray)) and len(needle) == 8:
+        try:
+            import fastmem as _fm
+            raw_regs = _fm.enum_regions(p, writable=True, heap_only=True, merge_adjacent=True)
+            if raw_regs is not None:
+                sliced = []
+                for start, end, _t in raw_regs:
+                    a = start if lo is None else max(lo, start)
+                    b = end if hi is None else min(hi, end)
+                    if a < b:
+                        sliced.append({"start": a, "end": b})
+                if not sliced:
+                    return found
+                vt = struct.unpack("<Q", needle)[0]
+                hits = _fm.scan_vptrs_flat(p, sliced, [vt], max_hits=500000, chunk_mb=4)
+                if hits is not None:
+                    if not hits:
+                        return found
+                    if _sys.platform == "win32":
+                        names = _batch_subunit_names_win(p, hits)
+                    else:
+                        names = [subunit_name(p, c) for c in hits]
+                    for cand, nm in zip(hits, names):
+                        if _is_valid_subunit_key(nm) and nm not in found:
+                            found[nm] = cand
+                    return found
+        except Exception:
+            found.clear()
+
     for m in p.regions(writable=True):
         a = m["start"] if lo is None else max(lo, m["start"])
         b = m["end"] if hi is None else min(hi, m["end"])
@@ -195,6 +273,7 @@ def live_pool(g, max_span=0x10000000):
         自动升级为全可写堆扫描并按 PID 缓存，从此 `logistics_company` / `signal_company` /
         `marine` / `flame_tank` 等全部兵种 100% 在线可用！
     """
+    _SS.sync(g)
     p = g.p
     cached = _LIVE_POOL["by_name"]
     if _LIVE_POOL["pid"] == p.pid and cached:

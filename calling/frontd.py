@@ -35,10 +35,12 @@ import sys
 import threading
 import time
 
+import session_state as _SS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-BEAT_PATH = os.path.join(HERE, "front_worker.json")
-LOCK_PATH = os.path.join(HERE, "front_worker.lock")
-DIRECTIVES_PATH = os.path.join(HERE, "front_directives.json")
+BEAT_PATH = _SS.state_path(_SS.FRONT_WORKER_BEAT_NAME)
+LOCK_PATH = _SS.state_path(_SS.FRONT_WORKER_LOCK_NAME)
+DIRECTIVES_PATH = _SS.state_path(_SS.FRONT_DIRECTIVES_NAME)
 
 POLL = 5.0              # wall clock between heartbeat polls
 FIRST_DELAY = 4.0       # let the MCP server finish starting up
@@ -67,6 +69,7 @@ def _beat(**kw):
         _me.update(kw)
         _me["ts"] = time.time()
         snap = dict(_me)
+        _SS.ensure_parent(BEAT_PATH)
         tmp = "%s.%d.%d.tmp" % (BEAT_PATH, os.getpid(), threading.get_ident())
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -146,6 +149,7 @@ def directives():
 
 
 def _take_lock():
+    _SS.ensure_parent(LOCK_PATH)
     fh = open(LOCK_PATH, "a+b")
     try:
         if os.name == "nt":

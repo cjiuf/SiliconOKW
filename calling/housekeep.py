@@ -13,7 +13,10 @@ _LEADER_FAULTED = [False]
 
 # 2026-11-23 (复测 7 B-8): 进程级满槽/引擎拒绝州短 TTL 缓存（避免 64/42 等满槽州跨次调用反复撞墙）
 # key = (pid, tag, building, n_states) -> (timestamp, set[state_id])
+import session_state as _SS
+
 _REJECTED_STATE_CACHE = {}
+_SS.register_cache("housekeep._REJECTED_STATE_CACHE", container=_REJECTED_STATE_CACHE)
 _REJECTED_STATE_TTL_S = 120.0
 _MAX_QUEUED_SYNTH_REFINERY = 2
 _MAX_OWNED_SYNTH_REFINERY_WAR = 4

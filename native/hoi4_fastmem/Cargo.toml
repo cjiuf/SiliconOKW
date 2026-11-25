@@ -1,6 +1,6 @@
 [package]
 name = "hoi4_fastmem"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "基于 Win32 API + Rayon 多核并行的 HOI4 进程内存高速扫描与批量读取扩展"
 

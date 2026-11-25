@@ -16,30 +16,29 @@ The flags are taken verbatim from one of the game's own call sites: (1,1,0,0,0,0
 The command is POSTed to the queue (the player's path), so it works in multiplayer.
 """
 import struct, sys
+import offsets_win as _OW
 
-# PE 1.19.5.0: 0x13F6C30 is CMoveCommand::CMoveCommand(this, CArmy*, province, ...)
-# (disassembled 2026-11-16: writes vtable 0x2A2CDE0 at +0, then calls
-# CUnitMoveAction::CUnitMoveAction(0x12C1680) on this+0x28 with the stack args).
-# 0x253A600 is the Linux ELF address and executing it kills hoi4.exe (crash #10).
-MV_CTOR   = 0x13F6C30 if sys.platform == "win32" else 0x253A600
+# PE 1.19.5.0: CMoveCommand::CMoveCommand(this, CArmy*, province, ...)
+MV_CTOR   = _OW.ORDER_MV_CTOR
 # WARNING: vtable+0x50 (0x23E9A70) is NOT "CanExecute". It jumps to 0x23E8310, which is
 # a 140-line routine that touches game state and checks _ThreadForbidCount.
 # Calling it in a live game froze it. Validation is done by FIELD CHECKS only,
 # an invalid order is refused by the game anyway.
-MV_CANEXE = None
-MV_SIZE   = 0x88
 
-ACT_OFF        = 0x28
+MV_CANEXE = None
+MV_SIZE   = _OW.ORDER_MV_SIZE
+
+ACT_OFF        = _OW.ORDER_ACT_OFF
 ACT_TOKEN      = ACT_OFF + 0x08     # 0x3648
 # PE layout (dumped 2026-11-16 from a real construction): the handle sits at
 # cmd+0x38 (type) / +0x3C (id), i.e. ACT_OFF+0x10, not the Linux ACT_OFF+0x0C.
 ACT_DIV_HANDLE = (ACT_OFF + 0x10) if sys.platform == "win32" else (ACT_OFF + 0x0C)
 ACT_PATH       = ACT_OFF + 0x18     # data,cap,size,alloc
-UNIT_MOVE_TOKEN = 0x3648
+UNIT_MOVE_TOKEN = _OW.ORDER_UNIT_MOVE_TOKEN
 
-CARMY_HANDLE   = 0x18
-CARMY_PROVINCE = 0x1F0
-PROV_ID        = 0xA4
+CARMY_HANDLE   = _OW.ORDER_CARMY_HANDLE
+CARMY_PROVINCE = _OW.ORDER_CARMY_PROVINCE
+PROV_ID        = _OW.PROV_ID
 
 
 def build_move(g, division, province, flags=(1, 1, 0, 0, 0, 0, 1), path=None,
@@ -174,27 +173,39 @@ def province_of(g, division):
 
 def enemy_presence(g, enemy_tags):
     """province_id -> {'divisions':n,'org':x,'hp':y}: where the enemy divisions are."""
-    from game import _arr
+    import fastmem as _fm
+    from game import CO_ARMIES, _arr
     p = g.p
-    out = {}
+    div_ptrs = []
     for t in enemy_tags:
         try:
             c = g.country(t)
         except Exception:
             continue
-        for d in _arr(p, c.ptr, 0x290):
-            pr = p.u64(d + CARMY_PROVINCE)
-            if not pr:
-                continue
-            pid = p.i32(pr + PROV_ID)
-            e = out.setdefault(pid, {"divisions": 0, "org": 0.0, "hp": 0.0})
-            e["divisions"] += 1
-            e["org"] += p.i64(d + 0x428) / 1e5
-            e["hp"] += p.i64(d + 0x420) / 1e5
+        div_ptrs.extend(_arr(p, c.ptr, CO_ARMIES))
+    out = {}
+    if not div_ptrs:
+        return out
+    rows = _fm.read_divisions_batch(
+        p,
+        div_ptrs,
+        off_prov_ptr=CARMY_PROVINCE,
+        off_prov_id=PROV_ID,
+        off_org=0x428,
+        off_str=0x420,
+    )
+    for r in rows:
+        if r is None or r["prov"] is None:
+            continue
+        pid = r["prov"]
+        e = out.setdefault(pid, {"divisions": 0, "org": 0.0, "hp": 0.0})
+        e["divisions"] += 1
+        e["org"] += r["org_raw"] / 1e5
+        e["hp"] += r["str_raw"] / 1e5
     return out
 
-CARMY_PATH      = 0x200     # CPdxArray<i32>, the movement path
-CARMY_PATH_SIZE = 0x20C     # last element is the destination province
+CARMY_PATH      = _OW.ORDER_CARMY_PATH       # CPdxArray<i32>, the movement path
+CARMY_PATH_SIZE = _OW.ORDER_CARMY_PATH_SIZE  # last element is the destination province
 
 
 def movement(g, division):

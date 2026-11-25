@@ -623,7 +623,11 @@ def test_p3_small_fixes():
           rr["ok"] is False and rr.get("blocked_by") == "already_researched", rr)
 
     # 14. conveyors 读 PDXARRAY_SIZE (+0x0C) 而非 cap (+0x08)
-    src_game = open(os.path.join(CALLING, "game.py"), encoding="utf-8").read()
+    import inspect
+    src_game = (
+        inspect.getsource(game.Game.conveyors)
+        + inspect.getsource(game.Game.selectable_focuses)
+    )
     check("conveyors reads PDXARRAY_SIZE (+0x0C) for lines",
           "_arr_size = p.i32(conv + arr_off + O.PDXARRAY_SIZE)" in src_game)
     check("selectable_focuses deduplicates focuses to key list",

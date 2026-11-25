@@ -16,8 +16,10 @@ import os
 import sys
 import time
 
+import session_state as _SS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_PATH = os.path.join(HERE, "turn_state.json")
+STATE_PATH = _SS.state_path(_SS.TURN_STATE_NAME)
 
 MAX_ACTIONS_PER_TURN = 15
 MAX_INSPECT_QUERIES = 3
@@ -466,8 +468,9 @@ def _state_belongs_to_session(data, pid=None, proc_start=None, tag=None, date_ra
     return True
 
 
-def load_turn_state(path=STATE_PATH, pid=None, proc_start=None, tag=None, date_raw=None):
+def load_turn_state(path=None, pid=None, proc_start=None, tag=None, date_raw=None):
     """读取跨回合覆写式状态（memo、last_receipt、turn），自动隔离不同进程与存档。"""
+    path = STATE_PATH if path is None else path
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -476,23 +479,30 @@ def load_turn_state(path=STATE_PATH, pid=None, proc_start=None, tag=None, date_r
                                          tag=tag, date_raw=date_raw):
                 return data
             return _empty_turn_state()
-    except Exception:
-        pass
+    except FileNotFoundError:
+        return _empty_turn_state()
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("turnengine.load_turn_state", _e, detail=str(path))
     return _empty_turn_state()
 
 
-def reset_turn_state(path=STATE_PATH):
+def reset_turn_state(path=None):
     """清空持久化回合状态（测试收尾或手动新开一局时使用）。"""
+    path = STATE_PATH if path is None else path
     try:
         if os.path.exists(path):
             os.remove(path)
-    except Exception:
-        pass
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("turnengine.reset_turn_state", _e, detail=str(path))
     return _empty_turn_state()
 
 
-def save_turn_state(state, path=STATE_PATH):
+def save_turn_state(state, path=None):
     """原子覆写回合状态文件。"""
+    path = STATE_PATH if path is None else path
+    _SS.ensure_parent(path)
     tmp = path + ".tmp"
     clean = dict(state or {})
     memo = str(clean.get("memo") or "")
@@ -502,8 +512,9 @@ def save_turn_state(state, path=STATE_PATH):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(clean, f, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
-    except Exception:
-        pass
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("turnengine.save_turn_state", _e, detail=str(path))
 
 
 def _estimate_tokens(text):
@@ -547,9 +558,19 @@ def _window_guard(g):
 
 
 def _version_guard(g):
-    """确认当前进程的内存布局与 1.19.5 PE 偏移表匹配（防止 Steam 升 1.20 后误写）。"""
+    """确认当前进程的内存布局与 1.19.5 PE 精确指纹匹配（防止 Steam 升 1.20 后误写）。
+
+    优先调用 `win_pipeline.ensure_live_version(g, only_if_live=True)` 执行 PE
+    TimeDateStamp + SizeOfImage 精确核验（离线单测 FakeProc 自动放行），
+    通过后再校验 `G_GAMESTATE` 指针合理性作为双保险。
+    """
     if sys.platform != "win32":
         return True, None
+    try:
+        import win_pipeline as _wp
+        _wp.ensure_live_version(g, only_if_live=True)
+    except Exception as e:
+        return False, str(e)
     try:
         import offsets_win
         gs_rva = getattr(offsets_win, "G_GAMESTATE", None)
@@ -1168,12 +1189,9 @@ def _run_inspect_one(g, topic, q, tag):
     if topic == "air":
         return g.air_wings(tag, limit=30)
     if topic == "navy":
-        if sys.platform == "win32":
-            import navalops_win
-            fleets = navalops_win.naval_fleets(g, tag)
-            return {"count": len(fleets), "fleets": fleets[:20]}
-        import navalops
-        return navalops.fleets(g, tag)
+        import navalops_win
+        fleets = navalops_win.naval_fleets(g, tag)
+        return {"count": len(fleets), "fleets": fleets[:20]}
     if topic == "staff":
         # 严格只读参谋建议（绝不写档）；默认返回紧凑摘要（~1 KB，避免 8.5 KB 胖包撑爆 compact 上下文），
         # 需要原始全量结构时传 compact=False 或 full=True。
@@ -1504,8 +1522,9 @@ def _dispatch_action(g, op, args, tag):
             gate = _rd.check_unpause_gate(g, ensure_paused=True)
             if gate:
                 return gate
-        except Exception:
-            pass
+        except Exception as _e:
+            import diag as _diag
+            _diag.warn("turnengine.resume.unpause_gate", _e)
         import session
         return session.pause(g, paused=False)
     raise ValueError("unsupported op: %s" % op)

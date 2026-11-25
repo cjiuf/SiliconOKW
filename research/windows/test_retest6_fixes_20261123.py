@@ -220,6 +220,7 @@ def test_p0_1_war_escalation_and_gates():
 def test_p0_2_deploy_to_border_risk():
     print("\n=== 2. P0-2 deploy_to_border 边境抽空预警与保护 ===")
     import movemicro as mm
+    from micro import pathing as mm_path, front_state as mm_fs, directives as mm_dir
     import mapdata as md
     import unitorders as uo
     import diplomacy as dip
@@ -255,8 +256,8 @@ def test_p0_2_deploy_to_border_risk():
     origs = (
         md.province_owner_map, md.build_adjacency, md.load_definitions,
         uo.province_of, dr.filter_out, ss.front_budget,
-        mm._resolve, mm._border_provinces, mm._allowed_tags,
-        mm._load_front_state, mm._front_state, mm._alloc_errbuf, mm._run_move,
+        mm_path._resolve, mm_path._border_provinces, mm_path._allowed_tags,
+        mm_dir._load_front_state, mm_fs._front_state, mm_path._alloc_errbuf, mm_path._run_move,
         dip.country_relations, dip.war_escalation_forecast,
     )
     try:
@@ -267,13 +268,13 @@ def test_p0_2_deploy_to_border_risk():
         dr.filter_out = lambda g, ds: (ds, [])
         # BEL 两省总补给仅 4.0（2+2），12 个师明显超载 > 2*4
         ss.front_budget = lambda g, tgt, tag=None: {"per_province": {1: 2, 2: 2}}
-        mm._resolve = lambda g, d, og, t: list(div_pos.keys())
-        mm._border_provinces = lambda g, t: [1, 2] if t == "BEL" else [3, 4, 5]
-        mm._allowed_tags = lambda g: {"GER"}
-        mm._load_front_state = lambda: {}
-        mm._front_state = lambda g, t: {}
-        mm._alloc_errbuf = lambda g: 0
-        mm._run_move = lambda g, d, dst, flags, eb: (True, 0x999, [dst], None, None)
+        mm_path._resolve = lambda g, d, og, t: list(div_pos.keys())
+        mm_path._border_provinces = lambda g, t: [1, 2] if t == "BEL" else [3, 4, 5]
+        mm_path._allowed_tags = lambda g: {"GER"}
+        mm_dir._load_front_state = lambda: {}
+        mm_fs._front_state = lambda g, t: {}
+        mm_path._alloc_errbuf = lambda g: 0
+        mm_path._run_move = lambda g, d, dst, flags, eb: (True, 0x999, [dst], None, None)
         dip.country_relations = lambda g, t: {"tag": "GER", "faction": None, "subjects": [], "overlord": None, "at_war_with": []}
         dip.war_escalation_forecast = lambda g, tgt, me_tag=None: {"co_belligerents": ["FRA", "ENG"]}
 
@@ -300,8 +301,8 @@ def test_p0_2_deploy_to_border_risk():
     finally:
         (md.province_owner_map, md.build_adjacency, md.load_definitions,
          uo.province_of, dr.filter_out, ss.front_budget,
-         mm._resolve, mm._border_provinces, mm._allowed_tags,
-         mm._load_front_state, mm._front_state, mm._alloc_errbuf, mm._run_move,
+         mm_path._resolve, mm_path._border_provinces, mm_path._allowed_tags,
+         mm_dir._load_front_state, mm_fs._front_state, mm_path._alloc_errbuf, mm_path._run_move,
          dip.country_relations, dip.war_escalation_forecast) = origs
 
 
@@ -477,7 +478,11 @@ def test_p1_3_wait_for_signals_and_battle():
     print("\n=== 5. P1-3 wait_for(signals=[]) 与 wake_on_battle 默认关闭 ===")
     import turnloop as tl
 
-    srv_src = open(os.path.join(MCP_DIR, "server.py"), "r", encoding="utf-8").read()
+    import inspect
+    if MCP_DIR not in sys.path:
+        sys.path.insert(0, MCP_DIR)
+    import server as _mcp_srv
+    srv_src = inspect.getsource(_mcp_srv._wait_for)
     check("mcp/server.py 不再使用 falsy `a.get('signals') or turnloop.ALL_SIGNALS`",
           'a.get("signals") or turnloop.ALL_SIGNALS' not in srv_src
           and "turnloop.ALL_SIGNALS if _raw_sigs is None else tuple(_raw_sigs)" in srv_src)
@@ -704,7 +709,11 @@ def test_p2_2_and_p2_3():
     import movemicro as mm
     import session as sess
 
-    g_src = open(os.path.join(CALLING, "game.py"), "r", encoding="utf-8").read()
+    import inspect
+    g_src = (
+        inspect.getsource(gm.Game.plan_front)
+        + inspect.getsource(gm.Game.activate_army_battleplans)
+    )
     check("activate_army_battleplans 输出 armies_held_back_detail 含 divisions/provinces_sample/bordering",
           '"armies_held_back_detail": held_detail' in g_src
           and '"bordering": sorted(bordering)' in g_src)

@@ -8,55 +8,20 @@ rules the multiplayer session enforces.
 import struct
 import sys as _sys
 
-# 1.19.4.1 (f584) globals. These used to be the 1.19.2 addresses, which made
-# is_paused() read a random byte (0xF4 -> always "paused") and date_raw() never
-# self-heal. Keep them in one place; commands.py uses IDLER_GLOBAL = 0x459E908.
-G_IDLER      = 0x459E908
-G_GAMESTATE  = 0x459E9F0
-# The PE build is a different binary: reading the ELF offsets there fails outright
-# (`ReadProcessMemory ... GetLastError=299`) and that made hoi4_pause / hoi4_resume
-# throw on Windows.  Take the verified 1.19.5.0 values when they exist.
-if _sys.platform == "win32":
-    try:
-        import offsets_win as _OW
-        G_IDLER = getattr(_OW, "G_IDLER", G_IDLER)
-        G_GAMESTATE = getattr(_OW, "G_GAMESTATE", G_GAMESTATE)
-    except ImportError:
-        pass
-IDLER_COUNTRY_NAME = 0x620    # std::string, name of the played country
-IDLER_LOCAL_PLAYER = 0x7C0    # std::string, local player name
-SESSION_NET  = 0x58           # CSession+0x58 -> network object (CProxyServer)
-CLIENT_FIRST = 0x348          # first remote client name in the network object
-CLIENT_STRIDE = 0x700
-GS_MAJORS    = 0x328          # major powers (CCountry*)
-GS_COMBATS   = 0x268          # active land battles (CLandCombat*)
-# 2026-11-21 (P0-3): an integer at CCurrentGameState+0x468 that the tick loop
-# bumps while the game runs and that stops dead the moment it is paused.
-# Measured on pid 29864: 60779703 -> 60779709 over 3 s at speed 3, then identical
-# for 4.5 s with idler+0x6C1 = 1, then 60779715 -> 60779718 after the byte went
-# back to 0.  This is the pause verifier's primary witness -- no date parsing,
-# no game.log, no scan.
-GS_TICK      = 0x468
+import offsets_win as _OW
 
-IDLER_PAUSED = 0x6C1          # 1 = paused, 0 = running (the byte SPACE toggles).
-                              # +0x6C3 is a DIFFERENT flag: measured 0 both while
-                              # running and while paused on pid 29864 -- it does
-                              # not mirror +0x6C1.
-if _sys.platform == "win32":
-    try:
-        import profile as _prof
-        IDLER_PAUSED = _prof.anchor("IDLER_PAUSED", IDLER_PAUSED)
-    except Exception:
-        pass
-
-# CPauseGame: vtable 0x4460D70 (1.19.4.1), object size 0x50.
-# Verified by disassembling the constructors (0x21BAE00 default, 0x21BAE60 copy):
-#   +0x28 std::string _M_p  -> +0x38 (SSO buffer)      +0x30 _M_string_length
-#   +0x38 char[16] local buffer                        +0x48 u8 "pause"  +0x49 u8 flag
-# The old PAUSE_CTOR 0x2095400 was a 1.19.2 address and segfaulted on every call,
-# which is why hoi4_pause had to fall back to xdotool. No constructor call now.
-VT_PAUSE_GAME = 0x4460D70
-PAUSE_SIZE    = 0x50
+# PE 1.19.5.0 会话偏移统一来自 offsets_win 单一真源（已接入 profile.py overlay）
+G_IDLER = _OW.G_IDLER
+G_GAMESTATE = _OW.G_GAMESTATE
+IDLER_COUNTRY_NAME = _OW.SESSION_IDLER_COUNTRY_NAME   # std::string, name of the played country
+IDLER_LOCAL_PLAYER = _OW.SESSION_IDLER_LOCAL_PLAYER   # std::string, local player name
+SESSION_NET = _OW.SESSION_NET                         # CSession+0x58 -> network object (CProxyServer)
+CLIENT_FIRST = _OW.SESSION_CLIENT_FIRST               # first remote client name in the network object
+CLIENT_STRIDE = _OW.SESSION_CLIENT_STRIDE
+GS_MAJORS = _OW.GS_MAJORS                             # major powers (CCountry*)
+GS_COMBATS = _OW.GS_COMBATS                           # active land battles (CLandCombat*)
+GS_TICK = _OW.GS_CLOCK                                # CCurrentGameState+0x468 实时时钟计数器
+IDLER_PAUSED = _OW.SESSION_IDLER_PAUSED               # 1 = paused, 0 = running (SPACE 切换字节)
 
 
 def _std_string(p, addr):
@@ -238,6 +203,8 @@ def pause(g, paused=True, who=None):
     import time as _t
 
     if _sys.platform == "win32":
+        import win_pipeline as _wp
+        _wp.ensure_live_version(g, only_if_live=True)
         p = g.p
         idler = p.u64(p.base + G_IDLER)
         if not idler:
@@ -328,113 +295,6 @@ def pause(g, paused=True, who=None):
                            "loss) still holds the game")
         return True, ""
 
-    def running_proof():
-        """The clock moved -> really running (the pause flag alone lies at start)."""
-        before = g.date_raw()
-        _t.sleep(1.5)
-        return g.date_raw() != before
-
-    if is_paused(g) == want:
-        if want:
-            return True, "already paused"
-        if running_proof():
-            return True, "already running"
-    ok, err = _toggle(g, who, want)
-    if ok:
-        for _ in range(10):
-            _t.sleep(0.05)
-            if is_paused(g) == want:
-                if want or running_proof():
-                    return True, ""
-                break
-    # 1.19.4.1: CPauseGame(+0x48=1) pauses correctly, but +0x48=0 does NOT resume
-    # (the engine ignores the resume through this command; verified live 2026-11-04
-    # and again 2026-11-05 on a fresh campaign). Fall back to the player's own UI:
-    # the clock/pause icon in the top bar. Keyboard events never reach the SDL
-    # window under this headless X server, but mouse clicks do.
-    if not want:
-        for attempt in (_click_pause_button, _key_toggle):
-            if attempt():
-                for _ in range(14):
-                    _t.sleep(0.2)
-                    if running_proof():
-                        return True, ""
-    return False, err or ("pause command accepted but the state did not change")
-
-
-def _click_pause_button(display=None):
-    """Click the pause icon in the top bar (window-relative, right-aligned)."""
-    import os, subprocess
-    disp = display or os.environ.get("HOI4_DISPLAY") or ":1"
-    env = dict(os.environ, DISPLAY=disp)
-    try:
-        ids = subprocess.run(["xdotool", "search", "--name", "Hearts of Iron"],
-                             capture_output=True, text=True, env=env, timeout=10).stdout.split()
-        if not ids:
-            return False
-        wid = ids[-1]
-        geo = subprocess.run(["xdotool", "getwindowgeometry", "--shell", wid],
-                             capture_output=True, text=True, env=env, timeout=10).stdout
-        width = 1280
-        for line in geo.splitlines():
-            if line.startswith("WIDTH="):
-                width = int(line.split("=", 1)[1])
-        subprocess.run(["xdotool", "mousemove", "--window", wid, str(width - 290), "22"],
-                       timeout=10, env=env)
-        subprocess.run(["xdotool", "click", "1"], timeout=10, env=env)
-        return True
-    except Exception:
-        return False
-
-
-def _key_toggle(display=None):
-    """Press space in the game window (works where the command path does not)."""
-    import os, subprocess
-    disp = display or os.environ.get("HOI4_DISPLAY") or ":1"
-    try:
-        ids = subprocess.run(["xdotool", "search", "--name", "Hearts of Iron"],
-                             capture_output=True, text=True,
-                             env=dict(os.environ, DISPLAY=disp), timeout=10).stdout.split()
-        if ids:
-            subprocess.run(["xdotool", "windowactivate", ids[0]], timeout=10,
-                           env=dict(os.environ, DISPLAY=disp),
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["xdotool", "key", "space"], timeout=10,
-                       env=dict(os.environ, DISPLAY=disp),
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except Exception:
-        return False
-
-
-def _toggle(g, who=None, want=True):
-    """Build CPauseGame (0x50 bytes, vtable 0x4460D70) directly in memory.
-
-    Pure struct construction, no constructor call: the 1.19.2 ctor address
-    (0x2095400) is not a function in this binary.
-    """
-    import struct as _s
-    from commands import BASE_INIT
-    p = g.p
-    who = (who or (_idler_name(g) or "AI")).encode("utf-8", "replace")[:15]
-    own = g._inj is None
-    if own:
-        g.attach()
-    try:
-        cmd = g.malloc(PAUSE_SIZE)
-        blob = bytearray(PAUSE_SIZE)
-        _s.pack_into("<Q", blob, 0x00, p.base + VT_PAUSE_GAME)
-        for off, fmt, val in BASE_INIT:
-            _s.pack_into(fmt, blob, off, val)
-        _s.pack_into("<QQ", blob, 0x28, cmd + 0x38, len(who))
-        blob[0x38:0x38 + len(who)] = who
-        blob[0x48] = 1 if want else 0
-        blob[0x49] = 0
-        p.write(cmd, bytes(blob))
-        rv = g.cmd.post(cmd)
-        if not (rv & 0xFF):
-            return False, getattr(g.cmd, "last_error", "") or "CCommand::Run refused CPauseGame"
-        return True, ""
-    finally:
-        if own:
-            g.detach()
+    raise NotImplementedError(
+        "Linux CPauseGame/xdotool pause path has been removed; use Windows PE."
+    )

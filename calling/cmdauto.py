@@ -95,60 +95,12 @@ def execute_offsets(execute, end):
 
 
 def build(force=False):
-    if os.path.exists(CACHE) and not force:
-        with open(CACHE, "rb") as f:
-            return pickle.load(f)
-    import rtti
-    from elf import ELF
-    from funcs import FuncIndex
-    e = ELF(BIN); fi = FuncIndex(e)
-    m = rtti.build(); rel, _ = rtti.all_relocs(e)
-    out = {}
-    for k, vps in m["vtables"].items():
-        mm = re.fullmatch(r"\d+(C[A-Za-z0-9_]*Command)", k)
-        if not mm:
-            continue
-        vp = vps[0]
-        desc = rel.get(vp + 0xB8)
-        exe = rel.get(vp + 0x50)
-        tid = rel.get(vp + 0x60)
-        size = None
-        try:
-            b = e.data[e.sec(".text")["off"] + (tid - e.sec(".text")["addr"]):][:24] if tid else b""
-            mt = re.search(rb"\xb8(....)\x5d\xc3", b, re.S)
-            type_id = struct.unpack("<I", mt.group(1))[0] if mt else None
-        except Exception:
-            type_id = None
-        flds = []
-        if desc:
-            try:
-                flds = describe_fields(desc, fi.end(desc) or desc + 0x400)
-            except Exception:
-                flds = []
-        exec_offs = []
-        if exe:
-            try:
-                exec_offs = execute_offsets(exe, fi.end(exe) or exe + 0x600)
-            except Exception:
-                exec_offs = []
-        known = {o for o, _k, _n in flds}
-        for o, k in exec_offs:
-            if o not in known:
-                flds.append((o, k, 0))
-        flds.sort()
-        out[mm.group(1)] = {"vtable": vp, "execute": exe, "describe": desc,
-                            "type_id": type_id, "fields": flds}
-    # take the sizes from cmdscan
-    try:
-        from cmdscan import CommandScanner
-        sizes = CommandScanner().scan()
-        for k, v in out.items():
-            v["size"] = sizes.get(k, {}).get("size")
-    except Exception:
-        pass
-    with open(CACHE, "wb") as f:
-        pickle.dump(out, f)
-    return out
+    import safe_cache
+    if safe_cache.exists(CACHE) and not force:
+        return safe_cache.load(CACHE)
+    raise NotImplementedError(
+        "Linux ELF/objdump command scanner removed; use prebuilt cmdfields.json or PE recalc."
+    )
 
 
 if __name__ == "__main__":

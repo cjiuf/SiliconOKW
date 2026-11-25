@@ -94,12 +94,13 @@ def commands():
                 "the game still applies its own rules through CanExecute.\n\n"
                 "Addresses are relative to the image base. ARGS is how many arguments\n"
                 "the constructor takes; FIELDS lists offset:kind pairs on the object.")]
+    import safe_cache
     try:
-        ctors = pickle.load(open(os.path.join(CALLING, "cmdctors.pkl"), "rb"))
+        ctors = safe_cache.load(os.path.join(CALLING, "cmdctors.pkl"))
     except Exception as e:
-        return "\n".join(out) + "\n(could not read cmdctors.pkl: %s)\n" % e
+        return "\n".join(out) + "\n(could not read cmdctors cache: %s)\n" % e
     try:
-        meta = pickle.load(open(os.path.join(CALLING, "cmdfields.pkl"), "rb"))
+        meta = safe_cache.load(os.path.join(CALLING, "cmdfields.pkl"))
     except Exception:
         meta = {}
     out.append("%-46s %-13s %-13s %-5s %s\n%s"

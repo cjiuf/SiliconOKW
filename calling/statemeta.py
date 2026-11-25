@@ -38,15 +38,15 @@ def reset_cache():
 
 
 def _try_load_disk_cache():
-    """优先从 `hoi4_recalc assets` 生成的 `statemeta.pkl` 秒读（~1ms 替代 ~1s 冷扫）。"""
+    """优先从 `hoi4_recalc assets` 生成的缓存秒读（~1ms 替代 ~1s 冷扫）。"""
     if _CACHE["disk_tried"]:
         return
     _CACHE["disk_tried"] = True
-    if not os.path.isfile(CACHE_PATH):
+    import safe_cache
+    if not safe_cache.exists(CACHE_PATH):
         return
     try:
-        with open(CACHE_PATH, "rb") as fh:
-            d = pickle.load(fh)
+        d = safe_cache.load(CACHE_PATH)
         if (
             isinstance(d, dict)
             and d.get("schema") == SCHEMA
@@ -57,6 +57,8 @@ def _try_load_disk_cache():
             _CACHE["states"] = d["states"]
             _CACHE["categories"] = d["categories"]
             _CACHE["slot_buildings"] = set(d["slot_buildings"])
+    except (safe_cache.UnsafePickleError, safe_cache.CacheIntegrityError):
+        raise
     except Exception:
         pass
 

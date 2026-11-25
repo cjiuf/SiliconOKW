@@ -42,13 +42,14 @@ through cmdwin.post_drained().
 from __future__ import annotations
 
 import struct
+import offsets_win as _OW
 
-VT_AIRWING_MAIN = 0x29F7748
-VT_AIRWING_SECONDARY = 0x29F7780
-VT_AIRWINGPOOL = 0x29F77D8
+VT_AIRWING_MAIN = _OW.AIR_VT_WING_MAIN
+VT_AIRWING_SECONDARY = _OW.AIR_VT_WING_SECONDARY
+VT_AIRWINGPOOL = _OW.AIR_VT_WINGPOOL
 #: CStrategicAir + 0x90 = u32 CCountryTag id of the air force's owner
 #: (measured 2026-11-19: 44 groups, 44 distinct tag ids, ENG 36 wings / GER 15)
-SA_OWNER = 0x90
+SA_OWNER = _OW.AIR_SA_OWNER
 
 # --- CAirWing live state (measured 2026-11-16 on the 15 German wings) ------
 # +0x7C  i32  planes currently in the wing      (100 fighter / 76..80 bomber)
@@ -59,9 +60,9 @@ SA_OWNER = 0x90
 # +0xA4, i.e. the engine's own set-mission command already enables the
 # mission.  CStratAirEnableMissionCommand is therefore NOT needed for a
 # normal player order (verified: wing 2 +0xA0 0->1 and +0xA4 0->1).
-WING_PLANES = 0x7C
-WING_MISSION = 0xA0
-WING_MISSION_ON = 0xA4
+WING_PLANES = _OW.AIR_WING_PLANES
+WING_MISSION = _OW.AIR_WING_MISSION
+WING_MISSION_ON = _OW.AIR_WING_MISSION_ON
 
 MISSION_NAMES = {1: "air_superiority", 2: "cas", 4: "interception",
                  8: "strategic_bombing", 16: "naval_strike",
@@ -87,15 +88,15 @@ def wing_state(g, w):
         return {"planes": None, "mission": None, "mission_name": None,
                 "mission_on": None}
 
-VT_ATTACH = 0x2A97728
-SIZE_ATTACH = 0x48
-CANEXEC_ATTACH = 0x19D3920
-VT_SET_MISSION = 0x2A96BE8
-SIZE_SET_MISSION = 0x48
-CANEXEC_SET_MISSION = 0x19D4B30
-VT_ENABLE_MISSION = 0x2A96B28
-SIZE_ENABLE_MISSION = 0x60
-CANEXEC_ENABLE_MISSION = 0x19D4740
+VT_ATTACH = _OW.AIR_VT_ATTACH
+SIZE_ATTACH = _OW.AIR_SIZE_ATTACH
+CANEXEC_ATTACH = _OW.AIR_CANEXEC_ATTACH
+VT_SET_MISSION = _OW.AIR_VT_SET_MISSION
+SIZE_SET_MISSION = _OW.AIR_SIZE_SET_MISSION
+CANEXEC_SET_MISSION = _OW.AIR_CANEXEC_SET_MISSION
+VT_ENABLE_MISSION = _OW.AIR_VT_ENABLE_MISSION
+SIZE_ENABLE_MISSION = _OW.AIR_SIZE_ENABLE_MISSION
+CANEXEC_ENABLE_MISSION = _OW.AIR_CANEXEC_ENABLE_MISSION
 
 # 第二期数据驱动覆盖：优先从 calling/profile.py 读取空军虚表与命令地址
 try:
@@ -141,8 +142,12 @@ def wing_type(p, pool):
     return _msvc_str(p, d + 0x18)
 
 
+import session_state as _SS
+
 _AUTO_REFRESH_DONE = {}
 _AUTO_REFRESH_EMPTY_AT = {}
+_SS.register_cache("airops_win._AUTO_REFRESH_DONE", container=_AUTO_REFRESH_DONE)
+_SS.register_cache("airops_win._AUTO_REFRESH_EMPTY_AT", container=_AUTO_REFRESH_EMPTY_AT)
 
 
 def all_wings(g, refresh=False):

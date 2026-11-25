@@ -16,16 +16,15 @@ import os, re
 import config
 GAME = config.game_dir(required=False)
 
-AL_RANK = 0xE18                 # 1.19.5 (was 0xD7C)
+import offsets as _O
+AL_RANK = _O.LEADER_AL_RANK                 # 1.19.5 (was 0xD7C)
 RANKS = {0: "field_marshal", 1: "corps_commander", 2: "navy_leader"}
 import sys as _sys
-import offsets as _O
-CO_POLITICS = getattr(_O, "CO_POLITICS", 0xF68)
-PO_RULING_SUB = getattr(_O, "PO_RULING_SUB", None if _sys.platform == "win32" else 0xD0)
-PARTY_IDEOLOGY_TOKEN = 0x08
-PARTY_IDEO_GROUP = 0x18          # CPoliticalParty -> CIdeologyGroup* (PE)
-IDEO_GROUP_KEY = 0x18            # CIdeologyGroup -> std::string key (PE)
-FN_TOKEN_STR = 0x3471B20
+CO_POLITICS = _O.CO_POLITICS
+PO_RULING_SUB = _O.PO_RULING_SUB
+PARTY_IDEOLOGY_TOKEN = _O.LEADER_PARTY_IDEOLOGY_TOKEN
+PARTY_IDEO_GROUP = _O.LEADER_PARTY_IDEO_GROUP          # CPoliticalParty -> CIdeologyGroup* (PE)
+IDEO_GROUP_KEY = _O.LEADER_IDEO_GROUP_KEY              # CIdeologyGroup -> std::string key (PE)
 
 _chars_cache = {}
 

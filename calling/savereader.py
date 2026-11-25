@@ -30,12 +30,14 @@ def dump_tokens(g, path=TOKCACHE, limit=None):
         s = fieldmap.token_name(g, i)
         if s:
             tbl[i] = s
-    pickle.dump(tbl, open(path, "wb"))
+    import safe_cache
+    safe_cache.save(path, tbl, fmt="json.gz")
     return len(tbl)
 
 
 def load_tokens(path=TOKCACHE):
-    return pickle.load(open(path, "rb")) if os.path.exists(path) else {}
+    import safe_cache
+    return safe_cache.load(path) if safe_cache.exists(path) else {}
 
 
 class Reader:

@@ -50,26 +50,27 @@ the country index of the loser whose assets are being taken.
 import struct
 
 import cmdwin
+import offsets_win as _OW
 
-DONE_VT, DONE_CTOR, DONE_SIZE = 0x2AFC800, 0x1ED1D70, 0x30
-ENDTURN_VT, ENDTURN_SIZE = 0x2AFC8C0, 0x38
-PASS_VT, PASS_CTOR, PASS_SIZE = 0x2AFC740, 0x1ED1E50, 0x30
-CANEXEC_DONE = 0x1ED23A0
-CANEXEC_PASS = 0x1ED2A00
+DONE_VT, DONE_CTOR, DONE_SIZE = _OW.PEACE_DONE_VT, _OW.PEACE_DONE_CTOR, _OW.PEACE_DONE_SIZE
+ENDTURN_VT, ENDTURN_SIZE = _OW.PEACE_ENDTURN_VT, _OW.PEACE_ENDTURN_SIZE
+PASS_VT, PASS_CTOR, PASS_SIZE = _OW.PEACE_PASS_VT, _OW.PEACE_PASS_CTOR, _OW.PEACE_PASS_SIZE
+CANEXEC_DONE = _OW.PEACE_CANEXEC_DONE
+CANEXEC_PASS = _OW.PEACE_CANEXEC_PASS
 
-CONF_TURN_MAP = 0x1E8
-CONF_BID_MAP = 0x1C8
-VT_TURN = 0x29EAEC0
-TURN_SIZE = 0x40
-FN_INSTALL_TURN = 0xEB5390
-FN_PUSH_BACK = 0x1403371D0
+CONF_TURN_MAP = _OW.PEACE_CONF_TURN_MAP
+CONF_BID_MAP = _OW.PEACE_CONF_BID_MAP
+VT_TURN = _OW.PEACE_VT_TURN
+TURN_SIZE = _OW.PEACE_TURN_SIZE
+FN_INSTALL_TURN = _OW.PEACE_FN_INSTALL_TURN
+FN_PUSH_BACK = _OW.PEACE_FN_PUSH_BACK
 
-BUILD_CHANGE_GOV = 0x14F26C0
-BUILD_LIBERATE = 0x14F2870
-BUILD_PUPPET = 0x14F3070
-BUILD_NAVY = 0x14F3560
-BUILD_STATES = 0x14F3950
-BUILD_ALL = 0x14F2680
+BUILD_CHANGE_GOV = _OW.PEACE_BUILD_CHANGE_GOV
+BUILD_LIBERATE = _OW.PEACE_BUILD_LIBERATE
+BUILD_PUPPET = _OW.PEACE_BUILD_PUPPET
+BUILD_NAVY = _OW.PEACE_BUILD_NAVY
+BUILD_STATES = _OW.PEACE_BUILD_STATES
+BUILD_ALL = _OW.PEACE_BUILD_ALL
 
 BUILDERS = {
     'state': BUILD_STATES,
@@ -82,7 +83,7 @@ BUILDERS = {
 ACTION_SIZE = {'state': 0x50, 'puppet': 0x60}
 
 
-VT_PEACE_CONFERENCE = 0x29CDA28
+VT_PEACE_CONFERENCE = _OW.PEACE_VT_CONFERENCE
 
 
 def conference(g):
@@ -95,12 +96,15 @@ def conference(g):
     )
 
 
-GET_CONF = 0x1ED1EE0
+GET_CONF = _OW.PEACE_GET_CONF
 # 2026-11-23 (复测 7 B-9): 反汇编 GET_CONF 0x1ED1EE0 -> 0x1E05F0 / 0xC128A0 / 0x1ED1FF9 实证：
 # CCurrentGameState+0x4E0 为和平会议容器，+0x14 为活跃和会计数 (i32)，+0x08 为指针数组 data*，
 # data[0] 即当前活跃 CPeaceConference*。零注入纯只读 O(1)，可安全放入 turnloop 轮询。
-GS_PEACE_CONF = 0x4E0
+GS_PEACE_CONF = _OW.PEACE_GS_CONF
+import session_state as _SS
+
 _LAST_CONFERENCE = {}
+_SS.register_cache("peacewin._LAST_CONFERENCE", container=_LAST_CONFERENCE)
 
 
 def live_conference_readonly(g):
@@ -204,7 +208,7 @@ def summary(g):
     return cur
 
 
-EXEC = {"done": 0x1ED22E0, "endturn": 0x1ED2300, "pass": 0x1ED2350}
+EXEC = {"done": _OW.PEACE_EXEC_DONE, "endturn": _OW.PEACE_EXEC_ENDTURN, "pass": _OW.PEACE_EXEC_PASS}
 
 
 def _apply_profile():
@@ -235,8 +239,9 @@ def _apply_profile():
         EXEC["done"] = _prof.anchor("PEACE_EXEC_DONE", EXEC["done"])
         EXEC["endturn"] = _prof.anchor("PEACE_EXEC_ENDTURN", EXEC["endturn"])
         EXEC["pass"] = _prof.anchor("PEACE_EXEC_PASS", EXEC["pass"])
-    except Exception:
-        pass
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("peacewin.apply_profile", _e)
 
 
 _apply_profile()
@@ -323,8 +328,9 @@ def _post(g, vt, ctor, size, idx):
     finally:
         try:
             cmdwin.free(g, buf)
-        except Exception:
-            pass
+        except Exception as _fe:
+            import diag as _diag
+            _diag.warn("peacewin.post.free_buf", _fe)
     cmdwin.attach_fake_vtable(g, cmd, vt)
     if not cmdwin.post(g, cmd):
         return False, "Post refused", cmd
@@ -466,8 +472,8 @@ def build_actions(g, loser_idx, kind='state', winner_idx=None):
 #       +0x48 = r9, +0x50 = arg5 ; the "whole fleet" call is r9 = 0,
 #       arg5 = 0x186A0 (100000 = 100%, see 0x14F3849..0x14F385E)
 # --------------------------------------------------------------------------
-PUPPET_CTOR = 0x15B4530
-NAVY_CTOR = 0x15B4600
+PUPPET_CTOR = _OW.PEACE_PUPPET_CTOR
+NAVY_CTOR = _OW.PEACE_NAVY_CTOR
 ACTION_SIZE_CTOR = {'puppet': 0x60, 'navy': 0x58}
 
 
@@ -548,7 +554,7 @@ def map_size(g, conf, off):
 # happen in the engine's own end-of-round/apply path; installing the turn is
 # therefore the whole job on our side.
 # --------------------------------------------------------------------------
-CONF_SUBMIT_MAP = 0x1F8
+CONF_SUBMIT_MAP = _OW.PEACE_CONF_SUBMIT_MAP
 
 
 def _map_find(p, conf, off, key):

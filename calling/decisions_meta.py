@@ -148,8 +148,8 @@ def build(force=False):
                     n += 1
     data = {"schema": SCHEMA, "files": n, "count": len(out), "decisions": out}
     try:
-        with open(CACHE, "wb") as f:
-            pickle.dump(data, f, protocol=4)
+        import safe_cache
+        safe_cache.save(CACHE, data, fmt="json")
     except OSError:
         pass
     return data
@@ -160,12 +160,14 @@ _MEM = None
 
 def load(force=False):
     global _MEM
-    if not force and _MEM is None and os.path.exists(CACHE):
+    import safe_cache
+    if not force and _MEM is None and safe_cache.exists(CACHE):
         try:
-            with open(CACHE, "rb") as f:
-                cached = pickle.load(f)
+            cached = safe_cache.load(CACHE)
             if isinstance(cached, dict) and cached.get("schema") == SCHEMA:
                 _MEM = cached
+        except (safe_cache.UnsafePickleError, safe_cache.CacheIntegrityError):
+            raise
         except Exception:
             _MEM = None
     if force or _MEM is None:

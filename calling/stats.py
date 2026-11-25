@@ -32,36 +32,12 @@ def snake(cls):
 
 def build(force=False):
     """{stat_name: (function_vaddr, class)}"""
-    if os.path.exists(CACHE) and not force:
-        with open(CACHE, "rb") as f:
-            return pickle.load(f)
-    import rtti
-    from elf import ELF
-    from funcs import FuncIndex
-    e = ELF(BIN); fi = FuncIndex(e)
-    m = rtti.build(); rel, _ = rtti.all_relocs(e)
-    out = {}
-    for k, vps in m["vtables"].items():
-        mm = re.fullmatch(r"\d+(C[A-Za-z0-9_]*Trigger)", k)
-        if not mm:
-            continue
-        cls = mm.group(1)
-        vp = vps[0]
-        for slot in (0xC0, 0xB8, 0x50):
-            f = rel.get(vp + slot)
-            if not f:
-                continue
-            try:
-                lines = _dis(f, fi.end(f) or f + 0x100)
-            except Exception:
-                continue
-            txt = " ; ".join(lines[:8])
-            if "lea    rdi,[rsi+0x8]" in txt and ("call   %x" % GET_COUNTRY) in txt:
-                out[snake(cls)] = (f, cls)
-                break
-    with open(CACHE, "wb") as f:
-        pickle.dump(out, f)
-    return out
+    import safe_cache
+    if safe_cache.exists(CACHE) and not force:
+        return safe_cache.load(CACHE)
+    raise NotImplementedError(
+        "Linux ELF/objdump trigger scanner removed; use prebuilt stats.json."
+    )
 
 
 if __name__ == "__main__":

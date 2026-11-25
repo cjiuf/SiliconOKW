@@ -45,8 +45,8 @@ def _offset_or_die(name, linux_value):
 G_GAMESTATE = _offset_or_die("G_GAMESTATE", 0x459E9F0)
 GS_COMBATS = _offset_or_die("GS_COMBATS", 0x268)
 
-LC_SIDE_A, LC_SIDE_B = 0x28, 0x30
-LC_PROVINCE, LC_TERRAIN = 0x38, 0x48
+LC_SIDE_A, LC_SIDE_B = O.COMBAT_LC_SIDE_A, O.COMBAT_LC_SIDE_B
+LC_PROVINCE, LC_TERRAIN = O.COMBAT_LC_PROVINCE, O.COMBAT_LC_TERRAIN
 
 # ---------------------------------------------------------------- 2026-11-20
 # P0 #2 ("hoi4_combat_report.count is always 0").  The battle CONTAINER was
@@ -84,11 +84,14 @@ else:
     CB_ALL = None
     DAMAGE_RATES = True
 
-CB_GROUND_STR, CB_GROUND_ORG = 0x158, 0x160
-CB_AIR_STR, CB_AIR_ORG = 0x148, 0x150
+CB_GROUND_STR, CB_GROUND_ORG = O.COMBAT_CB_GROUND_STR, O.COMBAT_CB_GROUND_ORG
+CB_AIR_STR, CB_AIR_ORG = O.COMBAT_CB_AIR_STR, O.COMBAT_CB_AIR_ORG
 
-A_HANDLE, A_STR, A_ORG, A_XP, A_OOS, A_TAG, A_MANPOWER = 0x18, 0x420, 0x428, 0x430, 0x498, 0x1D8, 0x3D0
-PROV_ID = 0xA4
+A_HANDLE, A_STR, A_ORG, A_XP, A_OOS, A_TAG, A_MANPOWER = (
+    O.COMBAT_A_HANDLE, O.COMBAT_A_STR, O.COMBAT_A_ORG, O.COMBAT_A_XP,
+    O.COMBAT_A_OOS, O.COMBAT_A_TAG, O.COMBAT_A_MANPOWER,
+)
+PROV_ID = O.PROV_ID
 
 
 def _fx(p, a):
@@ -262,10 +265,14 @@ def verdict(us, them, margin=1.25, our_rate=None, their_rate=None, samples=None,
     }
 
 
+import session_state as _SS
+
 _HIST = {}
 # Baseline captured by activity() for the OTHER reader in the same request, so
 # activity + active_division_combats do not consume each other's delta.
 _LAST_PREV = {}
+_SS.register_cache("combat._HIST", container=_HIST)
+_SS.register_cache("combat._LAST_PREV", container=_LAST_PREV)
 
 
 def _scan(g, tags=None):
@@ -364,13 +371,15 @@ def report(g):
     return [{k: v for k, v in c.items() if not k.startswith("_")} for c in combats(g)]
 
 
-A_TMPL = 0x3B8
+A_TMPL = O.COMBAT_A_TMPL
 # 2026-11-19: A_STR_DAMAGE / A_ORG_DAMAGE are DEAD on the PE build -- they are
 # the Linux offsets of the accumulated damage fields and read 0.0 on every
 # division (verified on a battle where `killed` was moving 104 -> 157).  Kept
 # only so nobody re-derives them; the live signal is A_KILLED plus str/org
 # deltas, see _scan()/activity() above.
-A_STR_DAMAGE, A_ORG_DAMAGE, A_KILLED = 0x448, 0x450, 0x678
+A_STR_DAMAGE, A_ORG_DAMAGE, A_KILLED = (
+    O.COMBAT_A_STR_DAMAGE, O.COMBAT_A_ORG_DAMAGE, O.COMBAT_A_KILLED,
+)
 
 
 def active_division_combats(g, tags=None, limit=80):
@@ -427,7 +436,7 @@ def active_division_combats(g, tags=None, limit=80):
             "divisions": out[:limit]}
 
 
-ATTACK_PROV = 0x1F0     # CArmy -> the CProvince it is in
+ATTACK_PROV = O.COMBAT_ATTACK_PROV     # CArmy -> the CProvince it is in
 
 
 def we_attack(g, rec):
@@ -454,14 +463,14 @@ def neighbours_of(g, province_id, enemy_tags):
     return sorted(out)
 
 
-CO_ARMIES_IN_COMBAT = 0x12F0     # CCountry (from the serializer: num_armies_in_combat)
+CO_ARMIES_IN_COMBAT = O.COMBAT_CO_ARMIES_IN_COMBAT     # CCountry (from the serializer: num_armies_in_combat)
 
 
 CO_DIPLOMACY_STATUS = _offset_or_die("CO_DIPLOMACY_STATUS", 0xF60)  # PE 0xF88
-DS_WAR_RELATIONS    = 0x20       # CPdxArray<CWarRelation*>
-WR_FIRST, WR_SECOND = 0x0C, 0x10  # country ids of the two sides
-WR_INSTIGATOR       = 0x198       # first_was_instigator (bool)
-WR_THREAT           = 0x190
+DS_WAR_RELATIONS    = O.COMBAT_DS_WAR_RELATIONS                     # CPdxArray<CWarRelation*>
+WR_FIRST, WR_SECOND = O.COMBAT_WR_FIRST, O.COMBAT_WR_SECOND         # country ids of the two sides
+WR_INSTIGATOR       = O.COMBAT_WR_INSTIGATOR                        # first_was_instigator (bool)
+WR_THREAT           = O.COMBAT_WR_THREAT
 
 
 def _country_id_map(g):
@@ -480,11 +489,12 @@ def _country_id_map(g):
 # Verified live on both wars present in a 1936 save: an Italy/Ethiopia war read
 # (16, 44) and a fresh German/Dominican war read (1, 73), with the second copy of
 # the pair at +0x78/+0x7C agreeing on both.
-WR_WIN_VTABLE = 0x29DCC08
-WR_WIN_A, WR_WIN_B = 0x78, 0x7C
-WR_WIN_A2, WR_WIN_B2 = 0x10, 0x14
+WR_WIN_VTABLE = O.COMBAT_WR_WIN_VTABLE
+WR_WIN_A, WR_WIN_B = O.COMBAT_WR_WIN_A, O.COMBAT_WR_WIN_B
+WR_WIN_A2, WR_WIN_B2 = O.COMBAT_WR_WIN_A2, O.COMBAT_WR_WIN_B2
 
 _WR_CACHE = {}
+_SS.register_cache("combat._WR_CACHE", container=_WR_CACHE)
 
 
 def _war_relation_ptrs(g):

@@ -97,9 +97,9 @@ def _build_rivers_raw(game=GAME, force=False, min_ratio=0.30, min_pixels=6):
     and a false positive cancels attacks for no reason, so the threshold is
     deliberately conservative.
     """
-    if not force and os.path.exists(RIVER_CACHE):
-        with open(RIVER_CACHE, "rb") as f:
-            return pickle.load(f)
+    import safe_cache
+    if not force and safe_cache.exists(RIVER_CACHE):
+        return safe_cache.load(RIVER_CACHE)
     col2id, _ = load_definitions(game)
     img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
     key = (img[:, :, 0].astype(np.uint32) << 16) | (img[:, :, 1].astype(np.uint32) << 8) | img[:, :, 2]
@@ -142,8 +142,7 @@ def _build_rivers_raw(game=GAME, force=False, min_ratio=0.30, min_pixels=6):
         r = rivers.get(k, 0)
         if r >= min_pixels and r / n >= min_ratio:
             out[k] = "large" if bigs.get(k, 0) * 2 >= r else "small"
-    with open(RIVER_CACHE, "wb") as f:
-        pickle.dump(out, f)
+    safe_cache.save(RIVER_CACHE, out, fmt="json")
     return out
 
 
@@ -160,9 +159,9 @@ def _load_state_provinces_raw(game=GAME, force=False):
     province id. Treating it as a province meant the enemy mainland was never
     found and every enemy unit looked pocketed.
     """
-    if not force and os.path.exists(STATE_CACHE):
-        with open(STATE_CACHE, "rb") as f:
-            return pickle.load(f)
+    import safe_cache
+    if not force and safe_cache.exists(STATE_CACHE):
+        return safe_cache.load(STATE_CACHE)
     import re
     d = os.path.join(game, "history", "states")
     st2p, p2st = {}, {}
@@ -185,8 +184,7 @@ def _load_state_provinces_raw(game=GAME, force=False):
         for q in provs:
             p2st[q] = sid
     out = (st2p, p2st)
-    with open(STATE_CACHE, "wb") as f:
-        pickle.dump(out, f)
+    safe_cache.save(STATE_CACHE, out, fmt="json")
     return out
 
 
@@ -214,9 +212,9 @@ def _read_bmp_rgb(path):
 
 def _build_adjacency_raw(game=GAME, force=False):
     """{province_id: set(neighbour_ids)}: cached to disk."""
-    if not force and os.path.exists(CACHE):
-        with open(CACHE, "rb") as f:
-            return pickle.load(f)
+    import safe_cache
+    if not force and safe_cache.exists(CACHE):
+        return safe_cache.load(CACHE)
     col2id, _ = load_definitions(game)
     img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
     key = (img[:, :, 0].astype(np.uint32) << 16) | (img[:, :, 1].astype(np.uint32) << 8) | img[:, :, 2]
@@ -239,8 +237,7 @@ def _build_adjacency_raw(game=GAME, force=False):
     add(ids[:-1, :], ids[1:, :])
     # the map wraps east-west
     add(ids[:, -1:], ids[:, :1])
-    with open(CACHE, "wb") as f:
-        pickle.dump(adj, f)
+    safe_cache.save(CACHE, adj, fmt="json")
     return adj
 
 
@@ -267,51 +264,113 @@ def province_owner_map(g, with_ptrs=False):
     state, which is ~1,100 reads from the countries' state lists. Unless
     `with_ptrs` is asked for, no province object is read at all.
     """
+    import fastmem as _fm
+    import offsets as _O
     from game import _arr
     p = g.p
     # g.country(tag) re-reads the country array on every call, 440 times for
     # 440 countries. Fetch it once and walk it directly.
     g._load_tags()
     ptrs = g.country_ptrs()
-    st2tag = {}
+    valid_countries = []
     for tid, tag in enumerate(g._tags):
         if not tag or tag == "---":
             continue
         try:
             ci = g._tag2idx[tid]
-            if not (0 <= ci < len(ptrs)):
-                continue
-            for s in _arr(p, ptrs[ci], CO_STATES):
-                st2tag.setdefault(s, tag)
+            if 0 <= ci < len(ptrs):
+                valid_countries.append((tag, ptrs[ci]))
         except Exception:
             continue
+
+    st2tag = {}
+    hdr_reqs = [(cptr + CO_STATES, 16) for _, cptr in valid_countries]
+    hdr_batch = _fm.read_batch(p, hdr_reqs) if hdr_reqs else None
+    if hdr_batch is not None:
+        pdx_data = getattr(_O, "PDXARRAY_DATA", 0)
+        pdx_size = getattr(_O, "PDXARRAY_SIZE", 0x0C)
+        min_hdr = max(pdx_data + 8, pdx_size + 4)
+        arr_reqs = []
+        arr_tags = []
+        for (tag, _cptr), raw in zip(valid_countries, hdr_batch):
+            if not raw or len(raw) < min_hdr:
+                continue
+            d = struct.unpack_from("<Q", raw, pdx_data)[0]
+            n = struct.unpack_from("<i", raw, pdx_size)[0]
+            if d and 0 < n <= 100000 and d >= 0x10000:
+                arr_reqs.append((d, 8 * n))
+                arr_tags.append((tag, n))
+        arr_batch = _fm.read_batch(p, arr_reqs) if arr_reqs else []
+        for (tag, n), raw in zip(arr_tags, arr_batch or ()):
+            if not raw or len(raw) < 8 * n:
+                continue
+            for s in struct.unpack("<%dQ" % n, raw):
+                st2tag.setdefault(s, tag)
+    else:
+        for tag, cptr in valid_countries:
+            try:
+                for s in _arr(p, cptr, CO_STATES):
+                    st2tag.setdefault(s, tag)
+            except Exception:
+                continue
+
     st2p, _ = load_state_provinces()
     byid = {}
-    for sptr, tag in st2tag.items():
-        try:
-            sid = p.i32(sptr + STATE_ID)
-        except Exception:
-            continue
-        for q in st2p.get(sid, ()):
-            byid[q] = tag
+    st_items = list(st2tag.items())
+    sid_batch = (
+        _fm.read_batch(p, [(sptr + STATE_ID, 4) for sptr, _ in st_items])
+        if st_items
+        else None
+    )
+    if sid_batch is not None:
+        for (_sptr, tag), raw in zip(st_items, sid_batch):
+            if not raw or len(raw) < 4:
+                continue
+            sid = struct.unpack("<i", raw)[0]
+            for q in st2p.get(sid, ()):
+                byid[q] = tag
+    else:
+        for sptr, tag in st_items:
+            try:
+                sid = p.i32(sptr + STATE_ID)
+            except Exception:
+                continue
+            for q in st2p.get(sid, ()):
+                byid[q] = tag
     if not with_ptrs:
         return byid, {}
     byptr = {}
-    for pr in g.oi.instances("CProvince"):
-        try:
-            t = st2tag.get(p.u64(pr + PROV_STATE))
+    provs = list(g.oi.instances("CProvince"))
+    ps_batch = (
+        _fm.read_batch(p, [(pr + PROV_STATE, 8) for pr in provs])
+        if provs
+        else None
+    )
+    if ps_batch is not None:
+        for pr, raw in zip(provs, ps_batch):
+            if not raw or len(raw) < 8:
+                continue
+            t = st2tag.get(struct.unpack("<Q", raw)[0])
             if t is not None:
                 byptr[pr] = t
-        except Exception:
-            pass
+    else:
+        for pr in provs:
+            try:
+                t = st2tag.get(p.u64(pr + PROV_STATE))
+                if t is not None:
+                    byptr[pr] = t
+            except Exception:
+                pass
     return byid, byptr
 
 
 # CProvince vtable offset in 1.19.4.1 (f584). CProvince objects live in a heap
 # region that ObjectIndex's writable-only scan does NOT cover, so we look for the
 # vtable in every readable mapping once and cache the result on disk.
+import session_state as _SS
+
 PROV_VT_OFF = 0x4390588
-PROV_PTR_CACHE = os.path.join(HERE, "prov_ptrs.json")
+PROV_PTR_CACHE = _SS.state_path(_SS.PROV_PTRS_NAME)
 PROV_MAX_ID = 30000
 
 
@@ -346,9 +405,11 @@ def province_objects(g, force=False):
     if len(out) > 1000:
         try:
             import json
-            json.dump({"pid": g.p.pid, "base": g.p.base,
-                       "ptrs": {str(k): v for k, v in out.items()}},
-                      open(PROV_PTR_CACHE, "w"))
+            _SS.ensure_parent(PROV_PTR_CACHE)
+            with open(PROV_PTR_CACHE, "w") as _fh:
+                json.dump({"pid": g.p.pid, "base": g.p.base,
+                           "ptrs": {str(k): v for k, v in out.items()}},
+                          _fh)
         except Exception:
             pass
     _MEM[key] = out
@@ -408,7 +469,8 @@ def _win_controller_map(g, divisions=None):
     that and expands each state to its provinces. Per-province combat occupation
     within a contested state follows the state controller until the state flips.
     """
-    import struct as _st
+    import fastmem as _fm
+    import offsets_win as _ow
     p = g.p
     try:
         g._load_tags()
@@ -423,31 +485,66 @@ def _win_controller_map(g, divisions=None):
             return None
 
     out = {}
+    gs_states = getattr(_ow, "GS_STATES", 0x2C8)
+    pdx_size = getattr(_ow, "PDXARRAY_SIZE", 0x0C)
+    st_owner = getattr(_ow, "CS_OWNER", 0xC8)
+    st_ctrl = getattr(_ow, "CS_CONTROLLER", 0xCC)
+    st_provs = getattr(_ow, "ST_PROVINCES", 0x18)
+    prov_id_off = getattr(_ow, "PROV_ID", PROV_ID)
     try:
         gs = g.gamestate
-        arr = p.u64(gs + 0x2C8)          # GS_STATES, CPdxArray<CState*>
-        n = p.i32(gs + 0x2C8 + 0xC)
+        arr = p.u64(gs + gs_states)      # GS_STATES, CPdxArray<CState*>
+        n = p.i32(gs + gs_states + pdx_size)
     except Exception:
         return out
-    for i in range(max(0, min(n, 4000))):
+    try:
+        rows = _fm.read_state_provinces_batch(
+            p,
+            arr,
+            max(0, min(n, 4000)),
+            off_owner=st_owner,
+            off_controller=st_ctrl,
+            off_prov_arr=st_provs,
+            off_prov_count=st_provs + pdx_size,
+            off_prov_id=prov_id_off,
+            max_states=4000,
+            max_provs_per_state=400,
+        )
+    except Exception as _e:
         try:
-            st = p.u64(arr + 8 * i)
-            if not st:
-                continue
-            ctl = p.i32(st + 0xCC) or p.i32(st + 0xC8)
+            import diag as _diag
+            _diag.warn("mapdata.win_controller_map.batch_fallback", _e)
+        except Exception:
+            pass
+        rows = None
+    if rows is not None:
+        for _st, _sid, owner_idx, ctrl_idx, pids in rows:
+            ctl = ctrl_idx or owner_idx
             t = tag_of(ctl)
             if not t:
                 continue
-            pa = p.u64(st + 0x18)        # ST_PROVINCES
-            pn = p.i32(st + 0x18 + 0xC)
-            if not pa or not (0 < pn <= 400):
+            for pid in pids:
+                out[pid] = t
+    else:
+        for i in range(max(0, min(n, 4000))):
+            try:
+                st = p.u64(arr + 8 * i)
+                if not st:
+                    continue
+                ctl = p.i32(st + st_ctrl) or p.i32(st + st_owner)
+                t = tag_of(ctl)
+                if not t:
+                    continue
+                pa = p.u64(st + st_provs)
+                pn = p.i32(st + st_provs + pdx_size)
+                if not pa or not (0 < pn <= 400):
+                    continue
+                for k in range(pn):
+                    pr = p.u64(pa + 8 * k)
+                    if pr:
+                        out[p.i32(pr + prov_id_off)] = t
+            except Exception:
                 continue
-            for k in range(pn):
-                pr = p.u64(pa + 8 * k)
-                if pr:
-                    out[p.i32(pr + 0xA4)] = t
-        except Exception:
-            continue
     if divisions:
         seen = {}
         for r in divisions:

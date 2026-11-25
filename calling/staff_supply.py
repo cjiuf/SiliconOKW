@@ -633,7 +633,9 @@ def plan(g, tag=None, apply_moves=False):
     return res
 
 
-SHADOW_LOG = os.path.join(HERE, "staff_shadow.jsonl")
+import session_state as _SS
+
+SHADOW_LOG = _SS.state_path(_SS.STAFF_SHADOW_NAME)
 
 
 def shadow_log(report, date=None, extra=None):
@@ -678,6 +680,7 @@ def shadow_log(report, date=None, extra=None):
         except OSError:
             pass
     try:
+        _SS.ensure_parent(SHADOW_LOG)
         with open(SHADOW_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         if date:

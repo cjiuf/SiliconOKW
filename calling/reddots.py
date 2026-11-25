@@ -44,8 +44,10 @@ import sys
 import threading
 import time
 
+import session_state as _SS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_PATH = os.path.join(HERE, "reddots_state.json")
+STATE_PATH = _SS.state_path(_SS.REDDOTS_STATE_NAME)
 
 # 严控三项：默认拒绝普通 ack，必须显式 force=True + 非空 reason，且豁免期 <= 7 游戏日
 STRICT_CODES = frozenset({"PENDING_EVENT", "NO_FOCUS", "IDLE_RESEARCH"})
@@ -152,6 +154,16 @@ _STATES = {}
 _PERSIST_LOADED = False
 
 
+def _clear_reddots_caches():
+    global _PERSIST_LOADED
+    _STATES.clear()
+    _LAST_FOCUS_CANDS.clear()
+    _PERSIST_LOADED = False
+
+
+_SS.register_cache("reddots._STATES", _clear_reddots_caches)
+
+
 def _state_key(g):
     pid = getattr(getattr(g, "p", None), "pid", None)
     try:
@@ -206,6 +218,7 @@ def _save_persisted():
                 "ack_streaks": st.get("ack_streaks") or {},
                 "daily_ack_log": st.get("daily_ack_log") or {},
             }
+        _SS.ensure_parent(STATE_PATH)
         tmp = STATE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)

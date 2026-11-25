@@ -38,36 +38,38 @@ import sys
 import time
 
 import cmdwin
+import offsets_win as _OW
 
 # --- the routines -----------------------------------------------------------
-FN_CREATE_ARMY = 0x00C417A0   # (handle* out_parent, handle* theatre, CPdxArray<handle>*, u8) -> COrdersGroup*
-FN_NEW_OG      = 0x00F702D0   # (theatre,0,0,0,parent) -> COrdersGroup* -- one group, no divisions
-FN_RESOLVE     = 0x142284870  # handle* -> object*
+FN_CREATE_ARMY = _OW.ORDER_FN_CREATE_ARMY   # (handle* out_parent, handle* theatre, CPdxArray<handle>*, u8) -> COrdersGroup*
+FN_NEW_OG      = _OW.ORDER_FN_NEW_OG        # (theatre,0,0,0,parent) -> COrdersGroup* -- one group, no divisions
+FN_RESOLVE     = _OW.ORDER_FN_RESOLVE       # handle* -> object*
 
 # --- fields (Linux table, all re-verified on 1.19.5.0) ----------------------
-CO_THEATRES = 0x168           # CCountry -> CPdxArray<CTheatre*>
-CARMY_VT = 0x29D6D98          # CArmy vtable RVA (1.19.5.0, 1297/1297 divisions)
-CARMY_HANDLE = 0x18           # CArmy -> {type, id} (开局师 type=51, 新训师 type=4713, 切勿白名单过滤 type)
-CARMY_OG = 0xC0               # CArmy -> COrdersGroup*
+CO_THEATRES = _OW.CO_THEATRES               # CCountry -> CPdxArray<CTheatre*>
+CARMY_VT = _OW.ORDER_CARMY_VT               # CArmy vtable RVA (1.19.5.0, 1297/1297 divisions)
+CARMY_HANDLE = _OW.ORDER_CARMY_HANDLE       # CArmy -> {type, id} (开局师 type=51, 新训师 type=4713, 切勿白名单过滤 type)
+CARMY_OG = _OW.ORDER_CARMY_OG               # CArmy -> COrdersGroup*
 
 try:
     import profile as _aw_prof
     if _aw_prof.load():
         CARMY_VT = _aw_prof.anchor("VT_ARMY", CARMY_VT)
-except Exception:
-    pass
+except Exception as _e:
+    import diag as _diag
+    _diag.warn("armyops_win.apply_profile.carmy", _e)
 
-OG_HANDLE      = 0x08
-OG_IS_GROUP    = 0x39
-OG_THEATRE     = 0x40
-OG_DIVISIONS   = 0x50         # CPdxArray<CArmy*>
-OG_LEADER      = 0x88
-OG_ORDERS      = 0x98         # CPdxArray<COrderInstance*>
-OG_NAME        = 0x160        # std::string
-OG_PARENT      = 0x1B8
-OG_MEMBERS     = 0x228
+OG_HANDLE      = _OW.ORDER_OG_HANDLE
+OG_IS_GROUP    = _OW.ORDER_OG_IS_GROUP
+OG_THEATRE     = _OW.ORDER_OG_THEATRE
+OG_DIVISIONS   = _OW.ORDER_OG_DIVISIONS     # CPdxArray<CArmy*>
+OG_LEADER      = _OW.ORDER_OG_LEADER
+OG_ORDERS      = _OW.ORDER_OG_ORDERS        # CPdxArray<COrderInstance*>
+OG_NAME        = _OW.ORDER_OG_NAME          # std::string
+OG_PARENT      = _OW.ORDER_OG_PARENT
+OG_MEMBERS     = _OW.ORDER_OG_MEMBERS
 
-G_DEFAULT_ALLOC = 0x30FD000   # the game's CPdxNewDeleteAllocator instance
+G_DEFAULT_ALLOC = _OW.G_DEFAULT_ALLOC       # the game's CPdxNewDeleteAllocator instance
 HANDLE_ORDER_GROUP = 53
 
 
@@ -182,19 +184,19 @@ def armies(g, country=None):
 #   Post          what the UI uses (0xFD0880 calls 0x1422C4250 with flag 0).
 # Verified live 2026-11-14 (PID 26368): CanExecute 1, Post 1, and the engine
 # appended a type-2 order with root_front {66,7} to og+0x98 by itself.
-FN_NEW_ROOT_CMD = 0x18C9B20
-NR_VT           = 0x2A856A0   # COrderNewRootCommand vtable this ctor writes
-VT_OFFENSIVE    = 0x2A853A0   # COrderNewFrontCommand vtable (the offensive ctor)
-NR_CANEXE       = 0x18DF5E0
-NR_EXECUTE      = 0x18D9A30
-NR_SIZE         = 0x70
+FN_NEW_ROOT_CMD = _OW.ORDER_FN_NEW_ROOT_CMD
+NR_VT           = _OW.ORDER_NR_VT           # COrderNewRootCommand vtable this ctor writes
+VT_OFFENSIVE    = _OW.ORDER_VT_OFFENSIVE    # COrderNewFrontCommand vtable (the offensive ctor)
+NR_CANEXE       = _OW.ORDER_NR_CANEXE
+NR_EXECUTE      = _OW.ORDER_NR_EXECUTE
+NR_SIZE         = _OW.ORDER_NR_SIZE
 
-CO_FRONTS      = 0x50
-FRONT_HANDLE   = 0x08
-FRONT_PROVS    = 0x20
-FRONT_SECTIONS = 0x58
-SEC_PROVS      = 0x30
-SEC_ID         = 0x08
+CO_FRONTS      = _OW.ORDER_CO_FRONTS
+FRONT_HANDLE   = _OW.ORDER_FRONT_HANDLE
+FRONT_PROVS    = _OW.ORDER_FRONT_PROVS
+FRONT_SECTIONS = _OW.ORDER_FRONT_SECTIONS
+SEC_PROVS      = _OW.ORDER_SEC_PROVS
+SEC_ID         = _OW.ORDER_SEC_ID
 HANDLE_FRONT   = 66
 FULL           = 100000
 
@@ -354,13 +356,13 @@ def orders(g, og):
 # the child's vtable: without that check every 8-byte slot that happens to look
 # like {ptr, cap, size} yields heap noise, and writing to that noise corrupts
 # the process (three crashes on 2026-11-14).
-VT_ORDER_INSTANCE = 0x2A026E8     # .?AVCOrderInstance@@ vtable
+VT_ORDER_INSTANCE = _OW.ORDER_VT_ORDER_INSTANCE     # .?AVCOrderInstance@@ vtable
 ORDER_TYPE_OFFENSIVE = 1
-OI_ASSIGNED = 0x210               # CPdxArray<CArmy*> of divisions
-OI_EXECUTING = 0x248              # u8; 0 = the divisions never attack
-OI_ID = 0x244
-OI_TYPE = 0x30
-FN_ORDER_SET_EXECUTING = 0x10CD510   # (order, u8 executing, u8) -> void
+OI_ASSIGNED = _OW.ORDER_OI_ASSIGNED                 # CPdxArray<CArmy*> of divisions
+OI_EXECUTING = _OW.ORDER_OI_EXECUTING               # u8; 0 = the divisions never attack
+OI_ID = _OW.ORDER_OI_ID
+OI_TYPE = _OW.ORDER_OI_TYPE
+FN_ORDER_SET_EXECUTING = _OW.ORDER_FN_SET_EXECUTING  # (order, u8 executing, u8) -> void
 
 
 def _heap(x):
@@ -468,9 +470,10 @@ def order_children(g, og):
 def set_order_executing(g, child, on=True):
     """Set +0x248 through the engine's own routine.  Returns the byte read back."""
     p = g.p
-    g.call(p.base + FN_ORDER_SET_EXECUTING, (child, 1 if on else 0, 1),
+    child_addr = int(child, 16) if isinstance(child, str) else int(child)
+    g.call(p.base + FN_ORDER_SET_EXECUTING, (child_addr, 1 if on else 0, 1),
            absolute=True, force=True)
-    return p.u8(child + OI_EXECUTING)
+    return p.u8(child_addr + OI_EXECUTING)
 
 
 def start_offensives(g, og):
@@ -532,16 +535,16 @@ def army_info(g, og):
 # capitulation; 2026-11-15: the Danish front + offensive).  The tool layer
 # cannot import a stage script, so the same calls live here now.
 
-FN_NEW_OFFENSIVE_CMD = 0x18C9840   # COrderNewFrontCommand ctor (the offensive line)
-FN_ORDER_FRONT_CTX   = 0x10BB5A0   # order -> the frontCtx token `+0xD0` must equal
-FN_CANEXE_OFFENSIVE  = 0x18DF550
-OE_CTOR, OE_VT, OE_SIZE = 0x18C8C50, 0x2A85D60, 0x38   # COrderExecuteCommand
+FN_NEW_OFFENSIVE_CMD = _OW.ORDER_FN_NEW_OFFENSIVE_CMD   # COrderNewFrontCommand ctor (the offensive line)
+FN_ORDER_FRONT_CTX   = _OW.ORDER_FN_FRONT_CTX           # order -> the frontCtx token `+0xD0` must equal
+FN_CANEXE_OFFENSIVE  = _OW.ORDER_FN_CANEXE_OFFENSIVE
+OE_CTOR, OE_VT, OE_SIZE = _OW.ORDER_OE_CTOR, _OW.ORDER_OE_VT, _OW.ORDER_OE_SIZE   # COrderExecuteCommand
 
-ST_PROV_ID = 0xA4                  # CProvince -> int32 province id
+ST_PROV_ID = _OW.PROV_ID                                # CProvince -> int32 province id
 
 
-COUNTRY_ARMIES = 0x290            # CCountry -> CPdxArray<CArmy*>
-CARMY_GROUP = 0xC0                # CArmy -> COrdersGroup* (verified 2026-11-19)
+COUNTRY_ARMIES = _OW.CO_ARMIES                          # CCountry -> CPdxArray<CArmy*>
+CARMY_GROUP = _OW.ORDER_CARMY_OG                        # CArmy -> COrdersGroup* (verified 2026-11-19)
 
 
 def country_divisions(g, country=None):
@@ -559,7 +562,7 @@ def country_divisions(g, country=None):
     return out
 
 
-CARMY_SECONDARY = 0xB8            # og+0x50 holds (CArmy* + 0xB8): a secondary base subobject
+CARMY_SECONDARY = _OW.ORDER_CARMY_SECONDARY  # og+0x50 holds (CArmy* + 0xB8): a secondary base subobject
 
 
 def divisions_of(g, og):
@@ -1005,24 +1008,24 @@ def offensive_line(g, og, parent_id, provinces, divisions=None, can_execute=True
 # offensive) on top of the root instance it just created.  That is exactly the
 # pair the UI produces when you drag a front line and then an arrow, and it is
 # the only path that has never killed the process on this build.
-FN_PLAN_FACTORY  = 0x18CFC70       # no-arg factory: new(0x80) + ctor, -> cmd
-VT_COMPLETE_PLAN = 0x2A85760
-FN_PLAN_CANEXE   = 0x18DE930
-PLAN_SIZE        = 0x80
+FN_PLAN_FACTORY  = _OW.ORDER_FN_PLAN_FACTORY        # no-arg factory: new(0x80) + ctor, -> cmd
+VT_COMPLETE_PLAN = _OW.ORDER_VT_COMPLETE_PLAN
+FN_PLAN_CANEXE   = _OW.ORDER_FN_PLAN_CANEXE
+PLAN_SIZE        = _OW.ORDER_PLAN_SIZE
 
-PLAN_ARMY   = 0x28                 # handle {u32 type, u32 id} of the COrdersGroup
+PLAN_ARMY   = _OW.ORDER_PLAN_ARMY                   # handle {u32 type, u32 id} of the COrdersGroup
 # 2026-11-23 (C-1 进程崩溃根因实锤): COrderAddNewCompletePlanCommand::Execute (0x18D3FA0)
 # 在 0x18D4176 直接把 &cmd+0x30 传给 COrderAssignCommand ctor (0x18C7DF0)，后者按 8 字节步长
 # 把每个元素当作 CArmy 的 {type=51, id} 句柄调用 ResolveHandle (0x2284870)！
 # 旧代码把 4 字节省份 ID 数组塞进 +0x30，导致越界读堆并命中非 CArmy 句柄，读 [obj-0x10+0x1D8]
 # 作为国家 tag_id 索引 tag_table 时在 0xC08724 触发 C0000005 秒杀 hoi4.exe！
-PLAN_UNITS  = 0x30                 # CPdxArray<handle> (8B CArmy handles); +0x3c count > 0
-PLAN_IDS    = PLAN_UNITS           # 向后兼容旧常量名
-PLAN_PROVS  = 0x48                 # CPdxArray<u32>; handed to COrderNewFrontCommand
-PLAN_FRONT  = 0x64                 # handle of the CFront
-PLAN_SECT   = 0x6C
-PLAN_FROM   = 0x70
-PLAN_TO     = 0x78
+PLAN_UNITS  = _OW.ORDER_PLAN_UNITS                  # CPdxArray<handle> (8B CArmy handles); +0x3c count > 0
+PLAN_IDS    = PLAN_UNITS                            # 向后兼容旧常量名
+PLAN_PROVS  = _OW.ORDER_PLAN_PROVS                  # CPdxArray<u32>; handed to COrderNewFrontCommand
+PLAN_FRONT  = _OW.ORDER_PLAN_FRONT                  # handle of the CFront
+PLAN_SECT   = _OW.ORDER_PLAN_SECT
+PLAN_FROM   = _OW.ORDER_PLAN_FROM
+PLAN_TO     = _OW.ORDER_PLAN_TO
 
 
 def validate_division_ptrs(p, divs):
@@ -1210,13 +1213,13 @@ def complete_plan(g, og, front, provinces, section=None, frm=0, to=FULL,
             g.detach()
 
 
-FN_ORDER_FACTORY = 0x00C41720    # (COrdersGroup*, int type) -> new COrderInstance*
+FN_ORDER_FACTORY = _OW.ORDER_FN_FACTORY       # (COrdersGroup*, int type) -> new COrderInstance*
 # 2026-11-23 (复测 10 A-2 反汇编实证): 0x10B4EC0(parent, child) 把 child 加入 parent+0x1F8
 # (GetChildren) 并把 parent 加入 child+0x1E0 (GetParents)。旧版 manual_offensive 把两个参数
 # 写反成了 (child, parent)，导致箭头倒挂进 root+0x1E0，引擎 C402A0/10AF270 永远查不到也删不掉！
-FN_ORDER_SETPARENT = 0x0010B4EC0  # (parent, child) -> void  (AddChild / LinkOrder)
-FN_ORDER_SETPATH = 0x0010B0D90    # (order, CPdxArray<u32>*, int) -- copies the province path
-FN_ORDER_DETACH_ALL = 0x0010B5D50  # (order) -> void  (从两端 +0x1E0/+0x1F8/+0x2B8/+0x2D0 安全解绑)
+FN_ORDER_SETPARENT = _OW.ORDER_FN_SETPARENT   # (parent, child) -> void  (AddChild / LinkOrder)
+FN_ORDER_SETPATH = _OW.ORDER_FN_SETPATH       # (order, CPdxArray<u32>*, int) -- copies the province path
+FN_ORDER_DETACH_ALL = _OW.ORDER_FN_DETACH_ALL  # (order) -> void  (从两端 +0x1E0/+0x1F8/+0x2B8/+0x2D0 安全解绑)
 
 
 # --- the engine's own Execute, called directly (2026-11-19) ------------------
@@ -1267,8 +1270,8 @@ FN_ORDER_DETACH_ALL = 0x0010B5D50  # (order) -> void  (从两端 +0x1E0/+0x1F8/+
 #
 # `0x10B2C60` is the piece nothing else in this file ever calls: the engine's
 # own "how do the assigned divisions distribute over the split segments".
-FN_OFFENSIVE_CANEXE = 0x18DF550     # (cmd, 0) -> bool  (vtable +0x48)
-FN_OFFENSIVE_EXECUTE = 0x18D9070    # (cmd)    -> the real Execute
+FN_OFFENSIVE_CANEXE = _OW.ORDER_FN_CANEXE_OFFENSIVE     # (cmd, 0) -> bool  (vtable +0x48)
+FN_OFFENSIVE_EXECUTE = _OW.ORDER_FN_OFFENSIVE_EXECUTE   # (cmd)    -> the real Execute
 
 # 2026-11-19 live run: the ctor stores `cmd+0x6e = arg8 && *(u8*)0x33DDAB7`
 # (disasm 0x18C99DC..0x18C99F5).  arg8=1 alone is NOT enough -- the global
@@ -1276,18 +1279,14 @@ FN_OFFENSIVE_EXECUTE = 0x18D9070    # (cmd)    -> the real Execute
 # 0xFD472D) must ALSO be 1.  v1 wrote it around the ctor; v2 (§109) passes
 # arg8=0 (the UI's own mode-3 bytes), so cmd+0x6e is 0 regardless and the
 # gate stays untouched -- the constant is kept for documentation/future use.
-FN_OFFENSIVE_GATE = 0x33DDAB7
+FN_OFFENSIVE_GATE = _OW.ORDER_FN_OFFENSIVE_GATE
 
-# §108.5 guard constants (kept in sync with offsets_win.py, which this module
-# does not import).  Path B's 0xEEED50 filter matches provinces whose +0xd0
-# pointer is inside COUNTRIES[og_tag]+0x168's front-context list; when that
-# list is empty the engine sees "no line drawn" and Execute silently no-ops
-# (and in the broken empty-state the handle fast path can even fault, §107).
-G_GAMESTATE  = 0x33DD6B0   # u64 -> CCurrentGameState*
-GS_COUNTRIES = 0x310       # CPdxArray<CCountry*> (data, cap, size)
+# §108.5 guard constants (统一来自 offsets_win 单一真源)
+G_GAMESTATE  = _OW.G_GAMESTATE
+GS_COUNTRIES = _OW.GS_COUNTRIES
 # UI per-frame front-context refresh for one orders group (§108): the ONLY
 # maintainer of the layer.  Experiment entry for tool-drawn groups.
-FN_UI_FRONTCTX_REFRESH = 0xF711E0
+FN_UI_FRONTCTX_REFRESH = _OW.ORDER_FN_UI_FRONTCTX_REFRESH
 
 
 def _infer_root_target_provinces(g, root, og, ctx=0, enemy_tag=None, depth=1):
@@ -1595,7 +1594,7 @@ def manual_offensive(g, og, root_id, provinces, executing=True):
 
 # 2026-11-23 (复测 8 B-14 实机抓现行): order+0x210 数组中存放的元素是 CArmy 内部偏移
 # +0xB8 的多重继承子对象指针（实测 0x15b0fa91998 - 0x15b0fa918e0 == 0xB8），而非 CArmy 首址！
-ORDER_DIV_SUBOBJ_OFF = 0xB8
+ORDER_DIV_SUBOBJ_OFF = _OW.ORDER_DIV_SUBOBJ_OFF
 
 
 def assigned_breakdown(g, og, order_id):
@@ -1679,9 +1678,9 @@ def assigned_of(g, og, order_id):
 # nothing on hoi4.exe, and the ctor 0x231D0D0 the notes carried disassembles to
 # ZERO instructions -- it is not a function entry at all.  Nothing here calls a
 # ctor: the object is built from the vtable with build_by_vt.
-VT_ORDER_ASSIGN = 0x2A84CE0
-CANEXEC_ORDER_ASSIGN = 0x18DE970
-SIZE_ORDER_ASSIGN = 0x58
+VT_ORDER_ASSIGN = _OW.ORDER_VT_ASSIGN
+CANEXEC_ORDER_ASSIGN = _OW.ORDER_CANEXEC_ASSIGN
+SIZE_ORDER_ASSIGN = _OW.ORDER_SIZE_ASSIGN
 
 
 def assign_to_order(g, orders_group, order_id, divisions):
@@ -1940,8 +1939,9 @@ def set_plan_executing(g, og, order_id=0, executing=True):
                 try:
                     set_order_executing(g, int(ptr), bool(want))
                     direct_sync = True
-                except Exception:
-                    pass
+                except Exception as _e:
+                    import diag as _diag
+                    _diag.warn("armyops_win.direct_sync_executing", _e, detail="ptr=%#x" % int(ptr))
         finally:
             if own:
                 g.detach()
@@ -1986,10 +1986,10 @@ def set_plan_executing(g, og, order_id=0, executing=True):
 #     vtable     = 0x2A84C20  (COrderDeleteCommand)
 #     CanExecute = 0x18DEF50  (slot 9)
 #     Execute    = 0x18D6050  (slot 10)
-FN_ORDER_DELETE_CTOR = 0x18C89D0
-VT_ORDER_DELETE      = 0x2A84C20
-CANEXEC_ORDER_DELETE = 0x18DEF50
-SIZE_ORDER_DELETE    = 0x38
+FN_ORDER_DELETE_CTOR = _OW.ORDER_FN_DELETE_CTOR
+VT_ORDER_DELETE      = _OW.ORDER_VT_DELETE
+CANEXEC_ORDER_DELETE = _OW.ORDER_CANEXEC_DELETE
+SIZE_ORDER_DELETE    = _OW.ORDER_SIZE_DELETE
 
 try:
     import profile as _aw_prof_del
@@ -1997,8 +1997,9 @@ try:
         VT_ORDER_DELETE = _aw_prof_del.command_field("COrderDeleteCommand", "vt", VT_ORDER_DELETE)
         CANEXEC_ORDER_DELETE = _aw_prof_del.command_field("COrderDeleteCommand", "can_execute", CANEXEC_ORDER_DELETE)
         SIZE_ORDER_DELETE = max(SIZE_ORDER_DELETE, int(_aw_prof_del.command_field("COrderDeleteCommand", "size", SIZE_ORDER_DELETE)))
-except Exception:
-    pass
+except Exception as _e:
+    import diag as _diag
+    _diag.warn("armyops_win.apply_profile.delete", _e)
 
 
 def _post_delete_order_cmd(g, og, order_id):
@@ -2072,8 +2073,9 @@ def _detach_inverted_orphan_child(g, og, child_row):
     try:
         try:
             p.write(cptr + OI_EXECUTING, b"\x00")
-        except Exception:
-            pass
+        except Exception as _e:
+            import diag as _diag
+            _diag.warn("armyops_win.detach_orphan.clear_exec", _e, detail="cptr=%#x" % int(cptr))
         g.call(p.base + FN_ORDER_DETACH_ALL, (cptr,), absolute=True, force=True)
     finally:
         if own:
@@ -2133,14 +2135,18 @@ def delete_order(g, orders_group, order_id, allow_child=False):
             ),
         }
 
+    def _to_ptr_int(v):
+        return int(v, 16) if isinstance(v, str) else int(v)
+
     # 如果调用方明确要求删一个旧版倒挂孤儿 type-1（allow_child=True），先试原生命令，失败则安全解绑
     if oid in kid_ids and allow_child:
         k_self = kid_by_id[oid]
         if k_self.get("ptr"):
             try:
-                set_order_executing(g, k_self["ptr"], False)
-            except Exception:
-                pass
+                set_order_executing(g, _to_ptr_int(k_self["ptr"]), False)
+            except Exception as _e:
+                import diag as _diag
+                _diag.warn("armyops_win.delete_order.stop_self_child", _e, detail="ptr=%r" % k_self.get("ptr"))
         if k_self.get("inverted_parent_link"):
             ok_d, err_d = _detach_inverted_orphan_child(g, og, k_self)
             rem_orders = orders(g, og) or []
@@ -2165,15 +2171,17 @@ def delete_order(g, orders_group, order_id, allow_child=False):
     for k in owned_kids:
         if k.get("ptr"):
             try:
-                set_order_executing(g, k["ptr"], False)
-            except Exception:
-                pass
+                set_order_executing(g, _to_ptr_int(k["ptr"]), False)
+            except Exception as _e:
+                import diag as _diag
+                _diag.warn("armyops_win.delete_order.stop_child", _e, detail="ptr=%r" % k.get("ptr"))
     for o in cur_orders:
         if int(o.get("id") or -1) == oid and o.get("ptr"):
             try:
-                set_order_executing(g, o["ptr"], False)
-            except Exception:
-                pass
+                set_order_executing(g, _to_ptr_int(o["ptr"]), False)
+            except Exception as _e:
+                import diag as _diag
+                _diag.warn("armyops_win.delete_order.stop_root", _e, detail="ptr=%r" % o.get("ptr"))
 
     deleted_children = []
     detached_orphans = []
@@ -2346,9 +2354,9 @@ def target_provinces(g, enemy_tag, depth=2, own_tag=None):
 #   2. the command is QUEUED (the engine's own CanExecute runs first) -- a
 #      refused command does nothing instead of corrupting anything;
 #   3. the caller verifies the army count really grew before reporting ok.
-FN_ARMY_GROUP_CTOR = 0x18C6840
-ARMY_GROUP_VT = 0x2A846E0
-ARMY_GROUP_SIZE = 0x80
+FN_ARMY_GROUP_CTOR = _OW.ORDER_FN_ARMY_GROUP_CTOR
+ARMY_GROUP_VT = _OW.ORDER_ARMY_GROUP_VT
+ARMY_GROUP_SIZE = _OW.ORDER_ARMY_GROUP_SIZE
 
 
 def create_army_group(g, armies, theatre_ptr=None):
@@ -2408,3 +2416,129 @@ def create_army_group(g, armies, theatre_ptr=None):
     info["group_member_ptrs"] = [hex(k) for k in kids]
     ok = info["group_is_group"] and len(kids) == len(armies)
     return ok, ("" if ok else "parent object is not an army group"), info
+
+
+# ==============================================================================
+# 从 calling/armyops.py 纯搬运的共享只读查询与将领技能接口（阶段 1 Move-Only）
+# ==============================================================================
+AL_ATTACK = _OW.LEADER_AL_ATTACK
+AL_DEFENSE = _OW.LEADER_AL_DEFENSE
+AL_PLANNING = _OW.LEADER_AL_PLANNING
+AL_LOGISTICS = _OW.LEADER_AL_LOGISTICS
+AL_NAME = _OW.LEADER_AL_NAME
+AL_TAG = _OW.LEADER_AL_TAG
+
+
+def orders_groups(g, country=None):
+    """通过国家师列表收集所属集团军/集团军群（COrdersGroup*）。"""
+    from game import _arr
+    p = g.p
+    co = country.ptr if country is not None else g.player().ptr
+    seen, out = set(), []
+    for d in _arr(p, co, 0x290):
+        og = p.u64(d + CARMY_OG)
+        if og and og not in seen:
+            seen.add(og)
+            out.append(og)
+    return out
+
+
+def og_info(g, og):
+    """读取单个 COrdersGroup 的基础只读摘要。"""
+    p = g.p
+    ldr = p.u64(og + OG_LEADER)
+    name = ""
+    try:
+        name = p.stdstring(og + OG_NAME)
+    except Exception:
+        pass
+    return {
+        "ptr": hex(og),
+        "handle": list(struct.unpack("<ii", p.read(og + OG_HANDLE, 8))),
+        "name": name,
+        "is_army_group": bool(p.u8(og + OG_IS_GROUP)),
+        "divisions": p.i32(og + OG_DIVISIONS + 0xC),
+        "leader_ptr": hex(ldr) if ldr else None,
+        "leader": (p.cstr(p.u64(ldr + 0x40)) if ldr else None),
+        "parent_group": hex(p.u64(og + OG_PARENT)) if p.u64(og + OG_PARENT) else None,
+        "member_armies": (p.i32(og + OG_MEMBERS + 0xC) if p.u8(og + OG_IS_GROUP) else None),
+        "orders": p.i32(og + OG_ORDERS + 0xC),
+    }
+
+
+def leader_skills(g, army_leader):
+    """读取 CArmyLeader 的有效四维属性（含特质加成）。"""
+    p = g.p
+    return {
+        "attack": p.i32(army_leader + AL_ATTACK),
+        "defense": p.i32(army_leader + AL_DEFENSE),
+        "planning": p.i32(army_leader + AL_PLANNING),
+        "logistics": p.i32(army_leader + AL_LOGISTICS),
+    }
+
+
+def orders_of(g, orders_group):
+    """读取集团军当前挂载的 COrderInstance 列表（简版字段）。"""
+    from game import _arr
+    p = g.p
+    out = []
+    for o in _arr(p, orders_group, OG_ORDERS):
+        out.append({
+            "ptr": hex(o),
+            "id": p.i32(o + 0x244),
+            "type": p.i32(o + 0x30),          # 1=进攻线 2=前线 3=登陆 4=空降
+            "assigned_divisions": p.i32(o + 0x21C),
+            "root_front": [p.i32(o + 0x258), p.i32(o + 0x25C)],
+            "root_section": p.i32(o + 0x260),
+            "from": p.i64(o + 0x268),
+            "to": p.i64(o + 0x270),
+            "fallback": bool(p.u8(o + 0x298)),
+        })
+    return out
+
+
+def group_divisions(g, orders_group, tag=None):
+    """返回指定集团军（或集团军群下属全部集团军）的 CArmy* 指针列表。"""
+    from game import _arr
+    p = g.p
+    members = {orders_group}
+    if p.u8(orders_group + OG_IS_GROUP):
+        members |= set(_arr(p, orders_group, OG_MEMBERS))
+    co = (g.country(tag) if tag else g.player()).ptr
+    out = []
+    for d in _arr(p, co, 0x290):
+        og = p.u64(d + CARMY_OG)
+        if og in members or (og and p.u64(og + OG_PARENT) in members):
+            out.append(d)
+    return out
+
+
+def target_line(g, enemy_tag, depth="full", own_tag=None):
+    """计算敌国领土内用于进攻线的目标省份列表。"""
+    import mapdata
+    from collections import deque
+    if own_tag is None:
+        own_tag = g.player().tag
+    owners, _ = mapdata.province_owner_map(g)
+    adj = mapdata.build_adjacency()
+    _, ptype = mapdata.load_definitions()
+    enemy = {pid for pid, t in owners.items() if t == enemy_tag and ptype.get(pid) == "land"}
+    if not enemy:
+        return []
+    start = [pid for pid in enemy
+             if any(owners.get(n) == own_tag and ptype.get(n) == "land" for n in adj.get(pid, ()))]
+    if not start:
+        start = sorted(enemy)[:1]
+    dist = {p0: 0 for p0 in start}
+    q = deque(start)
+    while q:
+        cur = q.popleft()
+        for n in adj.get(cur, ()):
+            if n in enemy and n not in dist:
+                dist[n] = dist[cur] + 1
+                q.append(n)
+    if depth == "full":
+        top = max(dist.values())
+        return sorted(p0 for p0, d in dist.items() if d == top)
+    depth = int(depth)
+    return sorted(p0 for p0, d in dist.items() if d == depth) or sorted(dist, key=dist.get)[-1:]

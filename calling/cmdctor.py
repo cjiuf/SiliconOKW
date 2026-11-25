@@ -146,34 +146,12 @@ def find_ctor(vtable, e, fi, lm, data, text):
 
 
 def build(force=False):
-    if os.path.exists(CACHE) and not force:
-        with open(CACHE, "rb") as f:
-            return pickle.load(f)
-    import rtti
-    from elf import ELF
-    from funcs import FuncIndex
-    from leascan import build_lea_map
-    e = ELF(BIN); fi = FuncIndex(e); lm = build_lea_map(e)
-    m = rtti.build()
-    text = e.sec(".text")
-    out = {}
-    for k, vps in m["vtables"].items():
-        mm = re.fullmatch(r"\d+(C[A-Za-z0-9_]*Command)", k)
-        if not mm:
-            continue
-        vp = vps[0]
-        b = find_ctor(vp, e, fi, lm, e.data, text)
-        if not b:
-            continue
-        (_sc, fn, end, nargs) = b
-        try:
-            flds = parse_ctor(fn, end)
-        except Exception:
-            flds = []
-        out[mm.group(1)] = {"ctor": fn, "args": nargs, "fields": flds}
-    with open(CACHE, "wb") as f:
-        pickle.dump(out, f)
-    return out
+    import safe_cache
+    if safe_cache.exists(CACHE) and not force:
+        return safe_cache.load(CACHE)
+    raise NotImplementedError(
+        "Linux ELF/objdump ctor scanner removed; use prebuilt cmdctors.json or PE recalc."
+    )
 
 
 if __name__ == "__main__":

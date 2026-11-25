@@ -55,21 +55,22 @@ import struct
 import sys
 
 import offsets as O
+import offsets_win as _OW
 from commands import BASE_INIT
 
-FN_POST = 0x22C4250
-IDLER_VT_SESSION = 0x88
-IDLER_VT_TAG = 0xA0
-CTOR_SET_NATIONAL_FOCUS = 0x11D0DC0
-CTOR_SET_RESEARCH = 0x11D1980
-CTOR_ADD_CONSTRUCTION = 0x11CC8C0
-VT_ADD_CONSTRUCTION = 0x2A10B88
-VT_BUILDING_REF = 0x29EE730
-OP_NEW = 0x25A01DC
-OP_DELETE = 0x25CEC00
+FN_POST = _OW.CMD_FN_POST
+IDLER_VT_SESSION = _OW.CMD_IDLER_VT_SESSION
+IDLER_VT_TAG = _OW.CMD_IDLER_VT_TAG
+CTOR_SET_NATIONAL_FOCUS = _OW.CMD_CTOR_SET_NATIONAL_FOCUS
+CTOR_SET_RESEARCH = _OW.CMD_CTOR_SET_RESEARCH
+CTOR_ADD_CONSTRUCTION = _OW.CMD_CTOR_ADD_CONSTRUCTION
+VT_ADD_CONSTRUCTION = _OW.CMD_VT_ADD_CONSTRUCTION
+VT_BUILDING_REF = _OW.CMD_VT_BUILDING_REF
+OP_NEW = _OW.CMD_OP_NEW
+OP_DELETE = _OW.CMD_OP_DELETE
 # `xor al, al; ret` -- the shared do-nothing stub every command vtable already
 # uses for its unimplemented slots.
-FN_NOOP_DTOR = 0x11D530
+FN_NOOP_DTOR = _OW.CMD_FN_NOOP_DTOR
 
 
 def _alloc_obj(p):
@@ -216,6 +217,8 @@ def enqueue(game, cmd, tick=None, seq=None):
     message and then calls the command's deleting destructor, which is where the
     earlier experiments died.  Stamp and enqueue directly instead.
     """
+    import win_pipeline as _wp
+    _wp.ensure_live_version(game, only_if_live=True)
     p = game.p
     s = session(game)
     if tick is None:
@@ -381,9 +384,9 @@ def add_construction(game, state_id, building_type_id, level=1, priority=2):
 #
 # We build by field layout (build_by_vt), NOT by calling the ctor: nothing
 # foreign is executed, and every offset above is confirmed by disassembly.
-VT_ADD_ADVISOR = 0x2A11A88
-ADD_ADVISOR_SIZE = 0x50
-CTOR_ADD_ADVISOR = 0x11CC6D0     # real param ctor (documented; not called)
+VT_ADD_ADVISOR = _OW.CMD_VT_ADD_ADVISOR
+ADD_ADVISOR_SIZE = _OW.CMD_ADD_ADVISOR_SIZE
+CTOR_ADD_ADVISOR = _OW.CMD_CTOR_ADD_ADVISOR     # real param ctor (documented; not called)
 
 
 def make_add_advisor(game, packed_handle, slot):
@@ -426,9 +429,9 @@ def make_add_advisor(game, packed_handle, slot):
 # +0x30 (the country tag) stayed 0; that is an invalid tag and the command was
 # built from a pecmd size/vtable that had never been checked. We now fill BOTH
 # fields with a proven vtable+size and no ctor call.
-VT_UNLOCK_DOCTRINE = 0x2AAA8A0
-UNLOCK_DOCTRINE_SIZE = 0x38
-CTOR_UNLOCK_DOCTRINE = 0x1B0FD20    # real ctor (documented; not called)
+VT_UNLOCK_DOCTRINE = _OW.CMD_VT_UNLOCK_DOCTRINE
+UNLOCK_DOCTRINE_SIZE = _OW.CMD_UNLOCK_DOCTRINE_SIZE
+CTOR_UNLOCK_DOCTRINE = _OW.CMD_CTOR_UNLOCK_DOCTRINE    # real ctor (documented; not called)
 
 
 def make_unlock_doctrine(game, doctrine_ptr, tag_id=None):
@@ -445,8 +448,8 @@ def make_unlock_doctrine(game, doctrine_ptr, tag_id=None):
 # A paused game does NOT drain the command queue (§29.8): enqueue() returns 1
 # but the command just sits there. Every high-level write tool therefore has to
 # briefly run the clock or its success read-back observes a frozen world.
-CANEXEC_ADD_ADVISOR = 0x11ECC20      # CAddAdvisorCommand::CanExecute (vtable +0x48)
-CANEXEC_UNLOCK_DOCTRINE = 0x1B10310  # CUnlockGrandDoctrineCommand::CanExecute (+0x48)
+CANEXEC_ADD_ADVISOR = _OW.CMD_CANEXEC_ADD_ADVISOR           # CAddAdvisorCommand::CanExecute (vtable +0x48)
+CANEXEC_UNLOCK_DOCTRINE = _OW.CMD_CANEXEC_UNLOCK_DOCTRINE   # CUnlockGrandDoctrineCommand::CanExecute (+0x48)
 
 
 def can_unlock_doctrine(game, doctrine_ptr, tag_id=None):
@@ -498,6 +501,8 @@ def post_drained(game, cmd, seconds=2.0):
     """
     import time as _t
     import session as S
+    import win_pipeline as _wp
+    _wp.ensure_live_version(game, only_if_live=True)
     p = game.p
     idler = p.u64(p.base + S.G_IDLER)
     if not idler:
@@ -506,8 +511,9 @@ def post_drained(game, cmd, seconds=2.0):
     d0 = None
     try:
         d0 = game.date_raw()
-    except Exception:
-        pass
+    except Exception as _de:
+        import diag as _diag
+        _diag.warn("cmdwin.post_drained.date_before", _de)
     if was:
         p.write(idler + S.IDLER_PAUSED, b"\x00")
         _t.sleep(0.15)                      # let the loop notice the resume
@@ -534,19 +540,21 @@ def post_drained(game, cmd, seconds=2.0):
             try:
                 p.write(idler + S.IDLER_PAUSED, b"\x01")
                 _t.sleep(0.1)
-            except Exception:
-                pass
+            except Exception as _pe:
+                import diag as _diag
+                _diag.warn("cmdwin.post_drained.restore_pause", _pe)
     try:
         d1 = game.date_raw()
-    except Exception:
-        pass
+    except Exception as _de:
+        import diag as _diag
+        _diag.warn("cmdwin.post_drained.date_after", _de)
     return {"posted": posted, "was_paused": was,
             "drained": (d1 != d0) if (d0 is not None and d1 is not None) else None,
             "date_before": d0, "date_after": d1}
 
 
 # CSetResearchCommand::CanExecute -- vtable 0x2A11548 slot +0x48.
-CANEXEC_SET_RESEARCH = 0x11F3360
+CANEXEC_SET_RESEARCH = _OW.CMD_CANEXEC_SET_RESEARCH
 
 
 def can_exec(game, cmd, fn_rva):
@@ -573,29 +581,29 @@ def can_exec(game, cmd, fn_rva):
 # CRT.  That is the same failure that killed seven SetResearch attempts (§25), so
 # both objects get a private vtable whose slot 0 does nothing.
 
-CTOR_DECLARE_WAR = 0x1180B70
-VT_DECLARE_WAR = 0x2A07548
-VT_DIPLO_CMD = 0x2A073C8
-FN_DIPLO_VALIDATE = 0x11C2420
+CTOR_DECLARE_WAR = _OW.CMD_CTOR_DECLARE_WAR
+VT_DECLARE_WAR = _OW.CMD_VT_DECLARE_WAR
+VT_DIPLO_CMD = _OW.CMD_VT_DIPLO_CMD
+FN_DIPLO_VALIDATE = _OW.CMD_FN_DIPLO_VALIDATE
 # Filled into the scope struct the ctor forwards to CDiplomaticAction; the
 # default ctor 0x1180CD0 uses exactly this triple.
-SCOPE_MAGIC = 0x29C77F8
+SCOPE_MAGIC = _OW.CMD_SCOPE_MAGIC
 # `CDeclareWarAction::IsAvailable` (0x11B9C40) can only return true through the
 # early-out in 0x11B8460, which tests this byte.  Its real meaning is not
 # established; it is exposed as an explicit knob and defaults to on because the
 # validator rejects every action without it.
-DECLARE_WAR_FLAG_OFF = 0x70
+DECLARE_WAR_FLAG_OFF = _OW.CMD_DECLARE_WAR_FLAG_OFF
 # CSetGameSpeedCommand -- 经 1.19.5.0 PE 反汇编彻底确认（2026-11-22）：
 #   vtable    0x29F3A80    ctor  0xF84510(this, int speed)
 #   size      0x30         (factory 0xF848F0 / clone 0xF84770: mov ecx, 0x30)
 #   speed     +0x28 int32  (合法值 0..4；CanExecute 0xF85FB0: cmp [rcx+0x28], 4; setbe al)
 #   Execute   0xF85BC0 -> 尾调用 CCurrentGameState::SetSpeed (0x203F10)，写入 [gs+0x4BC]
 # 旧代码写成 size=0x28 且偏移 +0x24（Linux 布局），导致命令永远是空操作。
-VT_SET_GAME_SPEED = 0x29F3A80
-CTOR_SET_GAME_SPEED = 0xF84510
-SIZE_SET_GAME_SPEED = 0x30
-CANEXEC_SET_GAME_SPEED = 0xF85FB0
-VT_INCREASE_GAME_SPEED = 0x29F3900
+VT_SET_GAME_SPEED = _OW.CMD_VT_SET_GAME_SPEED
+CTOR_SET_GAME_SPEED = _OW.CMD_CTOR_SET_GAME_SPEED
+SIZE_SET_GAME_SPEED = _OW.CMD_SIZE_SET_GAME_SPEED
+CANEXEC_SET_GAME_SPEED = _OW.CMD_CANEXEC_SET_GAME_SPEED
+VT_INCREASE_GAME_SPEED = _OW.CMD_VT_INCREASE_GAME_SPEED
 
 
 def make_declare_war(game, to_id, from_id=None, wargoal=0, force=True):
@@ -652,9 +660,9 @@ def make_declare_war(game, to_id, from_id=None, wargoal=0, force=True):
 # Verified 2026-11-15: CGenerateWarGoalAction::IsAvailable (0x11BAD40) begins
 # with the identical `call 0x11B8460; test al,al` early-out as CDeclareWarAction
 # (0x11B9C40), so the +0x70 recipe transfers unchanged.
-VT_GENERATE_WARGOAL = 0x2A079B8
-CTOR_GENERATE_WARGOAL_DEFAULT = 0x1181220
-GENERATE_WARGOAL_SIZE = 0xA0     # ctor writes through +0x90
+VT_GENERATE_WARGOAL = _OW.CMD_VT_GENERATE_WARGOAL
+CTOR_GENERATE_WARGOAL_DEFAULT = _OW.CMD_CTOR_GENERATE_WARGOAL_DEFAULT
+GENERATE_WARGOAL_SIZE = _OW.CMD_GENERATE_WARGOAL_SIZE     # ctor writes through +0x90
 
 
 def make_justify_wargoal(game, to_id, wargoal_type_ptr=0, from_id=None, force=True):
@@ -1147,9 +1155,9 @@ def dispatch(game, cls, fields):
 # Same 12-byte shape as CSetNationalFocusCommand (0x11D0DC0 -> 0x2A128C8) minus
 # the CNationalFocus* argument: the command carries only "who", so dropping is
 # "clear whatever that country has selected".
-CTOR_DROP_NATIONAL_FOCUS = 0x11CE6F0   # (cmd, CCountryTag*) -> CDropCurrentNationalFocusCommand
-VT_DROP_NATIONAL_FOCUS = 0x2A12988     # .?AVCDropCurrentNationalFocusCommand@@
-SIZE_DROP_NATIONAL_FOCUS = 0x30
+CTOR_DROP_NATIONAL_FOCUS = _OW.CMD_CTOR_DROP_NATIONAL_FOCUS   # (cmd, CCountryTag*) -> CDropCurrentNationalFocusCommand
+VT_DROP_NATIONAL_FOCUS = _OW.CMD_VT_DROP_NATIONAL_FOCUS       # .?AVCDropCurrentNationalFocusCommand@@
+SIZE_DROP_NATIONAL_FOCUS = _OW.CMD_SIZE_DROP_NATIONAL_FOCUS
 
 
 def make_drop_national_focus(game, tag_id):
@@ -1255,6 +1263,8 @@ def set_game_speed(game, speed, measure_seconds=None, use_command=False):
     clamped = (engine_speed != requested)
 
     p = game.p
+    import win_pipeline as _wp
+    _wp.ensure_live_version(game, only_if_live=True)
     gs = p.u64(p.base + O.G_GAMESTATE)
     if not gs:
         return {
@@ -1353,8 +1363,9 @@ def set_game_speed(game, speed, measure_seconds=None, use_command=False):
             if temp_unpaused and idler:
                 try:
                     p.write(idler + _sess.IDLER_PAUSED, b"\x01")
-                except Exception:
-                    pass
+                except Exception as _pe:
+                    import diag as _diag
+                    _diag.warn("cmdwin.set_game_speed.restore_pause", _pe)
     elif mem_ok and was_paused:
         measure_note = ("game is paused; speed verified via CCurrentGameState+0x4BC "
                         "readback without advancing the clock (pass measure_seconds>0 "
@@ -1434,12 +1445,12 @@ def declare_war(game, to_id, from_id=None, wargoal=0, force=True, validate=False
     return {"ok": bool(posted), "valid": valid, "posted": posted, **objs}
 
 
-VT_SET_NATIONAL_FOCUS = 0x2A128C8
-VT_SET_RESEARCH = 0x2A11548
-VT_SET_PROD_LINE = 0x2A0FF88
-CTOR_SET_PROD_LINE = 0x11D1550
-CANEXEC_SET_PROD_LINE = 0x11F2C30
-SIZE_SET_PROD_LINE = 0x38
+VT_SET_NATIONAL_FOCUS = _OW.CMD_VT_SET_NATIONAL_FOCUS
+VT_SET_RESEARCH = _OW.CMD_VT_SET_RESEARCH
+VT_SET_PROD_LINE = _OW.CMD_VT_SET_PROD_LINE
+CTOR_SET_PROD_LINE = _OW.CMD_CTOR_SET_PROD_LINE
+CANEXEC_SET_PROD_LINE = _OW.CMD_CANEXEC_SET_PROD_LINE
+SIZE_SET_PROD_LINE = _OW.CMD_SIZE_SET_PROD_LINE
 
 
 def _apply_profile():
@@ -1509,8 +1520,9 @@ def _apply_profile():
         SPEC_PATCH["CSetGameSpeedCommand"].update(
             vt=VT_SET_GAME_SPEED, ctor=CTOR_SET_GAME_SPEED, size=SIZE_SET_GAME_SPEED
         )
-    except Exception:
-        pass
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("cmdwin.apply_profile", _e)
 
 
 _apply_profile()

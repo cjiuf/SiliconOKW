@@ -15,6 +15,9 @@ from typing import Iterable, Optional
 from mem import Proc
 from call import Injector, CallError
 import offsets as O
+import session_state as _SS
+
+DATE_ADDR_CACHE = _SS.state_path(_SS.DATE_ADDR_NAME)
 
 _LIBC_TRIM_FN = None
 _LIBC_TRIM_INIT = False
@@ -954,7 +957,7 @@ class HOI4:
     def __exit__(self, *a):
         self.detach()
 
-    def attach(self):
+    def attach(self, force_version: bool = False):
         """Attach once when making several calls; much faster than attaching per call.
 
         2026-11-08 (run 20): every process that injects now takes an exclusive
@@ -966,6 +969,9 @@ class HOI4:
         process. The kernel serialises them instead.
         """
         if self._depth == 0:
+            # 阶段 3 精确版本安全门禁：任何注入/远程调用前强制核验活进程 PE 指纹（fail-closed）
+            import win_pipeline as _wp
+            _wp.ensure_live_version(self, force=force_version)
             from xlock import FileLock
             self._lock = FileLock()
             self._lock.acquire()
@@ -975,8 +981,9 @@ class HOI4:
             except Exception:
                 try:
                     self._lock.release()
-                except Exception:
-                    pass
+                except Exception as _le:
+                    import diag as _diag
+                    _diag.warn("api.attach.lock_release", _le)
                 self._lock = None
                 raise
         self._depth += 1
@@ -993,8 +1000,9 @@ class HOI4:
                 if lk is not None:
                     try:
                         lk.release()
-                    except Exception:
-                        pass
+                    except Exception as _le:
+                        import diag as _diag
+                        _diag.warn("api.detach.lock_release", _le)
                     self._lock = None
 
     def call(self, func_vaddr: int, args: Iterable[int] = (), signed=False,
@@ -1062,38 +1070,14 @@ class HOI4:
         return self.console_argv(argv)
 
     def console_argv(self, argv) -> ConsoleResult:
-        """Run a console command.
-
-        Two paths, in this order:
-
-          1. `consolecmd.run` -- look the command up in the engine's own 370-entry
-             command table and call its handler directly. No keyboard, no window
-             manager, no X server, and it keeps working after a save reload.
-          2. `xconsole.run`  -- the old typing path, kept as a fallback in case
-             the table cannot be located (it needs matchbox + a focused window).
-        """
+        """通过引擎原生控制台命令表直接执行控制台命令（原 Linux `xconsole` 路径已移除）。"""
         cmd = " ".join(str(a) for a in argv)
         try:
             import consolecmd
             ok, msg = consolecmd.run(self, cmd)
             return ConsoleResult(ok, msg, cmd)
         except Exception as e:
-            direct_err = repr(e)[:200]
-        try:
-            import xconsole
-            depth = getattr(self, "_depth", 0)
-            for _ in range(depth):
-                self.detach()
-            try:
-                info = xconsole.run(cmd)
-            finally:
-                for _ in range(depth):
-                    self.attach()
-            ok = bool(info.get("ok"))
-            return ConsoleResult(ok, "" if ok else (info.get("note") or "typing failed")
-                                 + " / direct: " + direct_err, cmd)
-        except Exception as e:
-            return ConsoleResult(False, "direct: %s / typing: %r" % (direct_err, e), cmd)
+            return ConsoleResult(False, "direct: %r" % (e,), cmd)
 
     # =============================================== console command catalogue
     def command_catalog(self) -> dict:
@@ -1739,10 +1723,8 @@ class HOI4:
         # paid 11-22 s and hoi4_session_info blew its 50 s budget.
         if not force:
             try:
-                import json as _j, os as _o
-                _df = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),
-                                   "date_addr.json")
-                with open(_df) as _fh:
+                import json as _j
+                with open(DATE_ADDR_CACHE) as _fh:
                     _c = _j.load(_fh)
                 if int(_c.get("pid") or 0) == self.p.pid and _c.get("addr"):
                     _ad = (int(_c["addr"], 16) if isinstance(_c["addr"], str)
@@ -1814,8 +1796,8 @@ class HOI4:
                 self._win_date_last = self.p.i32(gs_hits[0])
                 return gs_hits[0]
             try:
-                import json as _j, os as _o
-                with open(_o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "date_addr.json")) as _dfh:
+                import json as _j
+                with open(DATE_ADDR_CACHE) as _dfh:
                     c = _j.load(_dfh)
                 if int(c.get("pid") or 0) == self.p.pid and c.get("addr"):
                     ad = int(c["addr"], 16) if isinstance(c["addr"], str) else int(c["addr"])
@@ -1931,7 +1913,7 @@ class HOI4:
         dead = self._dead_date_addrs
         if len(dead) > 200:
             dead.clear()
-        cache_f = os.path.join(os.path.dirname(os.path.abspath(__file__)), "date_addr.json")
+        cache_f = DATE_ADDR_CACHE
         # 2026-11-08 (run 16): try the EXACT CDate signature first. The heuristic
         # below picks by distance to the game.log stamp, and a stalled log pinned
         # the clock 71 days in the past inside the game's ring buffer of
@@ -1952,8 +1934,9 @@ class HOI4:
                     _json.dump({"pid": self.p.pid, "base": self.p.base,
                                 "addr": exact, "last": self._date_last}, fh)
                 os.replace(_tmp, cache_f)
-            except Exception:
-                pass
+            except Exception as _ce:
+                import diag as _diag
+                _diag.warn("api.date_cache.write", _ce, detail=str(cache_f))
             return exact
         if not self._date_addr and not force:
             try:
@@ -2025,8 +2008,9 @@ class HOI4:
                                 # game 0.3 s to move again.
                                 try:
                                     self.dismiss_popups_and_unpause()
-                                except Exception:
-                                    pass
+                                except Exception as _de:
+                                    import diag as _diag
+                                    _diag.warn("api.find_date.dismiss_unpause", _de)
                                 _t.sleep(0.3)
                                 _mv = self.p.try_read(self._date_addr, 4)
                                 if _mv and struct.unpack("<i", _mv)[0] != cur:
@@ -2180,8 +2164,9 @@ class HOI4:
 
     def _save_date_cache(self):
         import json as _json
-        f = os.path.join(os.path.dirname(os.path.abspath(__file__)), "date_addr.json")
+        f = DATE_ADDR_CACHE
         try:
+            _SS.ensure_parent(f)
             _tmp = f"{f}.{os.getpid()}.tmp"
             with open(_tmp, "w") as fh:
                 _json.dump({"pid": self.p.pid, "base": self.p.base,
@@ -2192,58 +2177,26 @@ class HOI4:
             pass
 
     # 2026-11-11: the stock Paradox log directory is NOT where this stack writes:
-    # the game may run with -userdir=<somewhere>, so its logs live in
-    # <userdir>/logs. Reading the default directory picked up files from an old
-    # 1942 campaign and date_raw() clamped every fresh 1936 campaign to
-    # 1942.06.23 (the "date stuck at 1942" bug). Resolve the userdir from the
-    # live process cmdline; HOI4_GAME_LOG / HOI4_ERROR_LOG still win.
-    @staticmethod
-    def _userdir_log_dir():
-        try:
-            import subprocess
-            cmd = subprocess.run(["ps", "-p", str(os.getpid()), "-o", "cmd="],
-                                 capture_output=True, text=True, timeout=3).stdout
-        except Exception:
-            cmd = ""
-        return cmd
-
     def _log_paths(self):
         env_g = os.environ.get("HOI4_GAME_LOG")
         env_e = os.environ.get("HOI4_ERROR_LOG")
         if env_g and env_e:
             return env_g, env_e
-        ud = getattr(self, "_hoi4_userdir", None)
-        if ud is None:
-            ud = ""
-            try:
-                cmd = open("/proc/%d/cmdline" % self.p.pid, "rb").read().split(b"\0")
-                for tok in cmd:
-                    t = tok.decode("utf-8", "replace")
-                    if t.startswith("-userdir="):
-                        ud = t.split("=", 1)[1]
-                        break
-            except Exception:
-                ud = ""
-            self._hoi4_userdir = ud
-        if ud:
-            base = os.path.join(ud, "logs")
-            return (env_g or os.path.join(base, "game.log"),
-                    env_e or os.path.join(base, "error.log"))
         try:
             import config as _cfg
             d = os.path.join(_cfg.user_dir(), "logs")
         except Exception:
             d = os.path.expanduser(
-                "~/.local/share/Paradox Interactive/Hearts of Iron IV/logs")
+                "~/Documents/Paradox Interactive/Hearts of Iron IV/logs")
         return env_g or os.path.join(d, "game.log"), env_e or os.path.join(d, "error.log")
 
     LOG_PATH = os.environ.get(
         "HOI4_GAME_LOG",
-        os.path.expanduser("~/.local/share/Paradox Interactive/Hearts of Iron IV/logs/game.log"))
+        os.path.expanduser("~/Documents/Paradox Interactive/Hearts of Iron IV/logs/game.log"))
 
     ERROR_LOG_PATH = os.environ.get(
         "HOI4_ERROR_LOG",
-        os.path.expanduser("~/.local/share/Paradox Interactive/Hearts of Iron IV/logs/error.log"))
+        os.path.expanduser("~/Documents/Paradox Interactive/Hearts of Iron IV/logs/error.log"))
 
     def _log_date(self):
         """The last [YYYY.MM.DD.HH] stamp in game.log / error.log, as a Clausewitz hour.
@@ -2292,25 +2245,7 @@ class HOI4:
         return min(ages) if ages else None
 
     def dismiss_popups_and_unpause(self):
-        """Close a blocking World News / event popup and clear the pause flag.
-
-        Run 7 lost ten months of game time to a single open news window: the
-        clock stood still, every front tick was skipped, and 110 divisions
-        watched Poland. Return activates a popup's default button and is
-        harmless on the map (Escape would open the main menu, so never use it).
-        The idler's pause byte (+0x6C1) is the same one `session.is_paused`
-        reads; clearing it resumes the clock even when no popup has focus.
-        """
-        if sys.platform != "win32":
-            try:
-                import subprocess
-                for disp in (":1", ":0"):
-                    subprocess.run(
-                        ["env", "DISPLAY=%s" % disp, "XDG_RUNTIME_DIR=/run/user/1001",
-                         "xdotool", "key", "Return"],
-                        timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+        """清除 CInGameIdler 暂停标志以恢复时钟（不使用合成按键注入）。"""
         try:
             # 2026-11-17: the old literal 0x459E908 is a LINUX ELF offset.  On
             # the PE build self.va() still resolves base+offset, so at best the
@@ -2326,11 +2261,14 @@ class HOI4:
             # the 13-day EVENT_TIMEOUT_DEFAULT auto-resolve.  Popups are read
             # and answered through the event queue instead (see hoi4_events).
             import session as _sess
+            import win_pipeline as _wp
+            _wp.ensure_live_version(self, only_if_live=True)
             idler = self.p.u64(self.va(_sess.G_IDLER))
             if idler and self.p.u8(idler + _sess.IDLER_PAUSED) != 0:
                 self.p.write(idler + _sess.IDLER_PAUSED, b"\x00")
-        except Exception:
-            pass
+        except Exception as _ue:
+            import diag as _diag
+            _diag.warn("api.dismiss_unpause.write_pause", _ue)
         return True
 
     def _gs_clock_raw(self):

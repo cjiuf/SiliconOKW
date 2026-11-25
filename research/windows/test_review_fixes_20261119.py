@@ -201,12 +201,15 @@ def test_hard_constraints_intact():
     import armyops_win
     check("Hard constraint: armyops_win.RAW_OFFENSIVE_CTOR_ALLOWED remains False",
           armyops_win.RAW_OFFENSIVE_CTOR_ALLOWED is False)
-    with open(os.path.join(ROOT, "mcp", "server.py"), encoding="utf-8") as f:
-        srv = f.read()
+    _mcp_dir = os.path.join(ROOT, "mcp")
+    if _mcp_dir not in sys.path:
+        sys.path.insert(0, _mcp_dir)
+    import server as _mcp_srv
+    _rage_src = inspect.getsource(_mcp_srv._rage_micro)
     check("Hard constraint: RageMicro uses independent Game() in mcp/server.py",
-          "ragemicro.RageMicro(Game(), **kw)" in srv)
+          "ragemicro.RageMicro(Game(), **kw)" in _rage_src)
     check("Hard constraint: MAX_PAUSE_HOURS = 300 intact in mcp/server.py",
-          "MAX_PAUSE_HOURS = 300" in srv)
+          _mcp_srv.MAX_PAUSE_HOURS == 300)
 
 
 def main():

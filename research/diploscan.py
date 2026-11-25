@@ -12,14 +12,16 @@ import config
 RE_DIR = config.DUMP_DIR
 BIN = config.binary_path(required=False)
 CACHE = os.path.join(HERE, "diploactions.pkl")
-FN_NEW = 0x3485810
-FN_BASE_CTOR = 0xA48E10
+FN_NEW = 0x510950   # operator new (_Znwm@plt) in 1.19.4.1
+FN_BASE_CTOR = None  # the base ctor moved; the vtable-lea check below replaces it
 
 
 def _dump():
     """Full disassembly to a temp file. It is large and is deleted once built."""
     import tempfile
-    p = os.path.join(tempfile.gettempdir(), "hoi4_alldis.txt")
+    p = os.environ.get("HOI4_DIS") or os.path.join(tempfile.gettempdir(), "hoi4_alldis.txt")
+    if os.path.exists(p) and os.path.getsize(p) > 0:
+        return p
     if not os.path.exists(p):
         with open(p, "w") as f:
             subprocess.run(["objdump", "-d", "-M", "intel", BIN], stdout=f, check=True)
@@ -82,7 +84,7 @@ def build(force=False):
             dis = subprocess.run(["objdump", "-d", "-M", "intel",
                                   "--start-address=%#x" % c, "--stop-address=%#x" % end, BIN],
                                  capture_output=True, text=True).stdout
-            if ("call   %x" % FN_BASE_CTOR) not in dis:
+            if FN_BASE_CTOR and ("call   %x" % FN_BASE_CTOR) not in dis:
                 continue
             if ("# %x" % info["vtable"]) not in dis:
                 continue

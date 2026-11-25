@@ -118,12 +118,14 @@ def _parse_regions(game):
 
 
 def build(force=False):
-    if not force and os.path.exists(CACHE):
+    import safe_cache
+    if not force and safe_cache.exists(CACHE):
         try:
-            with open(CACHE, "rb") as f:
-                cached = pickle.load(f)
+            cached = safe_cache.load(CACHE)
             if isinstance(cached, dict) and cached.get("schema") == SCHEMA:
                 return cached
+        except (safe_cache.UnsafePickleError, safe_cache.CacheIntegrityError):
+            raise
         except Exception:
             pass
     game = config.game_dir()
@@ -139,8 +141,7 @@ def build(force=False):
         by_name.setdefault(rec["name_key"].strip().lower(), rid)
     data = {"schema": SCHEMA, "regions": regions, "by_name": by_name}
     try:
-        with open(CACHE, "wb") as f:
-            pickle.dump(data, f)
+        safe_cache.save(CACHE, data, fmt="json")
     except OSError:
         pass
     return data
