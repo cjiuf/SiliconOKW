@@ -1,6 +1,6 @@
 """Dynamic-variable registry helpers (PE build 1.19.5.0).
 
-Facts established by disassembly (see docs/KNOWN_ISSUES.md P1 #6):
+Facts established by disassembly (see research/windows/pedis.py / trigger table notes):
 
   registry map global   RVA 0x33DF150   (std::unordered_map<u32, std::function<...>>)
   documentation list    RVA 0x33DF1D0   (std::list of {name, description, is_trigger})

@@ -52,6 +52,7 @@ STATE_PATH = _SS.state_path(_SS.REDDOTS_STATE_NAME)
 # 严控五项：默认拒绝普通 ack，必须显式 force=True + 非空 reason，且豁免期 <= 7 游戏日
 # CB_AVAILABLE / JUSTIFY_LOST 绝不放进 AUTO_SOLVABLE_CODES，必须由决策者亲自处置
 STRICT_CODES = frozenset({
+    "PEACE_CONFERENCE",
     "PENDING_EVENT",
     "NO_FOCUS",
     "IDLE_RESEARCH",
@@ -401,9 +402,10 @@ def _make_item(
     }
 
 
-def _scan_raw(g, fast=False):
+def _scan_raw(g, fast=False, prefetched=None):
     """纯只读采集全部原始红点（不套 ack 过滤）。"""
     items = []
+    pf = prefetched if isinstance(prefetched, dict) else {}
     try:
         tag = g.player_tag()
         c = g.player()
@@ -412,7 +414,28 @@ def _scan_raw(g, fast=False):
 
     date_text, date_raw = _date_info(g)
     st = _get_state(g)
-    at_war = _is_at_war(g)
+    at_war = bool(pf["enemies"]) if pf.get("enemies") is not None else _is_at_war(g)
+
+    # ------------------------------------------------------------------ 0. 和平会议（严控阻塞）
+    try:
+        import peacewin as _pw
+        _conf = _pw.live_conference_readonly(g)
+        if _conf:
+            items.append(_make_item(
+                "PEACE_CONFERENCE",
+                "检测到和平会议已开启（推钟已被引擎锁定）",
+                {"conference_ptr": hex(int(_conf)) if isinstance(_conf, int) else str(_conf)},
+                [
+                    "hoi4_peace_status() 查看当前和会参与国、得分与出价状态",
+                    "hoi4_peace_options(loser='<战败国TAG>') 与 hoi4_peace_demands(loser='<战败国TAG>') 提交需求",
+                    "确认后调用 hoi4_peace_finish(action='done') 结束和会并恢复推钟",
+                ],
+                severity="strict",
+                tier=1,
+                signature="PEACE_CONFERENCE:open",
+            ))
+    except Exception:
+        pass
 
     # ------------------------------------------------------------------ 1. 待决事件
     try:
@@ -506,7 +529,8 @@ def _scan_raw(g, fast=False):
 
     # ------------------------------------------------------------------ 2. 新决议 & 限时任务
     try:
-        vis = g.decisions(tag, which="visible", rich=True) or []
+        vis = (pf["decisions_visible"] if pf.get("decisions_visible") is not None
+               else (g.decisions(tag, which="visible", rich=True) or []))
         mine_vis = [d for d in vis if d.get("mine", True) and d.get("key")]
         cur_keys = {d["key"] for d in mine_vis}
         if not st["seen_decisions_init"]:
@@ -598,7 +622,7 @@ def _scan_raw(g, fast=False):
 
     # ------------------------------------------------------------------ 3. 空国策
     try:
-        cur_f = g.current_focus()
+        cur_f = pf["current_focus"] if "current_focus" in pf else g.current_focus()
         if not cur_f:
             cands = []
             cands_source = "none"
@@ -648,7 +672,8 @@ def _scan_raw(g, fast=False):
 
     # ------------------------------------------------------------------ 4. 空科研槽
     try:
-        slots = g.research_slots() or []
+        slots = (pf["research_slots"] if pf.get("research_slots") is not None
+                 else (g.research_slots() or []))
         free_slots = [s.get("slot") for s in slots if not s.get("slot_busy")]
         if free_slots:
             has_avail = True
@@ -685,25 +710,31 @@ def _scan_raw(g, fast=False):
 
     # ------------------------------------------------------------------ 5. 工业产能（民工/军工/船坞）
     lines = []
-    try:
-        lines = g.production_lines(tag, include_obsolete=False) or []
-    except TypeError:
+    if pf.get("lines") is not None:
+        lines = pf["lines"] or []
+    else:
         try:
-            lines = g.production_lines() or []
+            lines = g.production_lines(tag, include_obsolete=False) or []
+        except TypeError:
+            try:
+                lines = g.production_lines() or []
+            except Exception:
+                lines = []
         except Exception:
             lines = []
-    except Exception:
-        lines = []
 
-    try:
-        bld = g.construction_queue(tag) or []
-    except TypeError:
+    if pf.get("construction") is not None:
+        bld = pf["construction"] or []
+    else:
         try:
-            bld = g.construction_queue() or []
+            bld = g.construction_queue(tag) or []
+        except TypeError:
+            try:
+                bld = g.construction_queue() or []
+            except Exception:
+                bld = []
         except Exception:
             bld = []
-    except Exception:
-        bld = []
 
     civ_total = int(getattr(c, "civilian_factories", 0) or 0)
     mil_total = int(getattr(c, "military_factories", 0) or 0)
@@ -746,8 +777,8 @@ def _scan_raw(g, fast=False):
 
     # 2026-11-23 (复测 6 P1-1): 军工/船坞优先采用引擎权威口径 g.factory_allocation(tag)，
     # 避免把占领区非核心合规折算、改装线（CShipRefitProductionLine）或修理船坞误报为 IDLE_DOCK。
-    _alloc = None
-    if hasattr(g, "factory_allocation"):
+    _alloc = pf.get("alloc") if isinstance(pf.get("alloc"), dict) else None
+    if _alloc is None and hasattr(g, "factory_allocation"):
         try:
             _alloc = g.factory_allocation(tag)
         except Exception:
@@ -867,7 +898,12 @@ def _scan_raw(g, fast=False):
 
     # ------------------------------------------------------------------ 7. 未编组师 & 无将领集团军
     try:
-        unassigned = g.unassigned_divisions(tag) or []
+        if pf.get("unassigned") is not None:
+            unassigned = pf["unassigned"] or []
+        elif pf.get("unassigned_count") is not None:
+            unassigned = [{}] * max(0, int(pf["unassigned_count"] or 0))
+        else:
+            unassigned = g.unassigned_divisions(tag) or []
         if len(unassigned) >= 1:
             items.append(_make_item(
                 "UNASSIGNED_DIVS",
@@ -987,8 +1023,11 @@ def _scan_raw(g, fast=False):
     stock_totals = {}
     rifles_total = None
     try:
-        st_res = g.equipment_stockpile(tag) or {}
-        stock_totals = st_res.get("totals_by_equipment") or {}
+        if isinstance(pf.get("stock_totals"), dict):
+            stock_totals = pf["stock_totals"]
+        else:
+            st_res = g.equipment_stockpile(tag) or {}
+            stock_totals = st_res.get("totals_by_equipment") or {}
         rifles_total = sum(
             float(v or 0.0)
             for k, v in stock_totals.items()
@@ -1240,11 +1279,14 @@ def _scan_raw(g, fast=False):
     try:
         import diplomacy as _dip
         enemies_now = set()
-        try:
-            import combat as _cb_wg
-            enemies_now = {str(x).upper() for x in (_cb_wg.enemy_tags(g, tag) or ())}
-        except Exception:
-            enemies_now = set()
+        if pf.get("enemies") is not None:
+            enemies_now = {str(x).upper() for x in (pf["enemies"] or ())}
+        else:
+            try:
+                import combat as _cb_wg
+                enemies_now = {str(x).upper() for x in (_cb_wg.enemy_tags(g, tag) or ())}
+            except Exception:
+                enemies_now = set()
 
         wg_rows, wg_ok = _dip.country_wargoals_fast(g, tag=tag, valid_only=True)
         cb_rows = []
@@ -1404,10 +1446,13 @@ def _is_acked(item, acks, now_date_raw):
     return True
 
 
-def evaluate(g, fast=False):
+def evaluate(g, fast=False, prefetched=None):
     """完整评估当前红点，按未签收阻塞项 / 已签收项 / 提醒项分类返回。"""
     with _LOCK:
-        raw = _scan_raw(g, fast=fast)
+        try:
+            raw = _scan_raw(g, fast=fast, prefetched=prefetched)
+        except TypeError:
+            raw = _scan_raw(g, fast=fast)
         if not raw.get("ok"):
             return {
                 "ok": False,

@@ -11,11 +11,11 @@ from ._shared import CH_KEY, CH_NAME, _arr, item_name
 class MilitaryLeadersMixin:
     """角色、顾问池、将领/元帅查询、提拔招募及省份指针查询领域 Mixin。"""
 
-    VT_ARMY_LEADER = 0x43D5890   # 11CArmyLeader vtable, 1.19.4.1 (rtti_index.csv)
+    VT_ARMY_LEADER = 0x43D5890   # 11CArmyLeader vtable, 1.19.4.1 ELF RTTI
 
-    VT_ADVISOR = 0x4349AD8   # 8CAdvisor vtable, 1.19.4.1 (rtti.pkl)
+    VT_ADVISOR = 0x4349AD8   # 8CAdvisor vtable, 1.19.4.1 ELF RTTI
 
-    VT_CCHARACTER = 0x4349390   # 10CCharacter vtable, 1.19.4.1 (rtti.pkl)
+    VT_CCHARACTER = 0x4349390   # 10CCharacter vtable, 1.19.4.1 ELF RTTI
 
     G_PROVINCE_MANAGER = 0x459E9F0   # global -> manager singleton (vtable+0x50 = GetProvince(id))
     VT_PROVINCE_MGR    = 0x50        # slot offset inside the manager vtable

@@ -61,17 +61,27 @@ class OverviewMixin:
                 "clamped": capped != speed}
 
     def _air_snapshot(self, max_age=25.0):
-        """Player air wings, cached per game pid.
+        """Player air wings, cached per game pid (longer TTL on static game clock).
 
         2026-11-17: the user's complaint was that nothing ever reminded the model
         to touch the air force -- in the 1940 run all 15 wings sat at mission 0
         from 1936 to 1940.  `hoi4_overview` now reports that, but a CAirWing RTTI
-        scan is expensive, so it is cached for a few seconds and keyed by pid.
+        scan is expensive, so it is cached and keyed by `(pid, date_raw)`.
         """
         import time
         pid = getattr(getattr(self, "p", None), "pid", None)
+        date_raw = None
+        try:
+            d = self.date()
+            if isinstance(d, dict):
+                date_raw = d.get("raw")
+        except Exception:
+            date_raw = None
+        eff_age = max(float(max_age), 120.0) if (
+            date_raw is not None and _AIR_SNAP.get("date_raw") == date_raw
+        ) else float(max_age)
         if (_AIR_SNAP.get("pid") == pid and _AIR_SNAP.get("rows") is not None
-                and (time.time() - float(_AIR_SNAP.get("ts") or 0)) < max_age):
+                and (time.time() - float(_AIR_SNAP.get("ts") or 0)) < eff_age):
             return _AIR_SNAP["rows"]
         rows = []
         try:
@@ -79,7 +89,7 @@ class OverviewMixin:
             rows = AW.german_wings(self).get("wings") or []
         except Exception:
             rows = []
-        _AIR_SNAP.update(pid=pid, ts=time.time(), rows=rows)
+        _AIR_SNAP.update(pid=pid, date_raw=date_raw, ts=time.time(), rows=rows)
         return rows
 
     def _navy_snapshot(self):
@@ -91,13 +101,14 @@ class OverviewMixin:
             return []
         return fleets or []
 
-    def _light_alerts(self, tag, summary, lines, cur):
+    def _light_alerts(self, tag, summary, lines, cur, cons=None, unassigned=None,
+                      research_slots=None, alloc=None):
         """Alerts for hoi4_overview, without the 15 s focus ranking.
 
         `alerts()` calls selectable_focuses() and available_research(); together
         they pushed hoi4_overview past the MCP client timeout on the PE build
         (measured 34 s for alerts alone, 49 s for candidates).  Everything here
-        is already-read data.
+        is already-read or prefetched data.
         """
         out = []
         try:
@@ -106,7 +117,8 @@ class OverviewMixin:
         except Exception:
             pass
         try:
-            slots = self.research_slots(tag)
+            slots = (research_slots if research_slots is not None
+                     else self.research_slots(tag))
             empty = [s["slot"] for s in slots if not s.get("slot_busy")]
             if empty:
                 out.append("RESEARCH_IDLE: %d 个科研槽空置 (slot %s)"
@@ -143,7 +155,8 @@ class OverviewMixin:
         except Exception:
             pass
         try:
-            q = len(self.construction_queue(tag))
+            _cons_rows = (cons if cons is not None else self.construction_queue(tag)) or []
+            q = len(_cons_rows)
             civ = summary.get("civilian_factories") or 0
             if q == 0:
                 # 2026-11-17 (third pass): a 1939 save came back with 66 civilian
@@ -161,7 +174,7 @@ class OverviewMixin:
                 # which a factory actually finished), so the factory ledger is
                 # the only trustworthy signal here.
                 _assigned = sum(int(l.get("factories") or 0)
-                                for l in self.construction_queue(tag))
+                                for l in _cons_rows)
                 _idle = int(civ) - _assigned
                 # 2026-11-21 (续测 P2-9): `civ` is the RAW built level, which
                 # includes the factories permanently locked to consumer goods --
@@ -178,19 +191,26 @@ class OverviewMixin:
         except Exception:
             pass
         try:
-            n = len(self.unassigned_divisions(tag))
+            n = (int(unassigned) if isinstance(unassigned, int)
+                 else len(unassigned) if unassigned is not None
+                 else len(self.unassigned_divisions(tag)))
             if n:
                 out.append("UNASSIGNED_DIVS: %d 个师未编入集团军" % n)
         except Exception:
             pass
+        _has_auth_alloc = isinstance(alloc, dict) and alloc.get("source") == "engine_production_status"
         try:
-            total = summary.get("military_factories") or 0
-            used = sum(int(l.get("factories") or 0) for l in lines
-                       if l.get("class") == "CMilitaryProductionLine")
-            if total - used >= 2:
+            if _has_auth_alloc:
+                _mil_idle = int(alloc.get("military_idle") or 0)
+            else:
+                total = summary.get("military_factories") or 0
+                used = sum(int(l.get("factories") or 0) for l in lines
+                           if l.get("class") == "CMilitaryProductionLine")
+                _mil_idle = total - used
+            if _mil_idle >= 2:
                 out.append("MIL_FACTORY_IDLE: %d 座军工厂闲置未分配"
                            " -> hoi4_set_production_amount / hoi4_add_production_line"
-                           % (total - used))
+                           % _mil_idle)
         except Exception:
             pass
         # --- 2026-11-17 (third pass): the last two blind spots -----------------
@@ -199,13 +219,18 @@ class OverviewMixin:
         # codebase: the line is drawn, the UI shows it, and not one division ever
         # marches.  Both are cheap reads on data already in hand.
         try:
-            dock = summary.get("naval_dockyards") or 0
-            used = sum(int(l.get("factories") or 0) for l in lines
-                       if l.get("class") == "CNavalProductionLine")
-            if dock and dock - used >= 2:
+            if _has_auth_alloc:
+                dock = int(alloc.get("naval_available") or 0)
+                _dock_idle = int(alloc.get("naval_idle") or 0)
+            else:
+                dock = summary.get("naval_dockyards") or 0
+                used = sum(int(l.get("factories") or 0) for l in lines
+                           if l.get("class") in ("CNavalProductionLine", "CShipRefitProductionLine"))
+                _dock_idle = dock - used
+            if dock and _dock_idle >= 2:
                 out.append("DOCKYARD_IDLE: %d/%d 座船坞闲置未分配"
                            " -> hoi4_set_production_amount(line=..., amount=...)"
-                           % (dock - used, dock))
+                           % (_dock_idle, dock))
         except Exception:
             pass
         try:
@@ -332,11 +357,13 @@ class OverviewMixin:
             out.extend(_obs_alerts)
         except Exception:
             pass
+        _st_tot = {}
+        _divs_n = 0
         try:
             import equipmeta as _em
             _st_tot = (self.equipment_stockpile(tag) or {}).get("totals_by_equipment") or {}
             _total_mil = int(summary.get("military_factories") or 0)
-            _divs_n = int((self.divisions(tag, limit=1) or {}).get("count") or 0)
+            _divs_n = int((self.divisions(tag, limit=1, deep=False) or {}).get("count") or 0)
             for _sr in _em.compute_surplus_lines(lines, _st_tot, _total_mil, _divs_n)[:2]:
                 out.append(_sr["alert"])
         except Exception:
@@ -358,7 +385,15 @@ class OverviewMixin:
         # 2026-11-23: 挂载老手战略体检红灯（弱编+XP闲置 / 产能倒挂 / 前线断补危机）
         try:
             import macros as _mc
-            _hb = _mc.strategic_health_board(self, tag=tag) or {}
+            _pf = {"lines": lines, "summary": summary}
+            if _st_tot:
+                _pf["stock_totals"] = _st_tot
+            if _divs_n:
+                _pf["divisions_n"] = _divs_n
+            try:
+                _hb = _mc.strategic_health_board(self, tag=tag, prefetched=_pf) or {}
+            except TypeError:
+                _hb = _mc.strategic_health_board(self, tag=tag) or {}
             for _hal in (_hb.get("alerts") or []):
                 if _hal.get("severity") == "high":
                     out.append("%s: %s (%s)" % (_hal.get("code"), _hal.get("title"), _hal.get("action") or ""))
@@ -404,11 +439,12 @@ class OverviewMixin:
             pass
         return out
 
-    def _light_candidates(self, tag, lines, dec_rows=None):
+    def _light_candidates(self, tag, lines, dec_rows=None, research_slots=None):
         """Cheap candidates block: no focus ranking, no tech-tree scan."""
         out = {}
         try:
-            slots = self.research_slots(tag)
+            slots = (research_slots if research_slots is not None
+                     else self.research_slots(tag))
             out["empty_research_slots"] = [s["slot"] for s in slots
                                            if not s.get("slot_busy")
                                            or s.get("slot_done")]
@@ -452,10 +488,20 @@ class OverviewMixin:
         lines = self.production_lines(c.tag)
         used_mil = sum(int(l.get("factories") or 0) for l in lines
                        if l.get("class") == "CMilitaryProductionLine")
-        alerts = self._light_alerts(c.tag, summary, lines, cur)
         cons = self.construction_queue(c.tag)
         armies_n = len(_arr(self.p, c.ptr, CO_ARMIES))
         unassigned = len(self.unassigned_divisions(c.tag))
+        research = self.research_slots(c.tag)
+        alloc = None
+        if hasattr(self, "factory_allocation"):
+            try:
+                alloc = self.factory_allocation(c.tag)
+            except Exception:
+                alloc = None
+        alerts = self._light_alerts(
+            c.tag, summary, lines, cur,
+            cons=cons, unassigned=unassigned, research_slots=research, alloc=alloc,
+        )
         dec = self.decisions(c.tag, "visible", rich=True)
         # 2026-11-22 (P3-1): `decisions_visible` counted every globally-visible
         # decision (13) while `candidates.available_decisions` was already
@@ -463,9 +509,8 @@ class OverviewMixin:
         # numbers with no way to tell them apart.  Report both, named.  The rows
         # are now parsed once here and handed to _light_candidates.
         dec_mine = [d for d in dec if d.get("mine", True)]
-        cand = self._light_candidates(c.tag, lines, dec_rows=dec)
+        cand = self._light_candidates(c.tag, lines, dec_rows=dec, research_slots=research)
         tree = self.focus_tree(c.tag)
-        research = self.research_slots(c.tag)
         politics = self.politics(c.tag)
         prod = lines
         states = self.states(c.tag)
@@ -478,12 +523,18 @@ class OverviewMixin:
             for _fk in ("progress", "days_done", "cost_days", "days_left", "percent"):
                 if _fk in cur:
                     focus_block[_fk] = cur[_fk]
+        _has_auth_alloc = isinstance(alloc, dict) and alloc.get("source") == "engine_production_status"
+        mil_free = (
+            int(alloc.get("military_idle") or 0)
+            if _has_auth_alloc
+            else max(0, (summary.get("military_factories") or 0) - used_mil)
+        )
         return {
             "date": self.date()["text"],
             "alerts": alerts,
             "factories": {"civ_total": summary.get("civilian_factories"),
                           "mil_total": summary.get("military_factories"),
-                          "mil_free": max(0, (summary.get("military_factories") or 0) - used_mil),
+                          "mil_free": mil_free,
                           "dock_total": summary.get("naval_dockyards"),
                           "construction_queue_len": len(cons)},
             "army_summary": {"total_divisions": armies_n,

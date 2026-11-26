@@ -3854,8 +3854,12 @@ def _tick_production(g, st, st_cfg, ctx, dry_run=False):
                 try:
                     import equipmeta as _em
                     for srow in _em.compute_surplus_lines(lines, stock_t, total_mil, divs_n) or ():
-                        if "line" in srow and srow.get("surplus_ratio") is not None:
-                            surplus_ratios[int(srow["line"])] = float(srow["surplus_ratio"])
+                        if "line" in srow:
+                            _sr_val = srow.get("surplus_ratio")
+                            if _sr_val is None:
+                                _sr_val = srow.get("ratio")
+                            if _sr_val is not None:
+                                surplus_ratios[int(srow["line"])] = float(_sr_val)
                 except Exception:
                     pass
                 # 兜底：若 equipmeta 未覆写（或离线 mock 仅提供 totals_by_equipment），对步枪做直接安全储备倍比评估

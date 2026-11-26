@@ -529,11 +529,10 @@ def army_info(g, og):
 
 
 # =====================================================================
-# M4: the pieces the MCP tool layer needs, moved out of stage/wplan.py
+# M4: the pieces the MCP tool layer needs (verified live 2026-11-14/15)
 # =====================================================================
-# `stage/wplan.py` proved these live (2026-11-14: six Dutch provinces and a
-# capitulation; 2026-11-15: the Danish front + offensive).  The tool layer
-# cannot import a stage script, so the same calls live here now.
+# Proved live on 2026-11-14 (six Dutch provinces and capitulation) and
+# 2026-11-15 (Danish front + offensive).
 
 FN_NEW_OFFENSIVE_CMD = _OW.ORDER_FN_NEW_OFFENSIVE_CMD   # COrderNewFrontCommand ctor (the offensive line)
 FN_ORDER_FRONT_CTX   = _OW.ORDER_FN_FRONT_CTX           # order -> the frontCtx token `+0xD0` must equal
@@ -2314,9 +2313,9 @@ def delete_order(g, orders_group, order_id, allow_child=False):
 def target_provinces(g, enemy_tag, depth=2, own_tag=None):
     """Enemy provinces at BFS `depth` from our border -- the offensive line's targets.
 
-    Same rule as stage/wplan.py: start at the enemy provinces that touch us and
-    walk inwards, keeping everything at least `depth` steps in (depth=2 skips the
-    first row, which the front line already covers).
+    Starts at the enemy provinces that touch us and walks inwards, keeping
+    everything at least `depth` steps in (depth=2 skips the first row, which
+    the front line already covers).
     """
     import collections
     import mapdata

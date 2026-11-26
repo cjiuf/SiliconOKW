@@ -703,17 +703,16 @@ def _add_game_days(g, days):
 
 
 # ---------------------------------------------------------------- 工期模型
-# 1.19.4.1 游戏自己的数据：common/wargoals/00_invasion.txt
+# 1.19.5.0 游戏自己的数据：common/wargoals/00_invasion.txt
 #   take_state = { generate_base_cost = 200  generate_per_state_cost = 50 }
-# 加上 NDiplomacy 的常数：
-#   WARGOAL_JUSTIFY_TENSION_FROM_PRODUCTION = 30.0   （生产规模满额时 +30 天）
+# NDiplomacy 常数（WARGOAL_JUSTIFY_TENSION_FROM_PRODUCTION=30.0 为世界紧张度参数，不计入基准天数；
+# PE 1.19.5.0 活进程实测 1 州 take_state 无并发为 total_days=200.0、0.2 PP/天）：
 #   WARGOAL_PER_JUSTIFY_AND_WAR_COST_FACTOR = 1.5    （每多一个同存正当化/交战对象 x1.5）
 #   BASE_GENERATE_WARGOAL_DAILY_PP          = 0.2    （每天烧 0.2 PP）
 #   POLITICAL_POWER_UPPER_CAP               = 2000.0
-# 这个模型在 2026-11-08 的两个实测点上完全吻合：HOL[35] = 230 天、BEL[6] = 345 天。
 WARGOAL_BASE_COST = 200.0
 WARGOAL_PER_STATE_COST = 50.0
-WARGOAL_PRODUCTION_TERM = 30.0
+WARGOAL_PRODUCTION_TERM = 0.0
 WARGOAL_PER_COUNTRY = 1.5
 WARGOAL_DAILY_PP = 0.2
 POLITICAL_POWER_CAP = 2000.0
@@ -777,21 +776,11 @@ def _country_timed_activities(g):
     return out
 
 
-def justifying(g):
+def justifying(g, deep=False):
     """所有正在进行的正当化（读引擎真实对象，不是猜的）。
 
-    1.19.4.1 `CTimedWargoalActivity` 布局（2026-11-12 用活进程重新互证）：
-      +0x08 int32 活动 id
-      +0x0C int32 发起国 tag id         （实测 GER=1）
-      +0x10 int32 目标国 tag id         （实测 HOL=8 / BEL=7）
-      +0x14 int32 未知/变体字段（HOL take_state=0，BEL take_state=1，不是类型也不是发起国）
-      +0x18 int64 总时长，定点 x1e5，单位=天
-      +0x20 int64 每日进度，定点 x1e5，单位=天/天
-      +0x28 int64 已过天数，定点 x1e5
-    旧注释把 +0x14 当成“发起国”，于是 take_state 的活动读出 from=0，被
-    `src not in idx2tag` 直接丢掉——正当化明明在跑却报 not_started。
-    旧实现逐 8 字节猜 (t1,t2) 并把 +0x10 当发起国，所以把 GER->HOL 印成了
-    HOL->GER（方向反了），也没有 days_left / eta_date。
+    `deep=False`（默认）优先使用追踪指针 + 已有索引 / 缓存期内的 `live_instances`，
+    绝不重复执行全堆扫描；仅刚发起正当化后的轮询传 `deep=True` 破除负缓存重扫。
     """
     custom = getattr(g, "_mock_justifying", None)
     if custom is not None:
@@ -807,29 +796,38 @@ def justifying(g):
     out = []
 
     def _bust_negative(cache_name):
-        """Drop an EMPTY cache entry only: live=2s, deep=5s TTL. The old code
-        cached [] before the engine had built the activity and every later poll
-        in the same 3s window read that []; a stale negative outlived the event."""
+        """Drop an EMPTY cache entry only: live=2s, deep=5s TTL."""
         c = getattr(g.oi, cache_name, None)
         if c and "CTimedWargoalActivity" in c and not c["CTimedWargoalActivity"][1]:
             c.pop("CTimedWargoalActivity", None)
 
     def _instances():
-        """live_instances misses objects created after the index was built."""
+        """合并已知追踪指针、国家直读与可选的 live_instances（不再重复触发 deep_instances）。"""
+        pid = int(getattr(p, "pid", 0) or 0)
+        tracked = list(_TRACKED_ACTIVITIES.get(pid) or ()) if sys.platform == "win32" else []
         direct = _country_timed_activities(g)
-        if direct:
-            return direct
-        _bust_negative("_live_cache")
-        seen = list(g.oi.live_instances("CTimedWargoalActivity"))
-        if seen:
-            return seen
-        _bust_negative("_deep_cache")
-        try:
-            # build(force=True) here re-scanned ~3.8 GB on every miss; the direct
-            # read above already covers objects the index has never seen.
-            return list(g.oi.deep_instances("CTimedWargoalActivity"))
-        except Exception:
-            return []
+        if tracked or direct:
+            seen_a = set()
+            merged = []
+            for a in tracked:
+                if a not in seen_a:
+                    seen_a.add(a)
+                    merged.append((None, a))
+            for item in direct:
+                a = item[1] if isinstance(item, tuple) else item
+                if a not in seen_a:
+                    seen_a.add(a)
+                    merged.append(item)
+            return merged
+        live_fn = getattr(getattr(g, "oi", None), "live_instances", None)
+        if callable(live_fn):
+            if deep:
+                _bust_negative("_live_cache")
+            try:
+                return list(live_fn("CTimedWargoalActivity"))
+            except Exception:
+                return []
+        return []
 
     def _raw_date_to_str(raw_val):
         """将 CBaseTimedActivity 内部的 CGameDate (+0x38/+0x50) 转成 'YYYY.MM.DD'；无效哨兵返回 None。"""
@@ -946,11 +944,17 @@ def justifying(g):
     # 多条正当化活动存在时，按剩余天数升序排列，确保优先展示最快到期的借口
     out.sort(key=lambda r: (float("inf") if r.get("days_left") is None else float(r["days_left"]), str(r.get("target") or "")))
     if not out:
-        # 命令已入队、引擎还没建出 activity 的那几帧
-        try:
-            _left = g.oi.deep_instances("CGenerateWarGoalAction")
-        except Exception:
-            _left = g.oi.live_instances("CGenerateWarGoalAction")
+        # 命令已入队、引擎还没建出 activity 的那几帧：仅 deep=True 才扫堆，常规只读仅查已建索引
+        _left = []
+        oi = getattr(g, "oi", None)
+        if oi is not None:
+            try:
+                if deep and hasattr(oi, "live_instances"):
+                    _left = oi.live_instances("CGenerateWarGoalAction")
+                elif hasattr(oi, "instances"):
+                    _left = oi.instances("CGenerateWarGoalAction")
+            except Exception:
+                _left = []
         for act in _left:
             try:
                 src, tgt = p.i32(act + 0x10), p.i32(act + 0x18)
@@ -963,6 +967,9 @@ def justifying(g):
             except Exception:
                 pass
     return out
+
+
+_JUSTIFYING_ORIG = justifying
 
 
 def country_wargoals_fast(g, tag=None, valid_only=True):

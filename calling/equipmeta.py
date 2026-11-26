@@ -874,6 +874,7 @@ def compute_surplus_lines(lines, stockpile_totals, total_mil: int, div_count: in
             "stockpile": int(round(stock_qty)),
             "reserve_need": int(round(reserve_need)),
             "ratio": round(ratio, 2),
+            "surplus_ratio": round(ratio, 2),
             "factories": fac,
             "total_mil": total_mil,
             "factory_share_pct": round(share * 100.0, 1),

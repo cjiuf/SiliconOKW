@@ -57,10 +57,20 @@ class TestSafeCache(unittest.TestCase):
                 os.environ[k] = v
 
     def test_zero_tracked_pkl_in_git_and_all_18_load_without_pickle(self):
-        tracked = subprocess.check_output(
-            ["git", "ls-files", "*.pkl"], cwd=ROOT, text=True
-        ).splitlines()
-        self.assertEqual(tracked, [], f"仓库不应再跟踪任何 .pkl 文件，实际残留: {tracked}")
+        if os.path.isdir(os.path.join(ROOT, ".git")):
+            tracked = subprocess.check_output(
+                ["git", "ls-files", "*.pkl"], cwd=ROOT, text=True
+            ).splitlines()
+        else:
+            tracked = []
+            for sub in ("calling", "mcp", "tests"):
+                base = os.path.join(ROOT, sub)
+                for dp, dn, fn in os.walk(base):
+                    dn[:] = [d for d in dn if d != "__pycache__"]
+                    for f in fn:
+                        if f.endswith(".pkl"):
+                            tracked.append(os.path.relpath(os.path.join(dp, f), ROOT))
+        self.assertEqual(tracked, [], f"仓库不应再跟踪或残留任何 .pkl 文件，实际残留: {tracked}")
 
         os.environ["HOI4_NO_PICKLE"] = "1"
         for rel in MIGRATED_ASSETS:

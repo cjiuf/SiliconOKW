@@ -79,36 +79,38 @@ class StatsVarsMixin:
 
     def country_stats(self, tag=None, raw=False):
         """~44 country statistics gathered from the game's own trigger functions."""
-        import stats as _st
-        table = _st.build()
-        FIXED_KEYS = {"command_power", "command_power_daily", "political_power_daily",
-                      "surrender_progress", "convoy_threat", "naval_mine_danger"}
-        # Bool triggers return "actual == expected", and the expected field is zero, so
-        # the result comes back inverted. The right value is not (rax & 1). Checked
-        # against is_major, is_in_faction, has_war and has_capitulated; all agree.
-        BOOL_PREFIX = ("has_", "is_", "exists", "country_has")
-        # These want an extra parameter (id/tag), so they are not reliable here:
-        SKIP = ("owns_", "days_since", "has_decision", "has_rule", "has_terrain",
-                "has_opinion_modifier", "has_country_leader_ideology",
-                "has_completed_national_focus", "has_active_timed_decision",
-                "country_has_cosmetic_tag", "has_attache")
+        import api
         out = {}
-        with self:
-            for name, (fn, cls) in sorted(table.items()):
-                if not raw and name.startswith(SKIP):
-                    continue
-                try:
-                    v = self._scope_call(fn, tag)
-                except Exception:
-                    continue
-                if raw:
-                    out[name] = v
-                elif name in FIXED_KEYS:
-                    out[name] = round(v / O.FIXED, 4)
-                elif name.startswith(BOOL_PREFIX):
-                    out[name] = not bool(v & 1)
-                elif -10 ** 9 < v < 10 ** 9:
-                    out[name] = v
+        if getattr(api, "SCOPE_CALL_ALLOW", None):
+            import stats as _st
+            table = _st.build()
+            FIXED_KEYS = {"command_power", "command_power_daily", "political_power_daily",
+                          "surrender_progress", "convoy_threat", "naval_mine_danger"}
+            # Bool triggers return "actual == expected", and the expected field is zero, so
+            # the result comes back inverted. The right value is not (rax & 1). Checked
+            # against is_major, is_in_faction, has_war and has_capitulated; all agree.
+            BOOL_PREFIX = ("has_", "is_", "exists", "country_has")
+            # These want an extra parameter (id/tag), so they are not reliable here:
+            SKIP = ("owns_", "days_since", "has_decision", "has_rule", "has_terrain",
+                    "has_opinion_modifier", "has_country_leader_ideology",
+                    "has_completed_national_focus", "has_active_timed_decision",
+                    "country_has_cosmetic_tag", "has_attache")
+            with self:
+                for name, (fn, cls) in sorted(table.items()):
+                    if not raw and name.startswith(SKIP):
+                        continue
+                    try:
+                        v = self._scope_call(fn, tag)
+                    except Exception:
+                        continue
+                    if raw:
+                        out[name] = v
+                    elif name in FIXED_KEYS:
+                        out[name] = round(v / O.FIXED, 4)
+                    elif name.startswith(BOOL_PREFIX):
+                        out[name] = not bool(v & 1)
+                    elif -10 ** 9 < v < 10 ** 9:
+                        out[name] = v
         if not out:
             # 2026-11-11: stats.build() points at 1.19.2 trigger addresses and every
             # call is refused, so this tool returned {} for EVERY country — the agent

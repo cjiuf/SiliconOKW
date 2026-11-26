@@ -439,7 +439,11 @@ class EconomyMixin:
                                 "before": cur_f,
                                 "after": int(rr.get("after", cur_f - actual_taken)),
                                 "reclaimed": actual_taken,
-                                "surplus_ratio": sr.get("surplus_ratio"),
+                                "surplus_ratio": (
+                                    sr.get("surplus_ratio")
+                                    if sr.get("surplus_ratio") is not None
+                                    else sr.get("ratio")
+                                ),
                             })
                             need_reclaim -= actual_taken
                 except Exception:

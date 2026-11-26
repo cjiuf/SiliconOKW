@@ -370,7 +370,7 @@ class BattleplanOrdersMixin:
                 row["hint"] = ("hoi4_army_battleplans now auto-assigns and deletes an "
                                "order it cannot fill; or hoi4_delete_order + redraw. "
                                "A front order with 0 divisions can crash the engine "
-                               "(AGENTS.md rule 8)")
+                               "(order safety guard)")
             out.append(row)
         res = {"ok": all(x["ok"] for x in out), "mode": mode, "orders": out}
         note = getattr(self, "_assign_note", None)
@@ -705,7 +705,7 @@ class BattleplanOrdersMixin:
                 "note": ("0-division orders crash the engine at hoi4.exe+0xB2E62E; "
                          "this list should be empty before any war")}
 
-    def _border_divisions(self, target_tag, tag=None):
+    def _border_divisions(self, target_tag, tag=None, owner_by_id=None):
         """How many of our divisions are physically on the border we would attack.
 
         This is the check the 2026-11-16 campaign needed and did not have: the
@@ -722,7 +722,8 @@ class BattleplanOrdersMixin:
         out = {"own_tag": me, "enemy_tag": tgt, "border_provinces": 0,
                "border_sample": [], "divisions_on_border": 0, "divisions_count": 0}
         try:
-            cmap = mapdata.province_controller_map(self)
+            cmap = (owner_by_id if owner_by_id is not None
+                    else mapdata.province_controller_map(self))
             border = mapdata.border_provinces(self, me, tgt, owner_by_id=cmap)
         except Exception as e:
             out["error"] = "border map failed: %r" % (e,)
@@ -932,15 +933,20 @@ class BattleplanOrdersMixin:
              （显式传 `ack_co_belligerents=True` 或 `override_checks=True` 可放行；
              若已有驻军但较薄弱/缺前线，则写入高醒目 `warnings` 与 `reasons`）。
         """
+        import time as _time
+        _t0 = _time.perf_counter()
+        _timings_ms = {}
         c = self._c(tag)
         me = c.tag
         tgt_tag = str(target_tag).upper()
+        _t = _time.perf_counter()
         div = self.divisions(me, limit=1, deep=False)
         my_divs = int(div.get("count") or 0)
         try:
-            enemy_divs = int((self.divisions(tgt_tag) or {}).get("count") or 0)
+            enemy_divs = int((self.divisions(tgt_tag, limit=1, deep=False) or {}).get("count") or 0)
         except Exception:
             enemy_divs = 0
+        _timings_ms["divisions"] = round((_time.perf_counter() - _t) * 1000.0, 2)
         rifles = 0.0
         try:
             for row in (self.equipment_stockpile(me) or {}).get("stockpile") or []:
@@ -964,12 +970,14 @@ class BattleplanOrdersMixin:
             checks["divisions"]["warning"] = div["warning"]
 
         # ---- 2026-11-23 (复测 6 P0-1): 实时外交连锁推演（阵营 / 保独 / 宗主 / 附庸 / 接壤空防）
+        _t = _time.perf_counter()
         diplo = {}
         try:
             import diplomacy as _dip_fc
             diplo = _dip_fc.war_escalation_forecast(self, tgt_tag, me_tag=me) or {}
         except Exception as _de:
             diplo = {"error": repr(_de)}
+        _timings_ms["diplomacy"] = round((_time.perf_counter() - _t) * 1000.0, 2)
         checks["diplomacy"] = diplo
         for _db in diplo.get("diplomatic_blockers") or []:
             blockers.append(_db)
@@ -996,7 +1004,9 @@ class BattleplanOrdersMixin:
 
         # ---- hard checks 2+3: only when the caller wants them
         if hard:
+            _t = _time.perf_counter()
             bd = self._border_divisions(tgt_tag, tag=tag)
+            _timings_ms["border"] = round((_time.perf_counter() - _t) * 1000.0, 2)
             checks["border"] = bd
             if bd.get("error"):
                 blockers.append("cannot verify the border: %s" % bd["error"])
@@ -1012,7 +1022,9 @@ class BattleplanOrdersMixin:
             # 2026-11-18: 硬门槛从「frontd 指令 tick 过」换成「原生前线 + 进攻线 +
             # 至少一个集团军已指派」。旧门槛只证明有个后台线程在算，不证明地图上
             # 有任何人会去打仗——1939.07.30 就是这么在 8 个师的状态下宣的战。
+            _t = _time.perf_counter()
             fp = self._front_plan_check(tgt_tag, tag=tag)
+            _timings_ms["front_plan"] = round((_time.perf_counter() - _t) * 1000.0, 2)
             checks["front_plan"] = fp
             if not fp.get("ok"):
                 blockers.append(fp.get("problem") or
@@ -1021,6 +1033,7 @@ class BattleplanOrdersMixin:
             # 必须有战争借口。Windows 1.19.5 已打通 O(1) 实时直读 CDiplomacyStatus+0x80
             # （0.2ms，100% 包含新造 CB 与国策 CB），不再被旧 fast list 漏新 arena 坑死！
             # 若底层结构读不到（非 Windows 或异常）且未走权威路径，绝不伪报 "missing" 骗模型重造 200 天。
+            _t = _time.perf_counter()
             _cb, _just, _werr = None, [], None
             _wg_source = "unknown"
             _direct_authoritative = False
@@ -1061,6 +1074,7 @@ class BattleplanOrdersMixin:
                              if str((j or {}).get("target") or "").upper() == tgt_tag]
                 except Exception:
                     _just = []
+            _timings_ms["wargoal"] = round((_time.perf_counter() - _t) * 1000.0, 2)
             _prob, _state = _wargoal_gate(tgt_tag, _cb, _just)
             checks["wargoal"] = {
                 "state": _state,
@@ -1111,6 +1125,7 @@ class BattleplanOrdersMixin:
                             "war goal before that is allowed, it just raises world tension"
                             % (" + ".join(self.GER_SNOWBALL[:2]), year, have))
 
+        _timings_ms["total"] = round((_time.perf_counter() - _t0) * 1000.0, 2)
         ready = not blockers
         return {
             "ready": ready,
@@ -1133,4 +1148,5 @@ class BattleplanOrdersMixin:
             "infantry_equipment_stockpile": round(rifles, 1),
             "year": year,
             "completed_snowball": sorted(f for f in self.GER_SNOWBALL if f in completed),
+            "timings_ms": _timings_ms,
         }

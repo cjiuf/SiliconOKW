@@ -1010,7 +1010,11 @@ class MilitaryLandMixin:
         return res
 
     def divisions(self, tag=None, limit=200, deep=False):
-        """The country's divisions (CArmy in the game's code).
+        """The country's divisions (`CArmy` in the game's code).
+
+        Omitting `tag` queries the current player's divisions (`scope="player"`).
+        Pass a 3-letter country tag (`scope="country"`) to query another country,
+        or use `divenum.all_countries_divisions(g)` to summarize every live country.
 
         2026-11-16: this used to read `CCountry+0x290` of whatever pointer
         `country(tag)` handed back.  After the 1939.05.07 crash-restart that
@@ -1073,7 +1077,8 @@ class MilitaryLandMixin:
             out.append({"index": i, "ptr": hex(a),
                         "template": tname,
                         "province_ptr": hex(prov_ptr)})
-        res = {"count": int(count), "divisions": out, "source": source,
+        res = {"tag": me, "scope": "player" if tag is None else "country",
+               "count": int(count), "divisions": out, "source": source,
                "country_ptr": hex(info["ptr"]), "tag_id": info["tid"],
                "verified": bool(info.get("verified"))}
         if warning:

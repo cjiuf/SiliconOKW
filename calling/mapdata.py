@@ -557,6 +557,11 @@ def _win_controller_map(g, divisions=None):
     return out
 
 
+_CTRL_MAP_CACHE = {}  # (id_g, pid, date_raw) -> (monotonic_ts, dict)
+_CTRL_MAP_TTL_S = 2.0
+_SS.register_cache("mapdata.ctrl_map", container=_CTRL_MAP_CACHE)
+
+
 def province_controller_map(g, divisions=None):
     """province_id -> controller tag, LIVE (civil-war occupation included).
 
@@ -580,9 +585,33 @@ def province_controller_map(g, divisions=None):
          tag present is forced to that tag (handles freshly occupied ground
          before the area pointer updates).
     """
+    ckey = None
+    date_raw = None
+    if divisions is None:
+        import time as _time
+        try:
+            pid = getattr(getattr(g, "p", None), "pid", None)
+            d_fn = getattr(g, "date", None)
+            date_info = d_fn() if callable(d_fn) else None
+            date_raw = date_info.get("raw") if isinstance(date_info, dict) else None
+        except Exception:
+            pid, date_raw = None, None
+        if date_raw is not None:
+            ckey = (id(g), pid, date_raw)
+            hit = _CTRL_MAP_CACHE.get(ckey)
+            if hit is not None and (_time.monotonic() - hit[0]) < _CTRL_MAP_TTL_S:
+                return dict(hit[1])
+
     import sys as _sys
     if _sys.platform == "win32":
-        return _win_controller_map(g, divisions)
+        res = _win_controller_map(g, divisions)
+        if ckey is not None and res:
+            import time as _time
+            if len(_CTRL_MAP_CACHE) > 8:
+                _CTRL_MAP_CACHE.clear()
+            _CTRL_MAP_CACHE[ckey] = (_time.monotonic(), res)
+            return dict(res)
+        return res
     from collections import Counter
     owners, _ = province_owner_map(g)
     ptrs = province_objects(g)
@@ -620,6 +649,12 @@ def province_controller_map(g, divisions=None):
         for pv, tags in seen.items():
             if len(tags) == 1:
                 byid[pv] = next(iter(tags))
+    if ckey is not None and byid:
+        import time as _time
+        if len(_CTRL_MAP_CACHE) > 8:
+            _CTRL_MAP_CACHE.clear()
+        _CTRL_MAP_CACHE[ckey] = (_time.monotonic(), byid)
+        return dict(byid)
     return byid
 
 

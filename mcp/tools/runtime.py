@@ -53,8 +53,8 @@ def _selfheal_check(g) -> None:
     """Detect game restart / save reload and rebuild volatile caches in-process.
 
     Triggers:
-      * game pid changed (hoi4-guard restarted the game);
-      * /proc/<pid>/stat starttime changed (same pid reused);
+      * game pid changed (game process restarted);
+      * process start time changed (same pid reused);
     Actions: drop per-pid caches (tags, tag2idx, date addr, objindex scan,
     equipment db, tech db) so the next tool call rebuilds them.
     """

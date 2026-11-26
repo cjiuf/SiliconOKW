@@ -112,9 +112,9 @@ def _naval_tfs(a):
     import sys
     g = game()
     if sys.platform == "win32":
-        # 2026-11-16: navalops.py is all Linux offsets (fleet +0xB0, TF handle
-        # at +0x18 as a pointer). On the PE build the fleet task-force array is
-        # at +0xB8 and the TF handle at +0x18 resolves through 0x2284870.
+        # 2026-11-16: legacy Linux offsets (fleet +0xB0, TF handle at +0x18 as
+        # pointer) do not apply here. On the PE build the fleet task-force array
+        # is at +0xB8 and the TF handle at +0x18 resolves through 0x2284870.
         import navalops_win as NW
         try:
             fleets = NW.naval_fleets(g, a.get("tag"))
@@ -412,9 +412,9 @@ def _air_ger_attach(a):
     import sys
     g = game()
     if sys.platform == "win32":
-        # 2026-11-16: airops.py is all Linux VAs. The PE path uses the MSVC
-        # RTTI index + a pure-data CAttachAirWingToArmyCommand (verified live:
-        # 13/15 starting wings attached, CanExecute flips 1->0 on re-attach).
+        # 2026-11-16: PE path uses the MSVC RTTI index + pure-data
+        # CAttachAirWingToArmyCommand (verified live: 13/15 starting wings
+        # attached, CanExecute flips 1->0 on re-attach).
         # 2026-11-19: ownership is exact now (CStrategicAir+0x90), so newly
         # created wings are attached too instead of only the id-1 block.
         # 2026-11-22 (P3-4): 优先用 COrdersGroup+0x70 实机内存判已挂载状态，

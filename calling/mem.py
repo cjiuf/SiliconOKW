@@ -1,6 +1,6 @@
 """Live process memory access. Platform-independent layer.
 
-Raw reads and writes are delegated to a platform backend (process/linux.py);
+Raw reads and writes are delegated to the active platform backend in `calling/process/`;
 everything here is platform-independent.
 Nothing above this module needs to know which operating system it is on.
 """
@@ -40,6 +40,21 @@ class Proc:
             except Exception:
                 pass
         return be_cnt
+
+    @property
+    def injections(self):
+        """`call_count` 的语义化别名，表示当前 Python 进程累计完成的函数注入次数。"""
+        return self.call_count
+
+    def injection_breakdown(self, top=12):
+        """返回按调用方分组的函数注入次数排行榜（仅统计当前 Python 进程）。"""
+        if sys.platform == "win32":
+            try:
+                from process import winject as _wj
+                return _wj.call_breakdown(self.pid, top=top)
+            except Exception:
+                pass
+        return {}
 
     def va(self, file_vaddr):
         """Address in the binary -> address in the running process."""

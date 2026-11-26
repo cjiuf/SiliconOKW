@@ -88,7 +88,7 @@ def _strategic_health(a):
       "can actually feed (infrastructure, supply hub, railway, victory points - all "
       "from the game's own map and history files), which provinces are over capacity "
       "and where the surplus should go. detail=full returns the per-province table; "
-      "every tick is appended to calling/staff_shadow.jsonl so the coefficients can "
+      "every tick is appended to staff_shadow.jsonl in the session state directory so the coefficients can "
       "be fitted against the engine's own supply ratios. "
       "READ-ONLY BY DEFAULT: without apply=true this only reports plans "
       "(live:false, applied_this_tick:false) and changes NOTHING - not supply, not "

@@ -454,6 +454,7 @@ class DiplomacyWarMixin:
                             "estimated_upfront_pp": _need,
                             "estimated_pp_shortfall": round(max(0.0, float(_need) - float(_pp)), 1),
                             "required_pp": _need,
+                            "required_pp_is_estimate": True,
                             "force_hint": "pass force=true to bypass the estimated upfront PP guard",
                             "quote": _q}
                 _warn = ("force=true: PP %d is below estimated upfront ~%.0f PP; "
@@ -485,7 +486,11 @@ class DiplomacyWarMixin:
             for _ in range(10):
                 self._settle(0.35)
                 try:
-                    for _j in diplomacy.justifying(self):
+                    try:
+                        _jrows = diplomacy.justifying(self, deep=True)
+                    except TypeError:
+                        _jrows = diplomacy.justifying(self)
+                    for _j in _jrows:
                         if _j.get("source_class") != "CTimedWargoalActivity":
                             continue
                         if str(_j.get("target") or "").upper() == str(target_tag).upper():
@@ -501,9 +506,19 @@ class DiplomacyWarMixin:
                         mine, self._pick_target_state_id(target_tag))
                 except Exception as _e:
                     repaired = {"ok": False, "why": repr(_e)}
+                if isinstance(repaired, dict):
+                    repaired.setdefault(
+                        "reason",
+                        "PE cmdwin.justify_wargoal creates CTimedWargoalActivity with empty states array "
+                        "(size=0); populated 1 target state id to prevent crash at hoi4.exe+0xB2E62E on completion",
+                    )
                 if repaired and repaired.get("ok"):
                     try:
-                        for _j in diplomacy.justifying(self):
+                        try:
+                            _jrows2 = diplomacy.justifying(self, deep=True)
+                        except TypeError:
+                            _jrows2 = diplomacy.justifying(self)
+                        for _j in _jrows2:
                             if str(_j.get("target") or "").upper() == str(target_tag).upper():
                                 mine = _j
                                 break
@@ -741,7 +756,12 @@ class DiplomacyWarMixin:
                 _c = self.country(src)
                 cur_pp = _c.political_power
                 tgt = self.country(target_tag)
-                acts = [x for x in _D.justifying(self)
+                if (hasattr(_D, "justifying_fast")
+                        and getattr(_D, "justifying", None) is getattr(_D, "_JUSTIFYING_ORIG", None)):
+                    _jlist = _D.justifying_fast(self, tag=src)
+                else:
+                    _jlist = _D.justifying(self)
+                acts = [x for x in (_jlist or ())
                         if x.get("from") == src and
                         x.get("source_class") == "CTimedWargoalActivity"]
                 concurrent = len(acts)
@@ -760,10 +780,19 @@ class DiplomacyWarMixin:
                     bool(float(cur_pp) >= float(total_pp))
                     if cur_pp is not None else None
                 )
+                cur_date_text = None
+                try:
+                    _dobj = self.date()
+                    if isinstance(_dobj, dict):
+                        cur_date_text = _dobj.get("text")
+                except Exception:
+                    cur_date_text = None
                 return {
                     "ok": True, "mode": "pe-static-estimate",
                     "source": src, "target": target_tag, "wargoal": wargoal,
                     "states": state_ids,
+                    "quote_date": cur_date_text,
+                    "eta_basis": "if started on quote_date",
                     "current_pp": cur_pp,
                     "required_pp": None,
                     "pp_shortfall": None,
@@ -793,9 +822,9 @@ class DiplomacyWarMixin:
                     "estimated_days": days,
                     "estimated_completion_date": _D._add_game_days(self, days),
                     "estimated_total_pp": total_pp,
-                    "estimate_source": ("00_invasion.txt: 200 base + 30 production "
-                                        "+ 50/extra state, x1.5 per concurrent "
-                                        "justification; 0.2 PP/day"),
+                    "estimate_source": ("00_invasion.txt: 200 base + 50/extra state, "
+                                        "x1.5 per concurrent justification; 0.2 PP/day "
+                                        "(static baseline; ideological/at-war modifiers excluded)"),
                     "note": "pure-read estimate; nothing was written or posted",
                 }
             except Exception as e:
@@ -816,9 +845,12 @@ class DiplomacyWarMixin:
                         "error": "these states do not belong to %s: %s" % (target_tag, sorted(missing))}
         return diplomacy.wargoal_quote(self, target_tag, wargoal, sp, sids, source_tag=tag)
 
-    def justifying(self):
+    def justifying(self, deep=False):
         import diplomacy
-        return diplomacy.justifying(self)
+        try:
+            return diplomacy.justifying(self, deep=deep)
+        except TypeError:
+            return diplomacy.justifying(self)
 
     def diplomatic_actions(self):
         import diplomacy

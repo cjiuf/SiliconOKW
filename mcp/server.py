@@ -180,6 +180,9 @@ def _run_with_timeout(fn, args, name):
     import threading
     import time as _t
     prev = _CALL.get("thread")
+    if prev is not None and not prev.is_alive():
+        _CALL.clear()
+        prev = None
     if prev is not None and prev.is_alive():
         _el = _t.time() - _CALL.get("started", _t.time())
         # 2026-11-21 (续测 P1-1): a timed-out call keeps running (a Python thread
@@ -189,8 +192,8 @@ def _run_with_timeout(fn, args, name):
         # been running, and that the only current way out is to let it finish or
         # restart the server.  Long calls SHOULD be bounded at the source (see the
         # probe budget in selectable_focuses and the air/enqueue paths).
-        _hint = ("Wait for it, or restart the MCP server (Stop-Process the wx_server "
-                 "python pid, then mcp_load('hoi4')) -- Python cannot cancel it.")
+        _hint = ("Wait for it, or restart the HOI4 MCP server process -- Python "
+                 "cannot cancel an in-flight memory read thread.")
         if _el > 120:
             _hint = ("It has been running for %.0f s, far past the %.0f s budget: "
                      "restart the MCP server." % (_el, CALL_TIMEOUT_S))
@@ -201,14 +204,20 @@ def _run_with_timeout(fn, args, name):
                           % (_CALL.get("name"), _el, _hint))}
     box = {}
     cancel_ev = threading.Event()
+    th_ref = []
 
     def _work():
         try:
             box["out"] = fn(args)
         except BaseException as e:            # noqa: BLE001 - reported to the caller
             box["err"] = e
+        finally:
+            cur = th_ref[0] if th_ref else threading.current_thread()
+            if _CALL.get("thread") is cur:
+                _CALL.clear()
 
     th = threading.Thread(target=_work, daemon=True, name="call:%s" % name)
+    th_ref.append(th)
     _CALL.update(thread=th, name=name, started=_t.time(), cancel=cancel_ev)
     th.start()
     th.join(CALL_TIMEOUT_S)
@@ -219,6 +228,8 @@ def _run_with_timeout(fn, args, name):
         paused_now = _emergency_pause_game()
         th.join(1.5)
         if not th.is_alive() and "out" in box:
+            if _CALL.get("thread") is th:
+                _CALL.clear()
             out = box["out"]
             if isinstance(out, dict):
                 out.setdefault("paused", paused_now)
@@ -231,6 +242,8 @@ def _run_with_timeout(fn, args, name):
                           "server-side (game paused=%s to prevent clock drift). Do not "
                           "retry until it ends -- the next call will be refused while it "
                           "holds the game." % (name, CALL_TIMEOUT_S, paused_now))}
+    if _CALL.get("thread") is th:
+        _CALL.clear()
     if "err" in box:
         raise box["err"]
     return box.get("out")
@@ -423,12 +436,9 @@ def main():
     # cost is already gone: the repeated scanning was the bug (see the
     # `_date_scan_at` gate in api.py), so one scan now fits comfortably inside
     # the budget.
-    # 2026-11-16: the tactical tick needs an executor INSIDE this process.  The
-    # stack used to rely on hoi4_gateway.py's front_worker thread, which is not
-    # part of the running Windows stack -- so front_directives.json was written
-    # and never executed, and the army never moved.  `frontd.start()` spawns one
-    # daemon thread; a lock file keeps the other MCP server processes on this
-    # machine in standby.
+    # 2026-11-16: the tactical tick needs an executor INSIDE this process, so
+    # `frontd.start()` spawns one daemon thread; a lock file keeps any other MCP
+    # server processes on this machine in standby.
     try:
         import frontd
         _st = frontd.start()

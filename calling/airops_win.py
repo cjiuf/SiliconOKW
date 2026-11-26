@@ -2,10 +2,9 @@
 
 Why this module exists
 ----------------------
-`airops.py` is entirely Linux 1.19.4.1: its WING_VT 0x440E200, the attach ctor
-0x241F840, the mission ctors and the libstdc++ error sinks are ELF addresses.
-On hoi4.exe they match nothing, which is why `hoi4_air_wings` reported 0 wings
-and no air order ever worked.
+Legacy Linux 1.19.4.1 air offsets (WING_VT 0x440E200, attach ctor 0x241F840)
+are ELF addresses that match nothing on hoi4.exe, which previously caused
+`hoi4_air_wings` to report 0 wings and air orders to fail.
 
 Measured on the live PE build 2026-11-16 (research/windows/pedis.py, all RVAs):
 

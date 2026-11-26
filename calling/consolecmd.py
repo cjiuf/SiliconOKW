@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Direct, in-process console commands for HOI4 1.19.4.1 (Linux) / 1.19.5.0 (Windows).
 
-The keyboard path (`xconsole.py`) works, but it needs a live window manager, a
-live console command table inside the running game and a working X server. This
-module removes all three: it finds the engine's own command table in memory and
-calls each command's handler directly.
+The keyboard path works, but it needs a live window manager, a live console
+command table inside the running game and GUI focus. This module avoids GUI
+automation by finding the engine's own command table in memory and calling each
+command's handler directly.
 
 Both builds share the entry layout (stride 0x1C8); only *where* the table lives
 and *how* the argument array is built differ:

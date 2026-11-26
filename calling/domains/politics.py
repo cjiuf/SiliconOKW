@@ -190,14 +190,6 @@ class PoliticsMixin:
                     return pref
         return None
 
-    @staticmethod
-    def _decision_visible_tag(vis):
-        """The country a decision's `visible` trigger is scoped to, if any."""
-        if not vis:
-            return None
-        m = re.search(r"\b(?:original_tag|tag)\s*=\s*([A-Z]{3})\b", vis)
-        return m.group(1) if m else None
-
     def decision_meta(self, key):
         """Static metadata for one decision key (title / cost / trigger slice)."""
         try:
@@ -436,6 +428,16 @@ class PoliticsMixin:
                 adv_rows = _adv.load_advisors(my_tag) or []
             except Exception:
                 adv_rows = []
+            _leg = None
+            _leg_st = None
+            if adv_rows:
+                try:
+                    import legality as _leg_mod
+                    _leg = _leg_mod
+                    _leg_st = _leg._state(self, my_tag)
+                except Exception:
+                    _leg = None
+                    _leg_st = None
             for a in adv_rows:
                 ck = a.get("character") or ""
                 tok = a.get("idea_token") or ck
@@ -451,20 +453,19 @@ class PoliticsMixin:
                 is_active = (ck in active_set) or (tok in active_set)
                 avail_ok = True
                 blk = None
-                try:
-                    import legality as _leg
-                    _st = _leg._state(self, my_tag)
-                    for bname in ("visible_block", "available_block"):
-                        blk_txt = a.get(bname)
-                        if not blk_txt:
-                            continue
-                        unk = []
-                        if not _leg._eval(blk_txt, _st, unk) and not unk:
-                            avail_ok = False
-                            blk = "%s unmet" % bname
-                            break
-                except Exception:
-                    pass
+                if _leg is not None and _leg_st is not None:
+                    try:
+                        for bname in ("visible_block", "available_block"):
+                            blk_txt = a.get(bname)
+                            if not blk_txt:
+                                continue
+                            unk = []
+                            if not _leg._eval(blk_txt, _leg_st, unk) and not unk:
+                                avail_ok = False
+                                blk = "%s unmet" % bname
+                                break
+                    except Exception:
+                        pass
                 rows.append({
                     "key": ck,
                     "idea_token": tok,

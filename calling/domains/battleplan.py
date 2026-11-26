@@ -721,7 +721,7 @@ class BattleplanMixin:
 
     def _win_battleplans(self, enemy_tag, tag=None, force=False, wait_seconds=0,
                          armies=None, split=True):
-        """activate_army_battleplans for hoi4.exe: the chain stage/wden.py proved live.
+        """activate_army_battleplans for hoi4.exe (create_army -> front -> offensive -> execute).
 
         create_army -> front line (CFront section facing the enemy) -> offensive
         line under THAT order -> execute -> set the executing flag.
@@ -794,8 +794,8 @@ class BattleplanMixin:
                 out.update({"ok": False, "error": "no divisions"})
                 return out
             # One group only if every division already lives in the same one;
-            # otherwise make a new army (this is what stage/wden.py did -- the
-            # 1936 save has 4 divisions in an army and 26 floating).
+            # otherwise make a new army (the 1936 save has 4 divisions in an army
+            # and 26 floating).
             ogs = {p.u64(d + A.CARMY_OG) for d in divs}
             og = next(iter(ogs)) if len(ogs) == 1 and 0 not in ogs else 0
             if not og:

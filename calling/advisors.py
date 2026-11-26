@@ -27,20 +27,35 @@ def _blocks(text):
         yield key, text[m.end():i - 1]
 
 
+_TRAITS_CACHE = {}
+_ADVISORS_CACHE = {}
+
+
+def clear_caches():
+    """清空静态顾问/特质/理念目录进程内缓存。"""
+    _TRAITS_CACHE.clear()
+    _ADVISORS_CACHE.clear()
+    _IDEAS_CATALOG_CACHE.clear()
+    _LEADER_TRAITS_CACHE.clear()
+
+
 def load_traits(game_dir=None):
     game_dir = game_dir if game_dir is not None else config.game_dir(required=False)
     if not game_dir:
         return {}
+    if game_dir in _TRAITS_CACHE:
+        return _TRAITS_CACHE[game_dir]
     variables = {}
+    raw_files = []
     for p in glob.glob(os.path.join(game_dir, "common", "country_leader", "*.txt")):
         with open(p, encoding="utf-8", errors="replace") as _fh:
             raw = _fh.read()
+        raw_files.append(raw)
         for vm in re.finditer(r"^\s*@([A-Za-z0-9_]+)\s*=\s*([+-]?\d+(?:\.\d+)?)", raw, re.M):
             variables[vm.group(1)] = float(vm.group(2))
     mods = {}
-    for p in glob.glob(os.path.join(game_dir, "common", "country_leader", "*.txt")):
-        with open(p, encoding="utf-8", errors="replace") as _fh:
-            t = _strip(_fh.read())
+    for raw in raw_files:
+        t = _strip(raw)
         for key, body in _blocks(t):
             kv = {}
             for m in re.finditer(r"^\s*([A-Za-z0-9_]+)\s*=\s*([+-]?\d+(?:\.\d+)?|@[A-Za-z0-9_]+)\s*$", body, re.M):
@@ -54,6 +69,7 @@ def load_traits(game_dir=None):
                 kv[k] = float(v)
             if kv:
                 mods.setdefault(key, {}).update(kv)
+    _TRAITS_CACHE[game_dir] = mods
     return mods
 
 
@@ -73,9 +89,13 @@ def load_advisors(tag="GER", game_dir=None):
     game_dir = game_dir if game_dir is not None else config.game_dir(required=False)
     if not game_dir:
         return []
+    t_up = str(tag or "GER").upper()
+    cache_key = (game_dir, t_up)
+    if cache_key in _ADVISORS_CACHE:
+        return _ADVISORS_CACHE[cache_key]
     traits = load_traits(game_dir)
     out = []
-    for p in glob.glob(os.path.join(game_dir, "common", "characters", "*%s*.txt" % tag)):
+    for p in glob.glob(os.path.join(game_dir, "common", "characters", "*%s*.txt" % t_up)):
         with open(p, encoding="utf-8", errors="replace") as _fh:
             t = _strip(_fh.read())
         for ckey, body in _blocks(t):
@@ -110,6 +130,7 @@ def load_advisors(tag="GER", game_dir=None):
                     "visible_block": _subblock(ab, "visible"),
                 })
     out.sort(key=lambda a: (-a["army_xp_per_day"], a["slot"], a["character"]))
+    _ADVISORS_CACHE[cache_key] = out
     return out
 
 

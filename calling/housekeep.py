@@ -416,6 +416,27 @@ class HousekeepMixin:
             out.append({"error": str(e)})
         return out
 
+    def _mil_factory_totals(self, tag, lines, summary=None):
+        """军工有效可用上限/已用/闲置（优先采用引擎 CProductionStatus 权威口径）。"""
+        mil = [l for l in (lines or ()) if l.get("class") == "CMilitaryProductionLine"]
+        lines_used = sum(int(l.get("factories") or 0) for l in mil)
+        if summary is None:
+            summary = (self.player().summary()
+                       if tag in (None, "", "player") else self.country(tag).summary())
+        raw_mil = int((summary or {}).get("military_factories") or 0)
+        if hasattr(self, "factory_allocation"):
+            try:
+                alloc = self.factory_allocation(tag) or {}
+                if isinstance(alloc, dict) and alloc.get("source") == "engine_production_status":
+                    avail = max(0, int(alloc.get("military_available") or 0))
+                    eng_used = max(0, int(alloc.get("military_used") or lines_used))
+                    idle = max(0, int(alloc.get("military_idle") if alloc.get("military_idle") is not None else (avail - eng_used)))
+                    resv = max(0, int(alloc.get("military_reserved") or 0))
+                    return avail, eng_used, idle, raw_mil, resv, "engine_production_status"
+            except Exception:
+                pass
+        return raw_mil, lines_used, max(0, raw_mil - lines_used), raw_mil, 0, "lines_sum_fallback"
+
     def housekeep_production(self, tag=None):
         """Put every idle military factory to work.
 
@@ -436,10 +457,10 @@ class HousekeepMixin:
         capped_lines = self._cap_deprioritized_lines(tag, _rules0)
         lines = self.production_lines(tag)      # re-read: a swap changes the variant
         summary = self.player().summary() if tag in (None, "", "player") else self.country(tag).summary()
-        total_mil = int(summary.get("military_factories") or 0)
         mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-        used = sum(int(l.get("factories") or 0) for l in mil)
-        idle = max(0, total_mil - used)
+        total_mil, used, idle, raw_mil, mil_reserved, factory_source = self._mil_factory_totals(
+            tag, lines, summary
+        )
 
         # 2026-11-22 (复测 5 §8.5 / §8.9 #6): 识别严重过剩产线（SURPLUS，如步兵装备库存
         # > 2 倍安全储备且占军工 > 20%），在回执中明确给出 surplus_lines / surplus_factories，
@@ -472,8 +493,9 @@ class HousekeepMixin:
                 if surplus_trimmed:
                     lines = self.production_lines(tag)
                     mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-                    used = sum(int(l.get("factories") or 0) for l in mil)
-                    idle = max(0, total_mil - used)
+                    total_mil, used, idle, raw_mil, mil_reserved, factory_source = self._mil_factory_totals(
+                        tag, lines, summary
+                    )
         except Exception:
             pass
 
@@ -494,8 +516,9 @@ class HousekeepMixin:
                                     "error": res.get("error")}
                     lines = self.production_lines(tag)
                     mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-                    used = sum(int(l.get("factories") or 0) for l in mil)
-                    idle = max(0, total_mil - used)
+                    total_mil, used, idle, raw_mil, mil_reserved, factory_source = self._mil_factory_totals(
+                        tag, lines, summary
+                    )
             except Exception as e:
                 created_line = {"ok": False, "error": str(e)}
 
@@ -516,6 +539,8 @@ class HousekeepMixin:
 
         if idle <= 0:
             return {"ok": True, "idle": 0, "total": total_mil, "used": used,
+                    "raw_total": raw_mil, "military_reserved": mil_reserved,
+                    "factory_source": factory_source,
                     "changes": [], "dockyard_changes": dockyard_changes,
                     "upgraded": upgraded, "created_line": created_line,
                     "capped": capped_lines,
@@ -526,7 +551,10 @@ class HousekeepMixin:
                     "note": ("allocated idle dockyards" if dockyard_changes else "no idle military factories")}
         if not mil:
             return {"ok": False, "idle": idle, "total": total_mil, "used": used,
+                    "raw_total": raw_mil, "military_reserved": mil_reserved,
+                    "factory_source": factory_source,
                     "changes": [], "error": "no military production line",
+                    "note": "no military production line exists to receive idle factories",
                     "capped": capped_lines}
 
         # One main line per group: the one that already has the most factories.
@@ -556,8 +584,9 @@ class HousekeepMixin:
             ratio_map = dict(rules.get("ratios_rifle_surplus") or ratio_map)
         lines = self.production_lines(tag)
         mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-        used = sum(int(l.get("factories") or 0) for l in mil)
-        idle = max(0, total_mil - used)
+        total_mil, used, idle, raw_mil, mil_reserved, factory_source = self._mil_factory_totals(
+            tag, lines, summary
+        )
         low = {}
         need = (("inf", ("infantry_equipment",), 3000),
                 ("art", ("artillery_equipment", "support_equipment"), 1200))
@@ -630,6 +659,7 @@ class HousekeepMixin:
             left -= 1
 
         changes = []
+        change_notes = []
         for l in sorted(mil, key=lambda x: desired[id(x)] - int(x.get("factories") or 0),
                         reverse=True):
             before = int(l.get("factories") or 0)
@@ -638,24 +668,58 @@ class HousekeepMixin:
                 continue
             res = self.set_production_amount(l["index"], want, tag)
             after = int(res.get("after", before))
-            changes.append({"line": l["index"], "group": self._prod_group(l.get("equipment")),
-                            "equipment": l.get("equipment"),
-                            "before": before, "after": after, "requested": want,
-                            "granted": after - before, "ok": bool(res.get("ok"))})
-        used_after = sum(int(l.get("factories") or 0) for l in self.production_lines(tag)
-                         if l.get("class") == "CMilitaryProductionLine")
-        return {"ok": used_after >= total_mil or used_after > used,
-                "idle": idle, "total": total_mil, "used": used,
-                "used_after": used_after,
-                "low_stock": sorted(low),
-                "ratio": dict(ratio_map), "capped": capped_lines,
-                "upgraded": upgraded, "created_line": created_line,
-                "surplus_lines": surplus_lines,
-                "surplus_factories": sum(int(x.get("surplus_factories") or 0) for x in surplus_lines),
-                "surplus_trimmed": surplus_trimmed,
-                "obsolete_remaining": obsolete_remaining,
-                "dockyard_changes": dockyard_changes,
-                "changes": changes}
+            entry = {"line": l["index"], "group": self._prod_group(l.get("equipment")),
+                     "equipment": l.get("equipment"),
+                     "before": before, "after": after, "requested": want,
+                     "granted": after - before, "ok": bool(res.get("ok"))}
+            if res.get("error"):
+                entry["error"] = res["error"]
+                change_notes.append(str(res["error"]))
+            if res.get("note"):
+                entry["note"] = res["note"]
+                change_notes.append(str(res["note"]))
+            if res.get("blocked_by"):
+                entry["blocked_by"] = res["blocked_by"]
+            changes.append(entry)
+        lines_after = self.production_lines(tag)
+        total_after, used_after, idle_after, raw_after, resv_after, src_after = self._mil_factory_totals(
+            tag, lines_after, summary
+        )
+        ok_prod = bool(used_after >= total_after or used_after > used)
+        paused_now = None
+        if not ok_prod:
+            try:
+                import session as _sess_p
+                paused_now = bool(_sess_p.is_paused(self))
+            except Exception:
+                paused_now = None
+        res_out = {"ok": ok_prod,
+                   "idle": idle, "idle_after": idle_after,
+                   "total": total_after, "used": used,
+                   "used_after": used_after,
+                   "raw_total": raw_after, "military_reserved": resv_after,
+                   "factory_source": src_after,
+                   "low_stock": sorted(low),
+                   "ratio": dict(ratio_map), "capped": capped_lines,
+                   "upgraded": upgraded, "created_line": created_line,
+                   "surplus_lines": surplus_lines,
+                   "surplus_factories": sum(int(x.get("surplus_factories") or 0) for x in surplus_lines),
+                   "surplus_trimmed": surplus_trimmed,
+                   "obsolete_remaining": obsolete_remaining,
+                   "dockyard_changes": dockyard_changes,
+                   "changes": changes}
+        if paused_now is not None:
+            res_out["paused"] = paused_now
+        if not ok_prod:
+            if change_notes:
+                res_out["note"] = "; ".join(dict.fromkeys(change_notes))
+            elif paused_now:
+                res_out["note"] = "allocation stalled while game is paused (%d/%d used)" % (used_after, total_after)
+            else:
+                res_out["note"] = "no effective military factory increase (%d/%d used, %d idle remaining)" % (
+                    used_after, total_after, idle_after
+                )
+        return res_out
 
     def _housekeep_dockyards(self, tag=None):
         """把真实空闲海军船坞（已扣除修理船坞）自动分配给现有造船线。"""
@@ -1571,6 +1635,21 @@ class HousekeepMixin:
         import time as _time
         t0 = _time.monotonic()
         budget = float(budget_s or 40.0)
+        _date_before = None
+        _raw_before = None
+        try:
+            _d0 = self.date() if hasattr(self, "date") else None
+            if isinstance(_d0, dict):
+                _date_before = _d0.get("text")
+                _raw_before = _d0.get("raw")
+        except Exception:
+            pass
+        _paused_before = None
+        try:
+            import session as _sess_hk
+            _paused_before = bool(_sess_hk.is_paused(self))
+        except Exception:
+            _paused_before = None
         out = {"ok": True, "timings": {}}
         budget_exceeded = False
         # 2026-11-22 (复测 5 §3.3 / §3.4):
@@ -1667,6 +1746,41 @@ class HousekeepMixin:
             + ("; failed: %s" % ", ".join(failed_steps) if failed_steps else "")
             + ("; skipped: %s" % ", ".join(skipped_steps) if skipped_steps else "")
         )
+        _date_after = _date_before
+        _raw_after = _raw_before
+        try:
+            _d1 = self.date() if hasattr(self, "date") else None
+            if isinstance(_d1, dict):
+                _date_after = _d1.get("text")
+                _raw_after = _d1.get("raw")
+        except Exception:
+            pass
+        _paused_after = None
+        try:
+            import session as _sess_hk
+            _paused_after = bool(_sess_hk.is_paused(self))
+        except Exception:
+            _paused_after = None
+        _days_elapsed = (
+            round((float(_raw_after) - float(_raw_before)) / 24.0, 2)
+            if isinstance(_raw_before, (int, float)) and isinstance(_raw_after, (int, float))
+            else 0.0
+        )
+        _unpaused_for_drain = bool(
+            (_paused_before and (_paused_after is False or _days_elapsed > 0))
+            or _days_elapsed > 0
+        )
+        out["date_before"] = _date_before
+        out["date_after"] = _date_after
+        out["days_elapsed"] = _days_elapsed
+        out["paused_before"] = _paused_before
+        out["paused_after"] = _paused_after
+        out["unpaused_for_drain"] = _unpaused_for_drain
+        if _days_elapsed > 0:
+            out["clock_note"] = (
+                "clock advanced %.2f game day(s) (%s -> %s) while draining queued write commands"
+                % (_days_elapsed, _date_before or "?", _date_after or "?")
+            )
         out["elapsed_s"] = round(_time.monotonic() - t0, 2)
         if budget_exceeded:
             out["budget_exceeded"] = True

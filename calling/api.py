@@ -6,7 +6,7 @@ Two capabilities:
   2) ACTION : running any of the 383 console commands programmatically, by calling
               functions inside the process
 
-Reverse-engineering notes are in research/FINDINGS.md; offsets in offsets.py.
+Offsets are defined in `offsets.py` / `calling/offsets_win.py`.
 """
 from __future__ import annotations
 import json, os, re, struct, sys, time
@@ -894,8 +894,8 @@ def _load_stat_calls():
     `g.wars() -> country_stats()` ptrace-call 45 wild addresses and smash the game
     stack (hoi4_wars killed the process within 10 s, every time).
 
-    Do NOT re-enable until `research/stats.py` has been re-run against this binary
-    and every recovered signature re-verified. Pure memory reads are unaffected.
+    Do NOT re-enable until trigger signatures have been re-derived and
+    verified against this binary. Pure memory reads are unaffected.
     """
     global _stats_loaded
     _stats_loaded = True
@@ -962,11 +962,10 @@ class HOI4:
 
         2026-11-08 (run 20): every process that injects now takes an exclusive
         cross-process lock (xlock.FileLock: flock on POSIX, msvcrt on Windows)
-        on hoi4_ptrace.lock first. The gateway runs a front_worker
-        thread that calls `hoi4_tactical_front_tick` every 8 s, and the model (or a
-        stage/ script) can attach at the same moment: two PTRACE_SEIZE +
-        register rewrites on the same main thread garble RIP/RSP and kill the
-        process. The kernel serialises them instead.
+        on hoi4_ptrace.lock first. Concurrent threads or scripts calling into
+        the injector can attach at the same moment: two simultaneous register
+        rewrites on the same main thread garble RIP/RSP and kill the
+        process. The file lock serialises them instead.
         """
         if self._depth == 0:
             # 阶段 3 精确版本安全门禁：任何注入/远程调用前强制核验活进程 PE 指纹（fail-closed）

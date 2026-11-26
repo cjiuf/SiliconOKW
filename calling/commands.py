@@ -124,8 +124,8 @@ COMMANDS = {
     #   CSetConveyorLocationCommand   vt=0x44625A0 ctor 0x2205ac0
     #   CSetConveyorPriorityCommand   vt=0x44627F8 ctor 0x2206d90 (default priority 1)
     #   CDeployConveyorCommand        vt=0x4462A50 ctor 0x22076f0
-    # (addresses re-checked against the 1.19.4.1 ELF: the class list in rtti_index.csv
-    #  gives 27CSetConveyorPriorityCommand -> 0x44627f8; the ctor writes the {type,id}
+    # (re-checked against 1.19.4.1 ELF RTTI:
+    #  27CSetConveyorPriorityCommand -> 0x44627f8; the ctor writes the {type,id}
     #  handle at +0x24 and arg2 (esi/edx) at +0x2c, exactly like Location.)
     "CreateConveyor":     dict(vt=0x4462348, size=0x30, type=0x34A7,
         fields=[(0x24, "<Q", "template_handle"), (0x2C, "<i", "priority")]),
@@ -150,8 +150,8 @@ COMMANDS = {
     "DeployConveyor":     dict(vt=0x4462A50, size=0x30, type=0x3520,
         fields=[(0x24, "<Q", "conveyor_handle")]),
     # Deleting a dead conveyor: same flat 0x30 layout, handle at +0x24.
-    # rtti_index.csv: 22CRemoveConveyorCommand -> 0x4462CA8; ctor 0x2208020 writes
-    # only +0x24 (the {type,id} handle).
+    # 22CRemoveConveyorCommand -> 0x4462CA8; ctor 0x2208020 writes only +0x24
+    # (the {type,id} handle).
     "RemoveConveyor":     dict(vt=0x4462CA8, size=0x30, type=0x3521,
         fields=[(0x24, "<Q", "conveyor_handle")]),
     # ---- game speed ----

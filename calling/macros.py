@@ -218,7 +218,12 @@ def rebalance_production(
 
     # 若步枪明显超储，压低步枪目标权重并抬高火炮/装甲/空军权重
     rifles_now = fam_stock.get("inf", 0.0)
-    rifle_surplus = rifles_now >= max(rifle_soft_cap, divs_eff * 150.0)
+    rifle_soft_threshold = max(rifle_soft_cap, divs_eff * 150.0)
+    inf_line_surplus = any(
+        str(sr.get("family") or "") == "infantry_equipment"
+        for sr in surplus_by_line.values()
+    )
+    rifle_surplus = bool(rifles_now >= rifle_soft_threshold or inf_line_surplus)
     if target_ratios:
         ratios = {str(k).lower(): float(v) for k, v in target_ratios.items() if float(v) >= 0}
     elif rifle_surplus:
@@ -335,8 +340,14 @@ def rebalance_production(
         share = line_subweight[m["line"]] / max(0.01, fam_subweight_sum.get(fam, 1.0))
         w = base_w * urgency.get(fam, 1.0) * share
         # 若某条线本身被 equipmeta 标为严重超储，进一步压权重防回流
-        if m["surplus_info"] and float(m["surplus_info"].get("surplus_ratio") or 0) >= 2.0:
-            w *= 0.45
+        if m["surplus_info"]:
+            _sr_ratio = float(
+                m["surplus_info"].get("surplus_ratio")
+                if m["surplus_info"].get("surplus_ratio") is not None
+                else (m["surplus_info"].get("ratio") or 0.0)
+            )
+            if _sr_ratio >= 2.0:
+                w *= 0.45
         weights.append((m["line"], max(0.01, w)))
 
     w_sum = sum(w for _, w in weights) or 1.0
@@ -353,7 +364,6 @@ def rebalance_production(
     for idx, add_n in floored.items():
         target_map[idx] += add_n
 
-    # 若单个步兵超储线计算后仍高于 suggested_factories 且有其它急缺线，给急缺线再挪一档
     # 生成变更列表：先缩后扩
     changes = []
     for m in line_meta:
@@ -366,7 +376,12 @@ def rebalance_production(
         if m["deprioritized"] and af < bf:
             reason_parts.append("压减低优先轰炸机")
         elif m["surplus_info"] and af < bf:
-            reason_parts.append("超储线挪厂(库存率%.1fx)" % float(m["surplus_info"].get("surplus_ratio") or 0))
+            _sr_ratio = float(
+                m["surplus_info"].get("surplus_ratio")
+                if m["surplus_info"].get("surplus_ratio") is not None
+                else (m["surplus_info"].get("ratio") or 0.0)
+            )
+            reason_parts.append("超储线挪厂(库存率%.1fx)" % _sr_ratio)
         elif m["family"] == "inf" and rifle_surplus and af < bf:
             reason_parts.append("步枪库存%.0f超储抽厂" % rifles_now)
         elif ext_dem.get(m["family"], 0) > 0 and af > bf:
@@ -415,6 +430,20 @@ def rebalance_production(
         "total_military_factories": total_mil,
         "idle_before": idle_now,
         "rifle_surplus_detected": rifle_surplus,
+        "rifle_surplus_threshold": round(rifle_soft_threshold, 1),
+        "surplus_lines_detected": [
+            {
+                "line": k,
+                "equipment": v.get("equipment"),
+                "ratio": (
+                    v.get("surplus_ratio")
+                    if v.get("surplus_ratio") is not None
+                    else v.get("ratio")
+                ),
+                "surplus_factories": v.get("surplus_factories"),
+            }
+            for k, v in sorted(surplus_by_line.items())
+        ],
         "stockpile_by_family": {k: round(v, 1) for k, v in sorted(fam_stock.items())},
         "extra_demand_by_family": {k: round(v, 1) for k, v in sorted(ext_dem.items())},
         "reclaimed_factories": reclaimed_planned,
@@ -911,14 +940,15 @@ def plan_front_allocation(
 
 
 # ===================================================================== 战略体检红字看板
-def strategic_health_board(g, tag=None) -> Dict[str, Any]:
+def strategic_health_board(g, tag=None, prefetched=None) -> Dict[str, Any]:
     """纯只读老手战略体检看板（嵌入回合简报顶部与 overview），直接把隐性胜负手标红。"""
     me = _safe_tag(g, tag)
+    pf = prefetched if isinstance(prefetched, dict) else {}
     alerts: List[Dict[str, Any]] = []
     metrics: Dict[str, Any] = {"tag": me}
 
     try:
-        d = g.date() or {}
+        d = pf.get("date") if isinstance(pf.get("date"), dict) else (g.date() or {})
         year = int(d.get("year") or 1936)
     except Exception:
         year = 1936
@@ -926,13 +956,25 @@ def strategic_health_board(g, tag=None) -> Dict[str, Any]:
 
     # 1. 师数与年份曲线体检
     divs_n = 0
-    div_rows = []
-    try:
-        dres = g.divisions(me, limit=500) or {}
-        divs_n = int(dres.get("count") or 0)
-        div_rows = dres.get("divisions") or []
-    except Exception:
-        pass
+    if pf.get("divisions_n") is not None:
+        try:
+            divs_n = int(pf["divisions_n"] or 0)
+        except Exception:
+            divs_n = 0
+    elif isinstance(pf.get("divisions"), dict):
+        divs_n = int(pf["divisions"].get("count") or 0)
+    else:
+        try:
+            dres = g.divisions(me, limit=1, deep=False) or {}
+            divs_n = int(dres.get("count") or 0)
+        except TypeError:
+            try:
+                dres = g.divisions(me, limit=500) or {}
+                divs_n = int(dres.get("count") or 0)
+            except Exception:
+                pass
+        except Exception:
+            pass
     metrics["divisions"] = divs_n
 
     target_divs = None
@@ -959,10 +1001,14 @@ def strategic_health_board(g, tag=None) -> Dict[str, Any]:
     # 2. 主力步兵编制质量 & 陆军 XP 闲置体检
     army_xp = 0.0
     try:
-        c = g.country(me)
-        xp_d = getattr(c, "experience", None)
-        if not isinstance(xp_d, dict) and hasattr(c, "summary"):
-            xp_d = (c.summary() or {}).get("experience")
+        xp_d = None
+        if isinstance(pf.get("summary"), dict) and isinstance(pf["summary"].get("experience"), dict):
+            xp_d = pf["summary"].get("experience")
+        else:
+            c = g.country(me)
+            xp_d = getattr(c, "experience", None)
+            if not isinstance(xp_d, dict) and hasattr(c, "summary"):
+                xp_d = (c.summary() or {}).get("experience")
         if isinstance(xp_d, dict):
             army_xp = float(xp_d.get("army") or 0.0)
     except Exception:
@@ -1008,12 +1054,18 @@ def strategic_health_board(g, tag=None) -> Dict[str, Any]:
 
     # 3. 装备库存与产线倒挂体检（如步枪超储占大厂 vs 火炮归零）
     try:
-        st_tot = (g.equipment_stockpile(me) or {}).get("totals_by_equipment") or {}
+        if isinstance(pf.get("stock_totals"), dict):
+            st_tot = pf["stock_totals"]
+        else:
+            st_tot = (g.equipment_stockpile(me) or {}).get("totals_by_equipment") or {}
         fam_stock = _sum_stockpile_by_family(st_tot)
-        try:
-            pls = g.production_lines(me, include_obsolete=False) or []
-        except TypeError:
-            pls = g.production_lines(me) or []
+        if pf.get("lines") is not None:
+            pls = pf["lines"] or []
+        else:
+            try:
+                pls = g.production_lines(me, include_obsolete=False) or []
+            except TypeError:
+                pls = g.production_lines(me) or []
         mil_lines = [l for l in pls if l.get("class") == "CMilitaryProductionLine"]
         inf_fac = sum(int(l.get("factories") or 0) for l in mil_lines if _prod_family(l.get("equipment")) == "inf")
         art_fac = sum(int(l.get("factories") or 0) for l in mil_lines if _prod_family(l.get("equipment")) == "art")
