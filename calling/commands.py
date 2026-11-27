@@ -10,15 +10,7 @@ works. This module uses the same path: not a cheat, the player's own action chan
     Post(queue, cmd, 0)                          img+0x2DC1C40
 """
 from __future__ import annotations
-import struct
-import sys
-
-IDLER_GLOBAL   = 0x459E908
-IDLER_VT_QUEUE = 0x90     # CInGameIdler::GetCommandQueue()
-IDLER_VT_TAG   = 0xC0     # CInGameIdler::GetPlayerTag() -> CCountryTag*
-FN_POST        = 0x2F212D0   # CCommandQueue::Post(queue, cmd, int flag) — VERIFIED 2026-11-08: it is the exact call CCommand::Run makes at 0x20AE1A2 after CanExecute. force=1 skips the predicate (needed for CMoveCommand, whose vtable+0x50 is a heavy move routine).
-FN_RUN         = 0x20AE0A0   # CCommand::Run(cmd, std::string* err): CanExecute->Post
-FN_NEW         = 0x510950
+import os
 
 # Every CCommand constructor does the same base initialisation:
 #   [+0x08]=0(byte)  [+0x0c]=-1 [+0x10]=-1  [+0x14]=0(u16) [+0x16]=0xffff
@@ -164,6 +156,9 @@ COMMANDS = {
 }
 
 
+_CALLING_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
 class CommandLayer:
     def __init__(self, game):
         self.g = game
@@ -171,123 +166,40 @@ class CommandLayer:
         self._queue = None
 
     # ---------------------------------------------------------------- basics
-    def idler(self) -> int:
-        v = self.p.u64(self.g.va(IDLER_GLOBAL))
-        if not v:
-            raise RuntimeError("no CInGameIdler (not inside a game)")
-        return v
-
-    def queue(self, refresh=False) -> int:
-        if self._queue and not refresh:
-            return self._queue
-        idl = self.idler()
-        fn = self.p.u64(self.p.u64(idl) + IDLER_VT_QUEUE)
-        self._queue = self.g.call(fn, (idl,), absolute=True)
-        return self._queue
-
-    def player_tag_ptr(self) -> int:
-        idl = self.idler()
-        fn = self.p.u64(self.p.u64(idl) + IDLER_VT_TAG)
-        return self.g.call(fn, (idl,), absolute=True)
-
     def new(self, size: int) -> int:
-        # FN_NEW is a Linux VA. On the PE build this jumps into unrelated code
-        # and kills the process (measured 2026-11-14); the Windows path allocates
-        # from the game's own CPdxNewDeleteAllocator singleton instead, which is
-        # exactly what cmdwin does for the commands it builds by hand.
-        if sys.platform == "win32":
-            import cmdwin
-            return cmdwin.alloc(self.g, int(size))
-        return self.g.call(FN_NEW, (size,))
-
-    def _alloc_stdstring(self) -> int:
-        """A valid EMPTY libstdc++ std::string on the game's heap.
-
-        Layout (32 bytes): +0 _M_p, +8 _M_string_length, +16 _M_local_buf[16].
-        `_M_p` MUST point at the object's own SSO buffer. The old code zeroed all
-        32 bytes, so _M_p was NULL; when CCommand::Run wrote an error message into
-        it, libstdc++ either dereferenced NULL or freed a wild pointer. That is the
-        "command occasionally refused / crashed" bug in the law and focus paths.
-        """
-        s = self.g.malloc(0x20)
-        self.p.write(s, struct.pack("<QQ", s + 0x10, 0) + b"\0" * 16)
-        return s
-
-    def _read_stdstring(self, s: int) -> str:
-        txt = ""
-        try:
-            ptr = self.p.u64(s)
-            ln = self.p.u64(s + 8)
-            if ptr and 0 < ln < 512:
-                raw = self.p.try_read(ptr, ln) or b""
-                txt = raw.decode("utf-8", "replace")
-        except Exception:
-            pass
-        return txt
-
-    def _free_stdstring(self, s: int):
-        """Free the string's heap buffer (if it grew past SSO), then the string."""
-        try:
-            ptr = self.p.u64(s)
-            if ptr and ptr != s + 0x10:
-                self.g.free(ptr)
-            self.g.free(s)
-        except Exception:
-            pass
+        """从游戏内置 CPdxNewDeleteAllocator 分配命令内存（Windows PE 1.19.5.0）。"""
+        import cmdwin
+        return cmdwin.alloc(self.g, int(size))
 
     def post(self, cmd_ptr: int, force: int = 0):
-        """Put a command on the queue, the way the game does it.
-
-        CCommandQueue::Post used to be called directly here. Its address moved in
-        1.19.4.1 and the stale one is refused by the injector, which broke
-        hoi4_send_command / hoi4_declare_war. CCommand::Run (0x20AE0A0, verified)
-        does CanExecute -> Post internally, so calling Run is both correct and
-        the same path a player's click takes.
-        """
-        if sys.platform == "win32":
-            # PE: CCommand::Run does not exist at this address, and Post's drop
-            # paths call the command's deleting destructor.  `enqueue` stamps the
-            # session tick/seq and hands the object straight to the queue, the
-            # same route every working cmdwin command takes.
-            import cmdwin
-            rv = cmdwin.enqueue(self.g, cmd_ptr)
-            self.last_error = ""
-            return rv
-        if force:
-            # Forced posts bypass CanExecute; Run would refuse them.
-            return self.g.call(FN_POST, (self.queue(), cmd_ptr, force))
-        errbuf = self._alloc_stdstring()
-        try:
-            rv = self.g.call(FN_RUN, (cmd_ptr, errbuf))
-            self.last_error = self._read_stdstring(errbuf)
-        finally:
-            self._free_stdstring(errbuf)
+        """将已构造的 CCommand 入队（Windows PE 统一走 cmdwin.enqueue）。"""
+        inv = getattr(self.g, "invalidate_read_scope", None)
+        if callable(inv):
+            inv()
+        import cmdwin
+        rv = cmdwin.enqueue(self.g, cmd_ptr)
+        self.last_error = ""
         return rv
 
-    # ---------------------------------------------- automatic command catalogue
+    # ---------------------------------------------- prebuilt command catalogues
     def catalog(self):
-        """Field layout of all 370 commands, extracted automatically from the binary."""
+        """读取预构建的命令字段表（calling/cmdfields.json）。"""
         if getattr(self, "_auto", None) is None:
-            import cmdauto
-            self._auto = cmdauto.build()
+            import safe_cache
+            cache_p = os.path.join(_CALLING_DIR, "cmdfields.pkl")
+            self._auto = safe_cache.load(cache_p) if safe_cache.exists(cache_p) else {}
         return self._auto
 
     def ctor_catalog(self):
-        """Field layouts recovered from parameterised constructors (more complete)."""
+        """读取预构建的命令构造函数表（calling/cmdctors.json）。"""
         if getattr(self, "_ctors", None) is None:
-            import cmdctor
-            self._ctors = cmdctor.build()
+            import safe_cache
+            cache_p = os.path.join(_CALLING_DIR, "cmdctors.pkl")
+            self._ctors = safe_cache.load(cache_p) if safe_cache.exists(cache_p) else {}
         return self._ctors
 
     def spec_for(self, name: str):
-        """Return the hand-verified spec if there is one, otherwise the extracted one.
-
-        Names arrive both as the C++ class ("CAddProductionLineFactoriesCommand") and
-        as the short key ("AddProductionLineFactories"). The auto catalog in
-        cmdsigs.pkl is 1.19.2 data, so a C-prefixed name that matches a verified
-        short key MUST use the verified spec, otherwise a stale vtable is posted and
-        the game faults inside CCommandQueue::Post.
-        """
+        """返回静态命令字段描述（优先已校验表，其次预构建 JSON 目录）。"""
         if name in COMMANDS:
             return COMMANDS[name], "verified"
         if len(name) > 8 and name.startswith("C") and name.endswith("Command"):
@@ -307,7 +219,6 @@ class CommandLayer:
         ctors = self.ctor_catalog().get(key)
         fields = []
         if ctors and ctors.get("fields"):
-            # constructor-derived layout (more reliable): offset, size, arg, kind
             FMT = {8: "<q", 4: "<i", 2: "<h", 1: "<B"}
             i = 0
             for f in ctors["fields"]:
@@ -330,159 +241,51 @@ class CommandLayer:
                     fields=fields, auto=True, name=key), "auto"
 
     def send_raw(self, name: str, fields: dict, force=0):
-        """Build ANY CCommand and post it to the queue.
-        fields: {"tag":1, "0x28": <value>, ...}  (offset keys may be hex strings)"""
-        if sys.platform == "win32":
-            import cmdwin
-            if not cmdwin.win_safe(name):
-                # 2026-11-15: three separate commands built from pecmd data that was
-                # never verified took hoi4.exe down (CAddAdvisorCommand's guessed
-                # ctor, CGenerateWarGoalAction, CUnlockGrandDoctrineCommand).  A wrong
-                # vtable/size/ctor produces an object the engine executes as code, so
-                # "post it and see" is not a recoverable experiment.
-                return {"command": name, "ptr": None, "run_result": 0,
-                        "blocked": True,
-                        "error": "%s is not on the windows verified-command list. "
-                                 "Its pecmd layout/vtable has never been confirmed "
-                                 "against the PE build and posting it has killed the "
-                                 "game before. Add it to cmdwin.WIN_SAFE only after "
-                                 "the layout is proven." % name}
-            named = {k: v for k, v in fields.items()
-                     if not (isinstance(k, str) and (k.startswith("0x") or k.isdigit()))}
-            offs = {k: v for k, v in fields.items() if k not in named}
-            if named or not offs:
-                cmd = cmdwin.build_command(self.g, name, named)
-            else:
-                spec = cmdwin.spec_of(name)
-                blob_fields = []
-                for k, v in offs.items():
-                    off = int(str(k), 16) if str(k).startswith("0x") else int(k)
-                    hit = [f for f in spec["fields"] if f["offset"] == off]
-                    sz = hit[0]["size"] if hit else 8
-                    blob_fields.append((off, {8: "<Q", 4: "<i", 2: "<h",
-                                              1: "<B"}[sz], int(v)))
-                cmd = cmdwin.build_by_vt(self.g, spec["vt"], spec["size"], blob_fields)
-            rv = self.post(cmd, force)
-            return {"command": name, "ptr": hex(cmd), "run_result": rv & 0xFF,
-                    "error": getattr(self, "last_error", "")}
-        spec, src = self.spec_for(name)
-        size = spec["size"] or 0x80
-        ptr = self.new(size)
-        # operator new hands back uninitialised heap. Reading it back and only
-        # overwriting the known fields left padding full of whatever the previous
-        # owner wrote there, which the game's CanExecute/Execute then acted on.
-        blob = bytearray(size)
-        struct.pack_into("<Q", blob, 0, self.g.va(spec["vt"]))
-        for off, fmt, val in BASE_INIT:
-            struct.pack_into(fmt, blob, off, val)
-        known = {f[2]: f for f in spec["fields"]}
-        byoff = {f[0]: f for f in spec["fields"]}
-        # arg0, arg1 ... map to the non-tag fields, in order
-        ordered = [f for f in spec["fields"] if f[2] != "tag"]
-        for i, f in enumerate(ordered):
-            known.setdefault("arg%d" % i, f)
-        for k, v in fields.items():
-            if k in known:
-                off, fmt, _ = known[k]
-            else:
-                ks = str(k)
-                fmt_override = None
-                if "@" in ks:                      # "i32@0x24", "i64@0x28", "u8@0x30"
-                    tname, _, ks = ks.partition("@")
-                    fmt_override = {"i8": "<b", "u8": "<B", "i16": "<h", "u16": "<H",
-                                    "i32": "<i", "u32": "<I", "i64": "<q",
-                                    "u64": "<Q", "ptr": "<Q"}.get(tname)
-                try:
-                    off = int(ks, 16) if ks.startswith("0x") else int(ks)
-                except (TypeError, ValueError):
-                    raise KeyError("command %s has no field '%s'. Valid: %s"
-                                   % (name, k, sorted(known)))
-                fmt = fmt_override or byoff.get(off, (off, "<i", ""))[1]
-            if off + struct.calcsize(fmt) > size:
-                raise ValueError("offset %#x exceeds the command size (%#x)" % (off, size))
-            struct.pack_into(fmt, blob, off, int(v))
-        self.p.write(ptr, bytes(blob))
-        rv = self.post(ptr, force)
-        out = {"command": spec.get("name", name), "source": src, "ptr": hex(ptr),
-               "size": size, "fields": {k: hex(int(v)) for k, v in fields.items()}}
-        if isinstance(rv, int):
-            out["run_result"] = rv & 0xFF
-            out["error"] = getattr(self, "last_error", "")
-        return out
+        """在 Windows PE 白名单门禁下构造并投递任意已验证 CCommand。"""
+        import cmdwin
+        if not cmdwin.win_safe(name):
+            return {"command": name, "ptr": None, "run_result": 0,
+                    "blocked": True,
+                    "error": "%s is not on the windows verified-command list. "
+                             "Its pecmd layout/vtable has never been confirmed "
+                             "against the PE build and posting it has killed the "
+                             "game before. Add it to cmdwin.WIN_SAFE only after "
+                             "the layout is proven." % name}
+        named = {k: v for k, v in fields.items()
+                 if not (isinstance(k, str) and (k.startswith("0x") or k.isdigit()))}
+        offs = {k: v for k, v in fields.items() if k not in named}
+        if named or not offs:
+            cmd = cmdwin.build_command(self.g, name, named)
+        else:
+            spec = cmdwin.spec_of(name)
+            blob_fields = []
+            for k, v in offs.items():
+                off = int(str(k), 16) if str(k).startswith("0x") else int(k)
+                hit = [f for f in spec["fields"] if f["offset"] == off]
+                sz = hit[0]["size"] if hit else 8
+                blob_fields.append((off, {8: "<Q", 4: "<i", 2: "<h",
+                                          1: "<B"}[sz], int(v)))
+            cmd = cmdwin.build_by_vt(self.g, spec["vt"], spec["size"], blob_fields)
+        rv = self.post(cmd, force)
+        return {"command": name, "ptr": hex(cmd), "run_result": rv & 0xFF,
+                "error": getattr(self, "last_error", "")}
 
     # ------------------------------------------------------- generic builder
     def make(self, name: str, **fields):
-        """Build a command object directly, without calling its constructor."""
-        if sys.platform == "win32":
-            # PE build: the layout (and often the constructor itself) comes from
-            # `pecmd`, recovered out of MSVC RTTI + the ctor's own stores.
-            import cmdwin
-            return cmdwin.build_command(self.g, name, fields)
-        spec = COMMANDS[name]
-        ptr = self.new(spec["size"])
-        blob = bytearray(spec["size"])   # all-zero: no stale heap in padding fields
-        struct.pack_into("<Q", blob, 0, self.g.va(spec["vt"]))
-        for off, fmt, val in BASE_INIT:
-            struct.pack_into(fmt, blob, off, val)
-        known = {f[2]: f for f in spec["fields"]}
-        for k, v in fields.items():
-            if k not in known:
-                raise KeyError("command %s has no field '%s' (%s)" % (name, k, list(known)))
-            off, fmt, _ = known[k]
-            struct.pack_into(fmt, blob, off, v)
-        self.p.write(ptr, bytes(blob))
-        return ptr
+        """经由 pecmd/cmdwin 构造 Windows PE 命令对象。"""
+        import cmdwin
+        return cmdwin.build_command(self.g, name, fields)
 
     def send(self, name: str, force=0, **fields):
-        """Build a command and post it. The same path as a player's click."""
+        """构造命令并入队。"""
         ptr = self.make(name, **fields)
         self.post(ptr, force)
         return ptr
 
-    # ------------------------------------------------------- constructor-based
-    def build(self, name: str, *ctor_args, scratch_setup=None):
-        """Build the command by calling its constructor, and return the pointer."""
-        spec = COMMANDS[name]
-        cmd = self.new(spec["size"])
-        args = (cmd,) + tuple(ctor_args)
-        import api
-        api.allow_call(spec["ctor"])   # the constructor cmdctor recovered statically
-        self.g.call(spec["ctor"], args, scratch_writer=scratch_setup)
-        return cmd
-
-    def issue(self, name: str, *ctor_args, scratch_setup=None, force=0):
-        cmd = self.build(name, *ctor_args, scratch_setup=scratch_setup)
-        self.post(cmd, force)
-        return cmd
-
     # ---------------------------------------------------------- convenience
     def set_national_focus(self, focus_ptr: int, tag_id: int = None):
-        """Select a national focus for the player, or for the given tag."""
-        if sys.platform == "win32":
-            # The PE build keeps the same command objects but different addresses;
-            # cmdwin builds through the real constructor and posts through the
-            # session's Post (see calling/cmdwin.py).
-            import cmdwin
-            tid = self.g.player_tag_id() if tag_id is None else int(tag_id)
-            return cmdwin.set_national_focus(self.g, focus_ptr, tid)
-        if tag_id is None:
-            tagp = self.player_tag_ptr()
-        else:
-            tagp = None
-        spec = COMMANDS["SetNationalFocus"]
-        cmd = self.new(spec["size"])
-        holder = {}
-
-        def setup(scr):
-            holder["scr"] = scr
-            if tagp is None:
-                self.p.write(scr + 0x800, struct.pack("<i", tag_id))
-                return (cmd, scr + 0x800, focus_ptr)
-            return (cmd, tagp, focus_ptr)
-
-        import api
-        api.allow_call(spec["ctor"])
-        self.g.call(spec["ctor"], scratch_writer=setup)
-        self.post(cmd)
-        return cmd
+        """为本国或指定国家启动国策。"""
+        import cmdwin
+        tid = self.g.player_tag_id() if tag_id is None else int(tag_id)
+        return cmdwin.set_national_focus(self.g, focus_ptr, tid)
 

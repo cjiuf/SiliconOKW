@@ -253,66 +253,8 @@ def _state_array(g, act, state_ptrs):
 
 def justify_wargoal(g, target_tag, wargoal="take_state", states=(), source_tag=None,
                     dry_run=False):
-    """Start justifying a war goal (the same command as the diplomacy dialog).
-
-    `states` may be CState pointers (Game.justify_wargoal resolves ids) or ids.
-    With no states and a state-based wargoal, every state of the target is tried
-    in turn and the first one CanExecute accepts is used — that is exactly what a
-    player does by clicking through the list.
-    """
-    if sys.platform == "win32":
-        return False, "diplomacy.justify_wargoal uses Linux ELF offsets; use cmdwin.justify_wargoal on Windows PE"
-    p = g.p
-    wgs = wargoal_types(g)
-    if wargoal not in wgs:
-        return False, "unknown wargoal: %s (options: %s)" % (
-            wargoal, ", ".join(sorted(wgs)))
-    own = g._inj is None
-    if own:
-        g.attach()
-    try:
-        src = source_tag or g.player().tag
-        act = _new_action_param(g, SZ_WARGOAL, CTOR_WARGOAL_PARAM, VT_GENERATE_WARGOAL,
-                                [_i32buf(g, tag_index(g, src)),
-                                 _i32buf(g, tag_index(g, target_tag)),
-                                 wgs[wargoal], _scope_obj(g)])
-        i_from = tag_index(g, src)
-
-        if states:
-            cands = [list(states)]
-        elif wargoal in WARGOAL_NEEDS_STATES:
-            try:
-                sts = [s["ptr"] for s in g.states(target_tag)]
-            except Exception:
-                sts = []
-            # Danzig first (85) — the historical German claim — then the rest.
-            sts.sort(key=lambda x: 0 if p.i32(x + 0x48) == 85 else 1)
-            cands = [[x] for x in sts]
-        else:
-            cands = [[]]
-        if not cands:
-            return False, "the target owns no state to take"
-
-        tried = []
-        for st in cands:
-            _state_array(g, act, st)
-            # ALWAYS pre-check CanExecute. Posting an action whose fields the game
-            # does not fully understand faults the process (observed: sig=11 rip=0x21
-            # when the state array held pointers). A refused pre-check costs nothing.
-            ok = _can_execute(g, act, i_from)
-            err = "" if ok else "CanExecute false"
-            if ok and not dry_run:
-                ok, err = _post_action(g, act, i_from)
-            ids = [p.i32(x + 0x48) for x in st]
-            tried.append({"states": ids, "ok": ok})
-            if ok:
-                return True, ""
-            if len(tried) >= 12:
-                break
-        return False, "CanExecute refused every attempt: %s" % tried
-    finally:
-        if own:
-            g.detach()
+    """Start justifying a war goal (Windows PE 请使用 cmdwin.justify_wargoal)."""
+    return False, "diplomacy.justify_wargoal uses Linux ELF offsets; use cmdwin.justify_wargoal on Windows PE"
 
 
 # ------------------------------------------------------------------ declare war
@@ -606,68 +548,7 @@ def find_wargoal(g, target_tag, source_tag=None, deep=None):
 
 def declare_war(g, target_tag, wargoal_ptr=None, flag=0, dry_run=False):
     """Declare war. Requires a valid war goal (justify one first)."""
-    if sys.platform == "win32":
-        return False, "diplomacy.declare_war uses Linux ELF offsets; use cmdwin.declare_war on Windows PE"
-    p = g.p
-    own = g._inj is None
-    if own:
-        g.attach()
-    try:
-        src = g.player().tag
-        i_from = tag_index(g, src)
-        # 2026-11-13: CWarGoal DOES exist (vtable 0x4477D88, sizeof 0x90) — the old
-        # "no RTTI class" note was wrong, it just has no `C*Action` name so the
-        # diploscan cache never listed it. `find_wargoal` returns the one CB whose
-        # (+0x38 owner, +0x3C target) matches, which is exactly the pointer the
-        # diplomacy dialog hands to CDeclareWarAction. Passing the OTHER vtable hits
-        # (freed blocks) is what produced the sig=11 crashes.
-        cb = find_wargoal(g, target_tag, src) if not wargoal_ptr else None
-        cands = ([int(wargoal_ptr)] if wargoal_ptr
-                 else ([int(cb["ptr"], 16)] if cb else []))
-        # A NULL war goal is only meaningful while the `no_wargoal` cheat is on, and
-        # only POSTING it is safe: CDeclareWarAction::CanExecute dereferences the
-        # pointer (sig=11 rip=+0x... with rax=0), so a dry run must never probe 0.
-        if not dry_run and 0 not in cands:
-            cands.append(0)
-        if dry_run and not cands:
-            live = [w for w in wargoals(g, deep=False) if w["valid"]]
-            return False, ("no live casus belli against %s (the game refuses a war "
-                           "without a wargoal). Valid war goals on the board: %s"
-                           % (target_tag, [(w["owner_tag"], w["target_tag"], w["wargoal"])
-                                           for w in live] or "none"))
-        tried = []
-        for wg in cands:
-            try:
-                act = _new_action_param(
-                    g, SZ_DECLAREWAR, CTOR_DECLAREWAR_PARAM, VT_DECLAREWAR,
-                    [_i32buf(g, i_from), _i32buf(g, tag_index(g, target_tag)),
-                     wg, int(flag), _scope_obj(g)])
-            except Exception as e:
-                tried.append({"wargoal": hex(wg), "error": str(e)})
-                continue
-            if dry_run:
-                ok = _can_execute(g, act, i_from)
-                tried.append({"wargoal": hex(wg), "applicable": ok})
-                if ok:
-                    return True, "applicable (dry_run: nothing was sent)"
-                continue
-            ok, err = _post_action(g, act, i_from)
-            tried.append({"wargoal": hex(wg), "ok": ok, "error": err})
-            if ok:
-                return True, ""
-        if dry_run:
-            return False, "no war goal was applicable: %s" % tried
-        if not cb and not wargoal_ptr:
-            live = [w for w in wargoals(g, deep=False) if w["valid"]]
-            return False, ("no live casus belli against %s (the game refuses a war "
-                           "without a wargoal). Valid war goals on the board: %s"
-                           % (target_tag, [(w["owner_tag"], w["target_tag"], w["wargoal"])
-                                           for w in live] or "none"))
-        return False, ("the game refused every war goal (%d tried). Last: %s"
-                       % (len(tried), tried[-1] if tried else ""))
-    finally:
-        if own:
-            g.detach()
+    return False, "diplomacy.declare_war uses Linux ELF offsets; use cmdwin.declare_war on Windows PE"
 
 
 def _load_action_cache():
@@ -933,37 +814,7 @@ def _country_timed_activities(g):
             return [(None, a) for a in g.oi.instances("CTimedWargoalActivity")]
         except Exception:
             return []
-    from game import _arr, CO_POLITICS
-    p = g.p
-    try:
-        vt = p.va(0x4398978)
-    except Exception:
-        try:
-            vt = g.base + 0x4398978
-        except Exception:
-            return []
-    out, seen = [], set()
-    try:
-        tags = list(g.tags())
-    except Exception:
-        return out
-    for t in tags:
-        try:
-            pol = p.u64(g.country(t).ptr + CO_POLITICS)
-            if not pol:
-                continue
-            for a in _arr(p, pol, 0x08, limit=64):
-                if not a or a in seen or a < 0x10000:
-                    continue
-                try:
-                    if p.u64(a) == vt:
-                        seen.add(a)
-                        out.append((t, a))     # (owner tag, activity ptr)
-                except Exception:
-                    continue
-        except Exception:
-            continue
-    return out
+    return []
 
 
 def justifying(g, include_queued=False):

@@ -231,7 +231,7 @@ class AirNavyMixin:
         (the deterministic id-1..k starting block), so only the player's own
         aircraft are ever handed to the command.
         """
-        import api, armyops
+        import armyops
         if getattr(self, "_air_attach_broken", False):
             return {"ok": False, "skipped": "circuit_breaker"}
         c = self._c(tag)
@@ -324,61 +324,7 @@ class AirNavyMixin:
                 res_retry["retried_after_refresh"] = True
                 return res_retry
             return res_out
-        wings_all = self.oi.instances("CAirWing")
-        if not wings_all and refresh_oi:
-            self.oi.build(force=True)
-            wings_all = self.oi.instances("CAirWing")
-        if not wings_all:
-            return {"ok": False, "error": "no CAirWing in the object index",
-                    "scanned_wings": 0, "attached_count": 0}
-        wings = wings_all
-        if not allow_unverified:
-            return {"ok": False, "skipped": "wing ownership unverified",
-                    "scanned_wings": len(wings), "attached_count": 0,
-                    "note": "see the 2026-11-07 canary: no owner field found in "
-                            "CAirWing/CAirWingPool; the command accepts foreign wings"}
-        already = getattr(self, "_attached_wings_set", None)
-        if already is None or getattr(self, "_attached_wings_pid", None) != self.p.pid:
-            already = set()
-            self._attached_wings_set = already
-            self._attached_wings_pid = self.p.pid
-        api.allow_call(0x241F840)
-        api.allow_call(0x20AE0A0)
-        attached, refused = [], 0
-        try:
-            with self:
-                errbuf = self.malloc(0x28)
-                for w in wings:
-                    if w in already:
-                        continue
-                    if self.oi.class_of(w) != "CAirWing":
-                        continue
-                    og = ogs[len(attached) % len(ogs)]
-                    cmd = self.cmd.new(0x48)
-                    self.p.write(cmd, b"\0" * 0x48)
-                    self.call(0x241F840, (cmd, w, og, 0))
-                    # C1 (review 2026-11-07): errbuf is a libstdc++ std::string.
-                    # Writing 0x20 zero bytes set _M_p = NULL, so the moment
-                    # CCommand::Run wrote a refusal reason libstdc++ dereferenced
-                    # NULL -> SIGSEGV. A valid SSO empty string is
-                    # _M_p = this+0x10, _M_string_length = 0, _M_local_buf[0] = 0.
-                    self.p.write(errbuf, struct.pack("<QQB", errbuf + 0x10, 0, 0))
-                    rv = self.call(0x20AE0A0, (cmd, errbuf))
-                    if rv & 0xFF:
-                        already.add(w)
-                        attached.append({"wing": hex(w), "army": hex(og)})
-                    else:
-                        refused += 1
-        except Exception as e:
-            self._air_attach_broken = True
-            return {"ok": False, "error": str(e), "attached_count": len(attached),
-                    "scanned_wings": len(wings), "refused": refused}
-        return {"ok": bool(attached) or bool(already),
-                "scanned_wings": len(wings),
-                "attached_count": len(attached),
-                "refused": refused,
-                "total_attached": len(already),
-                "attached": attached[:40]}
+        raise NotImplementedError("attach_air_wings_to_armies requires Windows PE 1.19.5.0")
 
     def air_mission(self, wings="all", mission=0, flag1=None, flag2=None, tag=None):
         """对指定空军联队设置或清除作战任务（mission=0/'none'/'stand_down' 即一键停飞省油）。

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import os
 import struct
-import sys
 
+from api import enter_read_scope, read_scoped
 from explore import cstring
 import offsets as O
 import session_state as _SS

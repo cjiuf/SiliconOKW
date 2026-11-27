@@ -12,7 +12,6 @@ from ._shared import (
     CO_COMMAND_POWER,
     CO_OWNED_STATES,
     CO_STATES,
-    FN_DYNAMIC_VAR,
     ST_BUILDINGS,
     _arr,
 )
@@ -682,16 +681,4 @@ class StatsVarsMixin:
             if label_error:
                 out["label_error"] = label_error
             return out
-        c = self._c(tag)
-        p = self.p
-        hold = {}
-
-        def w(scr):
-            hold["s"] = scr
-            p.write(scr, b"\0" * 0x200)
-            p.write(scr + 0x208, struct.pack("<i", c.tag_id))
-            p.write(scr + 0x100, name.encode() + b"\0")
-            return (scr + 0x180, scr + 0x100, scr + 0x200, 0)
-        r = self.call(FN_DYNAMIC_VAR, scratch_writer=w, signed=True)
-        raw = p.read(hold["s"] + 0x180, 16)
-        return {"rax": r, "out": struct.unpack("<qq", raw)}
+        raise NotImplementedError("script_variable requires Windows PE 1.19.5.0")

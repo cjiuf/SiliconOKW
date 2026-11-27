@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import struct
 import sys
 
 from ._shared import (
@@ -20,6 +19,7 @@ from ._shared import (
     _arr,
     _count,
     item_name,
+    read_scoped,
 )
 
 class PoliticsMixin:
@@ -126,6 +126,10 @@ class PoliticsMixin:
     def _decision_name(self, d):
         return item_name(self.p, d + DECISION_NAME)
 
+    @read_scoped(
+        "decisions",
+        key_fn=lambda self, tag=None, which="visible", rich=True: (self._rs_tag_key(tag), str(which), bool(rich)),
+    )
     def decisions(self, tag=None, which="visible", rich=True):
         """Decisions, optionally with everything a player needs to judge one.
 
@@ -629,21 +633,8 @@ class PoliticsMixin:
             pass
 
     def _replace_can_execute(self, old, new, tag=None):
-        """Call CReplaceIdeaCommand::CanExecute (vtable +0x50) without posting.
-
-        Safe as a dry run: it only reads the command, country and both idea objects.
-        The command object is freed again right after the check.
-        """
-        if sys.platform == "win32":
-            return False
-        import api
-        api.allow_call(0x1CED690)  # CReplaceIdeaCommand::CanExecute, disassembled above
-        cmd = self._replace_cmd(old, new, tag)
-        try:
-            fn = self.p.u64(self.va(0x4415D70) + 0x50)
-            return bool(self.call(fn, (cmd, 0), absolute=True) & 0xFF)
-        finally:
-            self._free_cmd(cmd)
+        """Windows PE 下交由 replace_idea 内部 cmdwin 门禁核验。"""
+        return False
 
     def replace_idea(self, key, tag=None):
         """Replace the current law in the same category, using the game's own command."""
@@ -925,7 +916,7 @@ class PoliticsMixin:
             mov r12,[rdx] ; mov rbx,[rdx+8] ...     -> arg2 = std::string* (slot name)
         Then CCommand::Run (CanExecute -> Post) through _run_cmd.
         """
-        import advisors as _adv, api
+        import advisors as _adv
         c = self._c(tag)
         rows = _adv.load_advisors(c.tag)
         k = (key or "").lower()
@@ -1074,70 +1065,4 @@ class PoliticsMixin:
                     "pp_delta_note": pp_delta_note,
                     "drained": r.get("drained"),
                     "rv": r.get("posted"), "error": err}
-        nb = slot.encode("utf-8")
-        sp = self.malloc(0x20)
-        if len(nb) <= 15:
-            self.p.write(sp, struct.pack("<QQ", sp + 0x10, len(nb)) + nb.ljust(16, b"\0"))
-        else:
-            b = self.malloc(len(nb) + 1)
-            self.p.write(b, nb + b"\0")
-            self.p.write(sp, struct.pack("<QQQ", b, len(nb), len(nb) + 1))
-
-        # 2026-11-11 (disassembly of 0x1CEB5C0): the ctor takes EXACTLY three
-        # arguments (this, CCharacter*, std::string*). It reads [rsi+0x08] into
-        # cmd+0x24 and deep-copies the string at rdx into cmd+0x30; rcx/r8 are
-        # never touched, so the "missing regs" theory in the work order was
-        # wrong. The real defects were (a) no read-back at all (ok came straight
-        # from CanExecute while the effect lands on the NEXT game tick, so a
-        # later observer saw PP move and blamed a failed hire for it) and
-        # (b) no reason string when CanExecute refused.
-        cost = int(row.get("cost") or 0)
-        try:
-            pp0 = int(self.player().summary().get("political_power") or 0)
-        except Exception:
-            pp0 = 0
-        if cost and pp0 < cost:
-            return {"ok": False, "attempted": False, "advisor": row["character"],
-                    "slot": slot, "cost": cost, "political_power": pp0,
-                    "error": "not enough political power: have %d, need %d"
-                             % (pp0, cost)}
-
-        api.allow_call(0x1CEB5C0)
-        with self:
-            cmd = self.cmd.new(0x50)
-            self.p.write(cmd, b"\0" * 0x50)
-            self.call(0x1CEB5C0, (cmd, adv, sp))
-            rv = self._run_cmd(cmd)
-            err = getattr(self, "_last_cmd_error", "")
-        queued = bool(rv & 0xFF)
-
-        # Read back: the hire is applied by the game loop, not by the call.
-        token = (row.get("idea_token") or "").lower()
-        pp1 = pp0
-        applied = False
-        for _ in range(16):
-            self._settle(0.25)
-            try:
-                pp1 = int(self.player().summary().get("political_power") or 0)
-            except Exception:
-                pass
-            if (cost and pp1 <= pp0 - cost) or (not cost and pp1 != pp0):
-                applied = True
-                break
-            if not queued:
-                break
-        if not err and not queued:
-            # 2026-11-11: PP was checked above, so a refusal here is never about money.
-            # The old text sent two agents hunting for political power that they already had.
-            err = ("engine refused CAddAdvisorCommand::CanExecute (slot %r). Political power "
-                   "was sufficient (%d >= %d). A political_advisor slot holds THREE advisors, "
-                   "so 'the slot is full' is not the explanation: this character's own "
-                   "available/visible trigger is unmet (Todt/Speer need their focus, Schacht "
-                   "loses his after some focuses). Pick another advisor; retrying this one "
-                   "fails the same way." % (slot, pp0, cost))
-        return {"ok": bool(queued and (applied or not cost)),
-                "attempted": True, "queued": queued, "applied": applied,
-                "advisor": row["character"], "idea_token": token, "slot": slot,
-                "cost": cost, "political_power_before": pp0,
-                "political_power_after": pp1, "advisor_ptr": hex(adv),
-                "rv": rv & 0xFF, "error": err}
+        raise NotImplementedError("hire_advisor requires Windows PE 1.19.5.0")

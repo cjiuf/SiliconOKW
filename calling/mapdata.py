@@ -5,7 +5,17 @@ and caches it to disk. Combined with live ownership read from memory, this answe
 "which provinces of X face country Y".
 """
 import os, pickle, struct, sys
-import numpy as np
+
+_NP = None
+
+
+def _np():
+    """惰性加载 numpy：仅在冷建 BMP 地图/河流/质心缓存时导入，避免冷启动耗时 ~350 ms。"""
+    global _NP
+    if _NP is None:
+        import numpy as _numpy
+        _NP = _numpy
+    return _NP
 
 import config
 GAME = config.game_dir(required=False)
@@ -78,6 +88,7 @@ def _read_bmp_indexed(path):
     flip = h > 0
     h = abs(h)
     row = (w + 3) // 4 * 4               # rows are aligned to 4 bytes
+    np = _np()
     arr = np.frombuffer(data, dtype=np.uint8, count=row * h, offset=off)
     arr = arr.reshape(h, row)[:, :w]
     return arr[::-1] if flip else arr
@@ -100,6 +111,7 @@ def _build_rivers_raw(game=GAME, force=False, min_ratio=0.30, min_pixels=6):
     import safe_cache
     if not force and safe_cache.exists(RIVER_CACHE):
         return safe_cache.load(RIVER_CACHE)
+    np = _np()
     col2id, _ = load_definitions(game)
     img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
     key = (img[:, :, 0].astype(np.uint32) << 16) | (img[:, :, 1].astype(np.uint32) << 8) | img[:, :, 2]
@@ -203,6 +215,7 @@ def _read_bmp_rgb(path):
     flip = h > 0
     h = abs(h)
     row = (w * 3 + 3) & ~3
+    np = _np()
     arr = np.frombuffer(data, dtype=np.uint8, count=row * h, offset=off)
     arr = arr.reshape(h, row)[:, : w * 3].reshape(h, w, 3)
     if flip:
@@ -215,6 +228,7 @@ def _build_adjacency_raw(game=GAME, force=False):
     import safe_cache
     if not force and safe_cache.exists(CACHE):
         return safe_cache.load(CACHE)
+    np = _np()
     col2id, _ = load_definitions(game)
     img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
     key = (img[:, :, 0].astype(np.uint32) << 16) | (img[:, :, 1].astype(np.uint32) << 8) | img[:, :, 2]
@@ -430,9 +444,7 @@ def capital_provinces(g):
     import offsets as _O
     cap_off = getattr(_O, "CO_CAPITAL_STATE", None)
     if cap_off is None:
-        if sys.platform == "win32":
-            return {}
-        cap_off = 0xFF0
+        return {}
 
     p = getattr(g, "p", None)
     pid = getattr(p, "pid", None)
@@ -689,47 +701,7 @@ def province_controller_map(g, divisions=None):
          tag present is forced to that tag (handles freshly occupied ground
          before the area pointer updates).
     """
-    import sys as _sys
-    if _sys.platform == "win32":
-        return _win_controller_map(g, divisions)
-    from collections import Counter
-    owners, _ = province_owner_map(g)
-    ptrs = province_objects(g)
-    caps = capital_provinces(g)
-    groups = {}
-    for pid, pr in ptrs.items():
-        try:
-            area = g.p.u64(pr + 0xF0)
-        except OSError:
-            area = 0
-        if not area:
-            continue
-        groups.setdefault(area, []).append(pid)
-    byid = {}
-    for area, pids in groups.items():
-        cap_hits = Counter(caps[x] for x in pids
-                           if caps.get(x) and owners.get(x) == caps[x])
-        if len(cap_hits) == 1:
-            tag = next(iter(cap_hits))
-        else:
-            c = Counter(owners.get(x) for x in pids
-                        if owners.get(x) not in (None, "---"))
-            tag = c.most_common(1)[0][0] if c else None
-        for pid in pids:
-            byid[pid] = tag or owners.get(pid)
-    # Any province missing from the CProvince scan keeps its state owner.
-    for pid, t in owners.items():
-        byid.setdefault(pid, t)
-    if divisions:
-        seen = {}
-        for r in divisions:
-            pv, tag = r.get("prov"), r.get("tag")
-            if pv is not None and tag:
-                seen.setdefault(pv, set()).add(tag)
-        for pv, tags in seen.items():
-            if len(tags) == 1:
-                byid[pv] = next(iter(tags))
-    return byid
+    return _win_controller_map(g, divisions)
 
 
 def border_provinces(g, own_tag, enemy_tag, owner_by_id=None, adj=None):
@@ -798,6 +770,7 @@ def _build_province_centroids_raw(game=GAME, force=False):
         cached = safe_cache.load(CENTROID_CACHE)
         if isinstance(cached, dict) and cached.get("centroids"):
             return cached
+    np = _np()
     col2id, _ = load_definitions(game)
     img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
     h, w, _ = img.shape

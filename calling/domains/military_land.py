@@ -18,6 +18,7 @@ from ._shared import (
     _CONV_PROGRESS,
     _arr,
     item_name,
+    read_scoped,
 )
 
 class MilitaryLandMixin:
@@ -109,6 +110,7 @@ class MilitaryLandMixin:
         except Exception:
             return None
 
+    @read_scoped("conveyors", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def conveyors(self, tag=None):
         """Live division-training conveyors.
 
@@ -914,62 +916,7 @@ class MilitaryLandMixin:
         # call in the session read "hoi4 process not found".
         # Hard-refuse on the PE build until the CDivisionTemplate /
         # CReferencedDivisionTemplate layering is actually verified by disassembly.
-        if sys.platform == "win32":
-            return self._pe_duplicate_template(source_name, tag, new_name, dry_run=dry_run)
-        import struct as _s
-        c = self._c(tag)
-        arr = c.ptr + 0x1B8                      # CPdxArray<CReferencedDivisionTemplate*>
-        d = self.p.u64(arr)
-        n = min(self.p.i32(arr + 0x0C), 64)
-        src_ref = None
-        for i in range(n):
-            t = self.p.u64(d + i * 8)
-            nm = item_name(self.p, t + 0x20)
-            if nm == source_name:
-                src_ref = t
-                break
-        if src_ref is None:
-            return {"ok": False, "error": "template not found: %s" % source_name,
-                    "have": [item_name(self.p, self.p.u64(d + i * 8) + 0x20)
-                             for i in range(n)]}
-        # 2026-11-10 test: src_ref+0x18 crashed the ctor (sig=6 at 0x1FDC190);
-        # reverted until the real CDivisionTemplate/CReferencedDivisionTemplate
-        # layering is confirmed. CCreateDivisionTemplateCommand stays disabled.
-        src_inner = src_ref + 0x18
-        target_name = new_name or (source_name + " Copy")
-        import api
-        api.allow_call(0x1FDC190)
-        with self:
-            cmd = self.cmd.new(0x290)
-            self.p.write(cmd, b"\0" * 0x290)
-            tagbuf = self.malloc(16)
-            try:
-                self.p.write(tagbuf, _s.pack("<i", c.tag_id) + b"\0" * 12)
-                self.call(0x1FDC190, (cmd, src_inner, 0, tagbuf, 0))
-                # V2-01: the deep-copied template keeps the source name, so
-                # CanExecute rejects the duplicate. Rewrite the embedded
-                # std::string at (cmd+0x28)+0x08 before running.
-                na = cmd + 0x28 + 0x08
-                nb = target_name.encode("utf-8")
-                if len(nb) <= 15:
-                    self.p.write(na, _s.pack("<QQ", na + 0x10, len(nb)) + nb.ljust(16, b"\0"))
-                else:
-                    sb = self.malloc(len(nb) + 1)
-                    self.p.write(sb, nb + b"\0")
-                    self.p.write(na, _s.pack("<QQQ", sb, len(nb), len(nb) + 1))
-                rv = self._run_cmd(cmd)
-            finally:
-                self.free(tagbuf)
-        self._settle()
-        arr2 = c.ptr + 0x1B8
-        n2 = self.p.i32(arr2 + 0x0C)
-        names = [item_name(self.p, self.p.u64(self.p.u64(arr2) + i * 8) + 0x20)
-                 for i in range(min(n2, 64))]
-        return {"ok": bool(rv & 0xFF) or n2 > n, "run": bool(rv & 0xFF),
-                "new_name": target_name,
-                "templates_before": n, "templates_after": n2,
-                "templates": names,
-                "error": getattr(self, "_last_cmd_error", "")}
+        return self._pe_duplicate_template(source_name, tag, new_name, dry_run=dry_run)
 
     def template_composition(self, tag=None, only=None):
         """Division templates with their real battalion/company makeup."""
@@ -1044,6 +991,7 @@ class MilitaryLandMixin:
         return [{"ptr": hex(t), "class": self.oi.class_of(t)}
                 for t in _arr(p, self._c(tag).ptr, CO_THEATRES)]
 
+    @read_scoped("order_groups", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def order_groups(self, tag=None):
         """The country's ARMIES and ARMY GROUPS (COrdersGroup)."""
         import armyops
@@ -1075,6 +1023,7 @@ class MilitaryLandMixin:
                 row["members_source"] = "parent_links"
         return {"count": len(out), "groups": out}
 
+    @read_scoped("unassigned_divisions", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def unassigned_divisions(self, tag=None):
         """Divisions not attached to any army (CArmy*)."""
         co = self.country(tag) if tag else self.player()
@@ -1104,10 +1053,7 @@ class MilitaryLandMixin:
         army existed, and a second call in the same paused tick took the SAME
         divisions again and silently did nothing. Both are reported honestly now.
         """
-        if sys.platform == "win32":
-            import armyops_win as armyops
-        else:
-            import armyops
+        import armyops_win as armyops
         def _n():
             try:
                 return (self.order_groups(tag) or {}).get("count")
@@ -1126,16 +1072,6 @@ class MilitaryLandMixin:
         rej = getattr(self, "_last_division_rejected", None)
         if rej:
             res["rejected"] = list(rej[:10])
-        if sys.platform == "win32":
-            # armyops_win calls 0xC417A0 directly, so the army exists the moment
-            # the call returns -- no queue, no tick, nothing to wait for.
-            return res
-        if ok and before is not None and after is not None and after <= before:
-            res["queued"] = True
-            res["note"] = ("army count %s -> %s: the command is queued and lands on the "
-                           "next game tick; do not issue a second create_army in the "
-                           "same paused tick, it would take the same divisions again"
-                           % (before, after))
         return res
 
     def _resolve_orders_group(self, orders_group, tag=None):
@@ -1287,29 +1223,18 @@ class MilitaryLandMixin:
     def create_army_group(self, armies=None, tag=None):
         """Collect armies into a new army group (field marshal command)."""
         p = self.p
-        if sys.platform == "win32":
-            import armyops_win as AW
-            co = self.country(tag) if tag else None
-            mine = [og for og in AW.armies(self, co)
-                    if not p.u8(og + AW.OG_IS_GROUP) and not p.u64(og + AW.OG_PARENT)]
-        else:
-            import armyops
-            mine = [og for og in armyops.orders_groups(
-                        self, self.country(tag) if tag else None)
-                    if not p.u8(og + armyops.OG_IS_GROUP)
-                    and not p.u64(og + armyops.OG_PARENT)]
+        import armyops_win as AW
+        co = self.country(tag) if tag else None
+        mine = [og for og in AW.armies(self, co)
+                if not p.u8(og + AW.OG_IS_GROUP) and not p.u64(og + AW.OG_PARENT)]
         if armies is None:
             armies = mine
         if len(armies) < 1:
             return {"ok": False, "error": "no armies to group"}
-        if sys.platform == "win32":
-            ok, err, info = AW.create_army_group(self, armies)
-            out = {"ok": ok, "error": err, "armies": len(armies)}
-            out.update(info or {})
-            return out
-        import armyops
-        ok, err = armyops.create_army_group(self, armies)
-        return {"ok": ok, "error": err, "armies": len(armies)}
+        ok, err, info = AW.create_army_group(self, armies)
+        out = {"ok": ok, "error": err, "armies": len(armies)}
+        out.update(info or {})
+        return out
 
     def assign_commander(self, orders_group, character_key=None, leader_ptr=None,
                          allow_unverified=False):
@@ -1337,21 +1262,14 @@ class MilitaryLandMixin:
         ok, why = legality.check_commander(self, orders_group, leader_ptr, key, allow_unverified)
         if not ok:
             return {"ok": False, "error": why, "rejected_by": "player_rules"}
-        if sys.platform == "win32":
-            # armyops.set_army_leader is built on the Linux call path (g.malloc +
-            # a fixed 1.19.4.1 ctor VA), which does not exist on the PE build.
-            # CSetArmyLeaderCommand's ctor is (this, CArmyLeader*, COrdersGroup*, u8),
-            # so the three fields are leader / army / flag -- and cmdwin already knows
-            # how to build it through the real ctor.
-            self.send_command("SetArmyLeader",
-                              {"arg0": leader_ptr, "arg1": orders_group, "arg2": 0})
-            self._settle(0.5)
-            after = armyops.og_info(self, orders_group).get("leader_ptr")
-            same = bool(after) and int(after, 16) == int(leader_ptr)
-            return {"ok": same, "leader_ptr": hex(leader_ptr), "after": after,
-                    "error": "" if same else "the game did not attach the leader"}
-        ok, err = armyops.set_army_leader(self, orders_group, leader_ptr)
-        return {"ok": ok, "error": err}
+        # CSetArmyLeaderCommand ctor: (this, CArmyLeader*, COrdersGroup*, u8)
+        self.send_command("SetArmyLeader",
+                          {"arg0": leader_ptr, "arg1": orders_group, "arg2": 0})
+        self._settle(0.5)
+        after = armyops.og_info(self, orders_group).get("leader_ptr")
+        same = bool(after) and int(after, 16) == int(leader_ptr)
+        return {"ok": same, "leader_ptr": hex(leader_ptr), "after": after,
+                "error": "" if same else "the game did not attach the leader"}
 
     def division_detail(self, tag=None, limit=200, order_group=None):
         """Divisions one by one, using the game's own field names: organisation, strength,
@@ -1475,6 +1393,10 @@ class MilitaryLandMixin:
             res["skipped"] = lost
         return res
 
+    @read_scoped(
+        "divisions",
+        key_fn=lambda self, tag=None, limit=200, deep=False: (self._rs_tag_key(tag), int(limit), bool(deep)),
+    )
     def divisions(self, tag=None, limit=200, deep=False):
         """The country's divisions (CArmy in the game's code).
 

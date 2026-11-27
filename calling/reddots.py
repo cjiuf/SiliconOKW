@@ -411,6 +411,12 @@ def _make_item(
 
 def _scan_raw(g, fast=False):
     """纯只读采集全部原始红点（不套 ack 过滤）。"""
+    from api import enter_read_scope
+    with enter_read_scope(g):
+        return _scan_raw_body(g, fast=fast)
+
+
+def _scan_raw_body(g, fast=False):
     items = []
     try:
         tag = g.player_tag()

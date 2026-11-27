@@ -321,7 +321,6 @@ def _run_win(g, entry, args):
 
 def run(g, line):
     """Execute one console command line. Returns (ok, message)."""
-    import api
     parts = line.split()
     if not parts:
         raise ValueError("empty command")
@@ -340,20 +339,4 @@ def run(g, line):
         e = find(g, name)
         if not e:
             return False, "unknown command: %s" % name
-    if _WIN:
-        return _run_win(g, e, args)
-    p = g.p
-    fn = p.u64(e + 0x68) - g.base
-    api.allow_call(fn)
-    own = g._inj is None
-    if own:
-        g.attach()
-    try:
-        res = g.malloc(0x40)
-        p.write(res, b"\0" * 0x40)
-        arr = _mkargs(g, args)
-        g.call(fn, [res, arr])
-        return bool(p.u8(res)), (p.stdstring(res + 0x08) or "")
-    finally:
-        if own:
-            g.detach()
+    return _run_win(g, e, args)

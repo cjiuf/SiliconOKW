@@ -84,31 +84,7 @@ class DiplomacyWarMixin:
         cache = getattr(self, "_faction_objects_cache", None)
         if cache and cache[0] == pid:
             return cache[1]
-        if sys.platform == "win32":
-            hits = self.win_scan_class("CFaction")
-            self._faction_objects_cache = (pid, hits)
-            return hits
-        needle = struct.pack("<Q", self.p.base + self.FACTION_VT_RVA)
-        hits = []
-        for m in self.p.regions(writable=True):
-            a, b = m["start"], m["end"]
-            pos = a
-            while pos < b:
-                n = min(8 << 20, b - pos)
-                try:
-                    data = self.p.read(pos, n)
-                except Exception:
-                    pos += n
-                    continue
-                st = 0
-                while True:
-                    i = data.find(needle, st)
-                    if i < 0:
-                        break
-                    hits.append(pos + i)
-                    st = i + 8
-                pos += n
-        hits = sorted(set(hits))
+        hits = self.win_scan_class("CFaction")
         self._faction_objects_cache = (pid, hits)
         return hits
 
@@ -629,204 +605,7 @@ class DiplomacyWarMixin:
                     % (target_tag, wargoal)
                 )
             return out_j
-        readiness = None
-        if not force:
-            try:
-                import playbooks as _pb
-                # NOTE: justify_wargoal has no `tag` parameter — using `tag` here
-                # raised NameError, the except swallowed it and the whole veteran
-                # gate silently disappeared (caught 2026-11-05 by calling it live).
-                pbk = _pb.get_playbook(self.player().tag)
-            except Exception:
-                pbk = {}
-            forbid = int(pbk.get("forbid_manual_justify_before_year") or 0)
-            fallback = int(pbk.get("justify_fallback_year") or forbid)
-            # 2026-11-06: a minor nation, or a major switched to `cheese_breakout`,
-            # may justify freely — the historical no-justify rule only applies to
-            # the seven majors in "historical" mode.
-            try:
-                import playbooks as _pbm
-                if _pbm.get_playbook_mode(self.player().tag) != "historical":
-                    forbid = 0
-            except Exception:
-                pass
-            if forbid and not force:
-                year = 0
-                try:
-                    year = int(self.date().get("year") or 0)
-                except Exception:
-                    pass
-                done = set()
-                try:
-                    done = set(self.completed_focuses() or [])
-                except Exception:
-                    pass
-                # 1936-1938: never. From the fallback year on: only when the focus
-                # chain failed to deliver a casus belli (e.g. Poland accepted Danzig,
-                # ai_chance 10/11 -> the ~9% branch that grants no wargoal).
-                allowed = (year >= fallback
-                           and any(f in done for f in ("GER_danzig_or_war",))
-                           ) or year >= forbid
-                if not allowed:
-                    return {
-                        "ok": False,
-                        "blocked_by": "veteran_playbook",
-                        "error": pbk.get("manual_justify_note", "manual justify forbidden"),
-                        "hint": ("Historical line: use the focus tree. For a deliberate "
-                                 "1936 opening (e.g. the Dutch/East-Indies rubber plan) pass "
-                                 "force=true — the engine accepts it immediately; the "
-                                 "playbook gate is advisory, not a game rule."),
-                        "year": year,
-                        "completed": sorted(f for f in ("GER_danzig_or_war",) if f in done),
-                    }
-            # 2026-11-16: justifying is a CLAIM, not an attack -- it starts a
-            # 250-day clock and must be possible long before the army is
-            # deployed.  Only the advisory half of the readiness check applies;
-            # the border/front-tick blockers belong to declare_war.
-            readiness = self.war_readiness_check(target_tag, hard=False, force=True)
-            if readiness.get("blockers"):
-                return {"ok": False, "blocked_by": "war_readiness_check",
-                        "error": "; ".join(readiness["blockers"]),
-                        "readiness": readiness}
-        sp = []
-        if states:
-            want = {int(x) for x in states}
-            for tag in (target_tag,):
-                for st in _arr(self.p, self.country(tag).ptr, CO_STATES):
-                    if self.p.i32(st + ST_ID) in want:
-                        sp.append(st)
-            missing = want - {self.p.i32(x + ST_ID) for x in sp}
-            if missing:
-                return {"ok": False, "error": "these states do not belong to the target: %s" % sorted(missing)}
-        # 2026-11-19: the activity must never be born with an empty state array
-        # (see the crash note above the helpers).  With no explicit states we
-        # record the target's first state -- the engine only needs *a* state to
-        # point the completion message at.
-        guard_state_id = self.p.i32(sp[0] + ST_ID) if sp else None
-        auto_state = None
-        if not sp:
-            auto_state = self._pick_target_state_id(target_tag)
-            if auto_state is not None:
-                guard_state_id = auto_state
-                for st in _arr(self.p, self.country(target_tag).ptr, CO_STATES):
-                    if self.p.i32(st + ST_ID) == auto_state:
-                        sp = [st]
-                        break
-        # 2026-11-11: CGenerateWarGoalAction::CanExecute refuses silently when the
-        # country cannot pay the engine's political-power price, and every caller only
-        # saw "CanExecute refused every attempt" (three runs blamed the whole command).
-        # Ask the engine for the quote first and report the real blocker.
-        if not dry_run:
-            try:
-                for _j in diplomacy.justifying(self):
-                    if _j.get("source_class") != "CTimedWargoalActivity":
-                        continue        # a queued CGenerateWarGoalAction is not a justification
-                    if str(_j.get("target") or "").upper() == str(target_tag).upper():
-                        return {"ok": False, "blocked_by": "already_justifying",
-                                "error": "already justifying a war goal against %s" % target_tag,
-                                "justifying": _j}
-            except Exception:
-                pass
-            try:
-                quote = self.wargoal_quote(target_tag, wargoal, states)
-            except Exception as _e:
-                quote = None
-            if (quote and quote.get("ok") and quote.get("can_justify_now") is False
-                    and (quote.get("pp_shortfall") or 0) > 0):
-                return {"ok": False, "blocked_by": "political_power",
-                        "error": "not enough political power: %s" % (quote.get("note") or ""),
-                        "current_pp": quote.get("current_pp"),
-                        "required_pp": quote.get("required_pp"),
-                        "pp_shortfall": quote.get("pp_shortfall"),
-                        "quote": quote,
-                        "states": [self.p.i32(x + ST_ID) for x in sp]}
-        try:
-            _pp0 = self.politics().get("political_power")
-        except Exception:
-            _pp0 = None
-        ok, err = diplomacy.justify_wargoal(self, target_tag, wargoal, sp, dry_run=dry_run)
-        _pp_spent = None
-        mine = None
-        if ok and not dry_run:
-            # The engine accepts at most one justification at a time and refuses the
-            # second one at execution time, long after CCommand::Run returned true.
-            # Round 3 reported ok:true for commands that never became an activity.
-            for _ in range(10):
-                # A tick must run BEFORE justifying() is asked: the activity only
-                # exists once the loop consumed the command, and the first query
-                # used to cache an empty answer (objindex negative cache 2s/5s).
-                self._settle(0.35)
-                for _j in diplomacy.justifying(self):
-                    if _j.get("source_class") != "CTimedWargoalActivity":
-                        continue
-                    if str(_j.get("target") or "").upper() == str(target_tag).upper():
-                        mine = _j
-                        break
-                if mine:
-                    break
-        # 2026-11-19 guard #2: repair the state array the instant the activity
-        # exists, so a 195-day timer can never end on an empty CPdxArray.
-        state_guard = None
-        if mine and not dry_run:
-            try:
-                state_guard = self.ensure_wargoal_state_array(mine, guard_state_id)
-            except Exception as _e:
-                state_guard = {"ok": False, "why": repr(_e)}
-        # The PP is charged on a later tick too: read it AFTER the poll.
-        try:
-            _pp1 = self.politics().get("political_power")
-            _pp_spent = (round(float(_pp0) - float(_pp1), 1)
-                         if (_pp0 is not None and _pp1 is not None) else None)
-        except Exception:
-            _pp_spent = None
-        if ok and not dry_run and not mine:
-                try:
-                    import session as _sess
-                    _paused = _sess.is_paused(self)
-                except Exception:
-                    _paused = False
-                if _paused:
-                    # The command sits in the queue; the engine builds the activity on
-                    # the next unpaused frame. Failing here made callers retry and leak
-                    # one CGenerateWarGoalAction per attempt (round 4: six of them).
-                    return {"ok": True, "queued": True,
-                            "note": ("the game is PAUSED: the justification is queued and "
-                                     "will start on the next unpaused frame - call "
-                                     "hoi4_justifying after unpausing to confirm"),
-                            "wargoal": wargoal,
-                            "states": [self.p.i32(x + ST_ID) for x in sp]}
-                # 2026-11-13: with the `instant_wargoal` cheat on there is no timed
-                # activity at all - the CB is created on the same tick. A live
-                # CWarGoal for (me, target) proves the justification completed, so
-                # report success instead of "the engine charged PP and dropped it".
-                try:
-                    _cb = diplomacy.find_wargoal(self, target_tag)
-                except Exception:
-                    _cb = None
-                if _cb:
-                    return {"ok": True, "instant": True, "wargoal": wargoal,
-                            "casus_belli": _cb, "pp_spent": _pp_spent,
-                            "states": [self.p.i32(x + ST_ID) for x in sp]}
-                return {"ok": False,
-                        "blocked_by": "engine_dropped" if (_pp_spent or 0) > 0 else "not_started",
-                        "pp_spent": _pp_spent,
-                        "error": (("the engine charged %.1f PP but created no timed war-goal "
-                                   "activity for %s — the justification action was dropped "
-                                   "after the cost was taken" % (_pp_spent, target_tag))
-                                  if (_pp_spent or 0) > 0 else
-                                  ("the command was queued but no timed war-goal activity "
-                                   "for %s appeared (the engine allows one justification at "
-                                   "a time — check hoi4_justifying)" % target_tag)),
-                        "wargoal": wargoal,
-                        "states": [self.p.i32(x + ST_ID) for x in sp],
-                        "active": diplomacy.justifying(self, include_queued=True)}
-        return {"ok": ok, "error": err, "wargoal": wargoal, "dry_run": bool(dry_run),
-                "pp_spent": _pp_spent,
-                "states": [self.p.i32(x + ST_ID) for x in sp],
-                "readiness": readiness,
-                "state_guard": state_guard,
-                # live progress straight from CTimedWargoalActivity (days_left/eta_date)
-                "justifying": (diplomacy.justifying(self) if ok and not dry_run else [])}
+        raise NotImplementedError("justify_wargoal requires Windows PE 1.19.5.0")
 
     def wargoal_quote(self, target_tag, wargoal="take_state", states=None, tag=None):
         """对 target_tag 正当化指定州要多少 PP、还差多少、大概多少天（引擎级精确 PP）。"""
@@ -911,19 +690,7 @@ class DiplomacyWarMixin:
                 return {"ok": False, "unsupported_on_windows": True,
                         "error": "PE static quote failed: %s" % e,
                         "target": target_tag, "wargoal": wargoal}
-        sp, sids = [], []
-        if states:
-            want = {int(x) for x in states}
-            for st in _arr(self.p, self.country(target_tag).ptr, CO_STATES):
-                sid = self.p.i32(st + ST_ID)
-                if sid in want:
-                    sp.append(st)
-                    sids.append(sid)
-            missing = want - set(sids)
-            if missing:
-                return {"ok": False,
-                        "error": "these states do not belong to %s: %s" % (target_tag, sorted(missing))}
-        return diplomacy.wargoal_quote(self, target_tag, wargoal, sp, sids, source_tag=tag)
+        raise NotImplementedError("wargoal_quote requires Windows PE 1.19.5.0")
 
     def justifying(self):
         import diplomacy
@@ -938,19 +705,15 @@ class DiplomacyWarMixin:
                 "all_classes": sorted(allmap)}
 
     def send_diplomatic_action(self, action_class, target_tag, dry_run=False):
-        import diplomacy
-        if sys.platform == "win32":
-            return {"ok": False,
-                    "blocked_by": "unsupported_platform",
-                    "platform": "win32",
-                    "unsupported_on_windows": True,
-                    "alternatives": ["hoi4_justify_wargoal", "hoi4_declare_war"],
-                    "error": "diplomatic action objects are built through the Linux "
-                             "call path (setregs is missing on the PE backend); "
-                             "only hoi4_justify_wargoal / hoi4_declare_war have native Windows channels.",
-                    "action": action_class, "target": target_tag}
-        ok, err = diplomacy.send_action(self, action_class, target_tag, dry_run=dry_run)
-        return {"ok": ok, "error": err}
+        return {"ok": False,
+                "blocked_by": "unsupported_platform",
+                "platform": "win32",
+                "unsupported_on_windows": True,
+                "alternatives": ["hoi4_justify_wargoal", "hoi4_declare_war"],
+                "error": "diplomatic action objects are built through the Linux "
+                         "call path (setregs is missing on the PE backend); "
+                         "only hoi4_justify_wargoal / hoi4_declare_war have native Windows channels.",
+                "action": action_class, "target": target_tag}
 
     def declare_war(self, target_tag, dry_run=False, force=False, override_checks=False,
                     ack_co_belligerents=False, confirm_escalation=False):
@@ -1016,7 +779,6 @@ class DiplomacyWarMixin:
                         "confirm_escalation=true (or ack_co_belligerents=[...]) confirms strategic escalation."
                         % str(target_tag).upper()
                     )}
-        import diplomacy
         import combat
         import time as _t
         if sys.platform == "win32":
@@ -1054,24 +816,4 @@ class DiplomacyWarMixin:
                     "at_war_verified": verified,
                     **_diplo_summary,
                     "warnings": readiness.get("warnings") or []}
-        cb = None if dry_run else diplomacy.find_wargoal(self, target_tag)
-        ok, err = diplomacy.declare_war(self, target_tag, dry_run=dry_run)
-        # 2026-11-13: CCommand::Run only queues the action, so a `true` return means
-        # "CanExecute accepted and the command was posted", not "war exists". Poll
-        # the war-relation table so the caller never has to guess.
-        verified = None
-        if ok and not dry_run:
-            for _ in range(10):
-                _t.sleep(1.0)
-                try:
-                    if target_tag in combat.enemy_tags(self):
-                        verified = True
-                        break
-                except Exception:
-                    pass
-            if verified is None:
-                verified = False
-        return {"ok": ok, "error": err, "readiness": readiness,
-                "wargoal": cb, "at_war_verified": verified,
-                **_diplo_summary,
-                "warnings": readiness.get("warnings") or []}
+        raise NotImplementedError("declare_war requires Windows PE 1.19.5.0")

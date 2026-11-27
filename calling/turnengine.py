@@ -1165,6 +1165,19 @@ def build_turn_brief(g, tag=None, memo=None, last_receipt=None, extra_inspect=No
     默认 `include_data=False`：仅返回高密度 `markdown`（~1.8-2.2 KB），避免 MCP 响应
     携带双份 6 KB 结构化副本造成 4 倍 token 膨胀；需要程序化消费原结构时传 `include_data=True`。
     """
+    from api import enter_read_scope
+    with enter_read_scope(g):
+        return _build_turn_brief_body(
+            g, tag=tag, memo=memo, last_receipt=last_receipt, extra_inspect=extra_inspect,
+            include_focus_candidates=include_focus_candidates,
+            include_research_candidates=include_research_candidates,
+            include_data=include_data, reset_state=reset_state,
+        )
+
+
+def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_inspect=None,
+                           include_focus_candidates=True, include_research_candidates=True,
+                           include_data=False, reset_state=False):
     t0 = time.perf_counter()
     if reset_state:
         reset_turn_state()

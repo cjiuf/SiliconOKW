@@ -23,7 +23,17 @@ import bisect
 import os, re, struct, sys
 import time as _time
 from array import array
-import numpy as np
+
+_NP = None
+
+
+def _np():
+    """惰性加载 numpy：仅在未启用 Rust fastmem 的扫描回落路径中按需导入。"""
+    global _NP
+    if _NP is None:
+        import numpy as _numpy
+        _NP = _numpy
+    return _NP
 
 # 缓存 Win32 GetProcessMemoryInfo 与 Linux malloc_trim 句柄，避免在扫描循环里重复加载 DLL
 _WIN_RSS_FN = None
@@ -103,6 +113,7 @@ def _scan_regions_for_vptrs(proc, region_list, want_vptrs, max_hits=5000, chunk_
             return fast
     except Exception:
         pass
+    np = _np()
     targets = np.array(sorted({int(v) for v in want_vptrs}), dtype=np.uint64)
     lo, hi = int(targets[0]), int(targets[-1])
     single = targets.size == 1
@@ -293,28 +304,36 @@ class ObjectIndex:
 
     # ------------------------------------------------------------------ cache
     def _to_rel(self, m):
-        """向量化将运行时地址转为相对 image_base 偏移，消除百万次 Python 循环。"""
-        base = np.int64(self.p.base)
+        """将运行时地址转为相对 image_base 偏移（仅在 numpy 已载入时走向量化，避免热命中拉起 numpy）。"""
         base_int = int(self.p.base)
+        np_mod = _NP
         out = {}
         for k, v in (m or {}).items():
-            rel_arr = array("q")
-            if len(v):
-                np_rel = np.asarray(v, dtype=np.int64) - base
+            if not len(v):
+                out[int(k) - base_int] = array("q")
+            elif np_mod is not None:
+                rel_arr = array("q")
+                np_rel = np_mod.asarray(v, dtype=np_mod.int64) - np_mod.int64(base_int)
                 rel_arr.frombytes(np_rel.tobytes())
-            out[int(k) - base_int] = rel_arr
+                out[int(k) - base_int] = rel_arr
+            else:
+                out[int(k) - base_int] = array("q", (int(x) - base_int for x in v))
         return out
 
     def _from_rel(self, rel):
-        base = np.int64(self.p.base)
         base_int = int(self.p.base)
+        np_mod = _NP
         out = {}
         for k, v in (rel or {}).items():
-            abs_arr = array("q")
-            if len(v):
-                np_abs = np.asarray(v, dtype=np.int64) + base
+            if not len(v):
+                out[int(k) + base_int] = array("q")
+            elif np_mod is not None:
+                abs_arr = array("q")
+                np_abs = np_mod.asarray(v, dtype=np_mod.int64) + np_mod.int64(base_int)
                 abs_arr.frombytes(np_abs.tobytes())
-            out[int(k) + base_int] = abs_arr
+                out[int(k) + base_int] = abs_arr
+            else:
+                out[int(k) + base_int] = array("q", (int(x) + base_int for x in v))
         return out
 
     def _game_session_sig(self):
@@ -457,6 +476,7 @@ class ObjectIndex:
     @staticmethod
     def _merge_hits(out, base_addr, cand_idx, vals, targets, max_per_class=None):
         """向量化分组并按 vtable 批量追加到 array('q')，替代百万次 Python 循环。"""
+        np = _np()
         idx = np.clip(np.searchsorted(targets, vals), 0, targets.size - 1)
         good = targets[idx] == vals
         if not np.any(good):
@@ -529,6 +549,7 @@ class ObjectIndex:
             out = None
 
         if out is None:
+            np = _np()
             targets = np.array(sorted(target_list), dtype=np.uint64)
             lo, hi = int(targets[0]), int(targets[-1])
             out = {}
@@ -594,8 +615,6 @@ class ObjectIndex:
             if self._is_full or not self._indexed_vptrs
             else list(self._indexed_vptrs)
         )
-        targets = np.array(sorted(target_list), dtype=np.uint64)
-        lo, hi = int(targets[0]), int(targets[-1])
         try:
             regions = self.p.regions(writable=True)
         except Exception:
@@ -621,6 +640,9 @@ class ObjectIndex:
                         lst.extend(addrs)
                     added += len(addrs)
             else:
+                np = _np()
+                targets = np.array(sorted(target_list), dtype=np.uint64)
+                lo, hi = int(targets[0]), int(targets[-1])
                 buf = bytearray(CH)
                 mv = memoryview(buf)
                 for m in new:
@@ -718,11 +740,11 @@ class ObjectIndex:
         keys = self._rtti_keys(class_name)
         if not keys:
             return []
-        vptrs = [np.uint64(self.p.va(v))
+        vptrs = [int(self.p.va(v))
                  for k in keys for v in self.rtti.get(k, [])]
         if not vptrs:
             return []
-        want = set(int(v) for v in vptrs)
+        want = set(vptrs)
         known = []
         m = self.build()
         for vp in want:

@@ -6,7 +6,6 @@ Nothing above this module needs to know which operating system it is on.
 """
 import os
 import struct
-import ctypes
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -15,6 +14,15 @@ from process import Backend, find_pid          # noqa: E402,F401
 
 _WIN_MEM_PRIVATE = 0x20000
 _WIN_MEM_IMAGE = 0x1000000
+
+_ST_U16 = struct.Struct("<H")
+_ST_U32 = struct.Struct("<I")
+_ST_I32 = struct.Struct("<i")
+_ST_U64 = struct.Struct("<Q")
+_ST_I64 = struct.Struct("<q")
+_ST_F32 = struct.Struct("<f")
+_ST_F64 = struct.Struct("<d")
+_ST_QQ = struct.Struct("<QQ")
 
 
 class Proc:
@@ -106,18 +114,55 @@ class Proc:
         return got
 
     # ---------- typed ----------
-    def u8 (self,a): return self.read(a,1)[0]
-    def u16(self,a): return struct.unpack("<H", self.read(a,2))[0]
-    def u32(self,a): return struct.unpack("<I", self.read(a,4))[0]
-    def i32(self,a): return struct.unpack("<i", self.read(a,4))[0]
-    def u64(self,a): return struct.unpack("<Q", self.read(a,8))[0]
-    def i64(self,a): return struct.unpack("<q", self.read(a,8))[0]
-    def f32(self,a): return struct.unpack("<f", self.read(a,4))[0]
-    def f64(self,a): return struct.unpack("<d", self.read(a,8))[0]
+    def _fast_scalar(self, method_name):
+        """仅当未覆写 read() 且后端支持零分配标量读时返回快速函数，保证测试替身 100% 兼容。"""
+        if type(self).read is Proc.read and "read" not in self.__dict__:
+            be = self.__dict__.get("be")
+            if be is not None:
+                return getattr(be, method_name, None)
+        return None
 
-    def ptr(self,a):
-        v = self.try_read(a,8)
-        return struct.unpack("<Q", v)[0] if v and len(v)==8 else None
+    def u8(self, a):
+        fn = self._fast_scalar("read_u8")
+        return fn(a) if fn is not None else self.read(a, 1)[0]
+
+    def u16(self, a):
+        fn = self._fast_scalar("read_u16")
+        return fn(a) if fn is not None else _ST_U16.unpack(self.read(a, 2))[0]
+
+    def u32(self, a):
+        fn = self._fast_scalar("read_u32")
+        return fn(a) if fn is not None else _ST_U32.unpack(self.read(a, 4))[0]
+
+    def i32(self, a):
+        fn = self._fast_scalar("read_i32")
+        return fn(a) if fn is not None else _ST_I32.unpack(self.read(a, 4))[0]
+
+    def u64(self, a):
+        fn = self._fast_scalar("read_u64")
+        return fn(a) if fn is not None else _ST_U64.unpack(self.read(a, 8))[0]
+
+    def i64(self, a):
+        fn = self._fast_scalar("read_i64")
+        return fn(a) if fn is not None else _ST_I64.unpack(self.read(a, 8))[0]
+
+    def f32(self, a):
+        fn = self._fast_scalar("read_f32")
+        return fn(a) if fn is not None else _ST_F32.unpack(self.read(a, 4))[0]
+
+    def f64(self, a):
+        fn = self._fast_scalar("read_f64")
+        return fn(a) if fn is not None else _ST_F64.unpack(self.read(a, 8))[0]
+
+    def ptr(self, a):
+        fn = self._fast_scalar("read_u64")
+        if fn is not None:
+            try:
+                return fn(a)
+            except OSError:
+                return None
+        v = self.try_read(a, 8)
+        return _ST_U64.unpack(v)[0] if v and len(v) == 8 else None
 
     def cstr(self, addr, maxlen=256):
         b = self.try_read(addr, maxlen)
@@ -138,17 +183,17 @@ class Proc:
         if not d or len(d) < 32:
             return None
         if self._MSVC_STRING:
-            n, cap = struct.unpack_from("<QQ", d, 0x10)
+            n, cap = _ST_QQ.unpack_from(d, 0x10)
             if n > 0x10000 or cap > 0x10000 or n > cap:
                 return None
             if cap <= 15:                       # SSO
                 return d[:n].decode("utf-8", "replace")
             if n == 0:
                 return ""
-            p = struct.unpack_from("<Q", d, 0)[0]
+            p = _ST_U64.unpack_from(d, 0)[0]
             b = self.try_read(p, n)
             return b.decode("utf-8", "replace") if b is not None else None
-        p, n = struct.unpack_from("<QQ", d, 0)
+        p, n = _ST_QQ.unpack_from(d, 0)
         if n > 0x10000:
             return None
         if p == addr + 16:            # SSO

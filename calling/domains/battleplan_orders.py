@@ -128,116 +128,49 @@ class BattleplanOrdersMixin:
 
     def border_fronts(self, enemy_tag, tag=None):
         """Front sections facing the target country, for drawing a line."""
-        if sys.platform == "win32":
-            import armyops_win
-            segs = armyops_win.fronts_towards(self, enemy_tag, tag)
-            return [{"front_ptr": hex(s["front"]), "front_handle": s["front_handle"],
-                     "section": s["section"],
-                     "border_provinces": s["border_provinces"]}
-                    for s in segs]
-        import armyops
-        segs = armyops.fronts_towards(self, enemy_tag, tag)
+        import armyops_win
+        segs = armyops_win.fronts_towards(self, enemy_tag, tag)
         return [{"front_ptr": hex(s["front"]), "front_handle": s["front_handle"],
-                 "section": s["section"], "border_provinces": s["border_provinces"]}
+                 "section": s["section"],
+                 "border_provinces": s["border_provinces"]}
                 for s in segs]
 
     def draw_front_line(self, orders_group, enemy_tag=None, front_ptr=None,
                         section=None, frm=0, to=100000, assign="proportional"):
         """Give an army a front line order. With enemy_tag, the WHOLE border is covered."""
-        if sys.platform == "win32":
-            # The PE build draws a front line by calling COrderNewRootCommand with
-            # a CFront* and a CPdxArray<CArmy*>; the Linux arm-then-verify dance
-            # (settle + poll for the queued order) does not apply, because the
-            # engine appends the order synchronously inside Post.
-            import armyops_win
-            divs = armyops_win.divisions_of(self, orders_group)
-            if front_ptr is not None:
-                fp = int(front_ptr, 16) if isinstance(front_ptr, str) else int(front_ptr)
-                ok, err, _cmd = armyops_win.draw_front_line(
-                    self, orders_group, fp, section, frm, to, divisions=divs)
-                return {"ok": ok, "error": err, "divisions": len(divs)}
-            if not enemy_tag:
-                return {"ok": False, "error": "enemy_tag or front_ptr is required"}
-            seen, res, new_ids = set(), [], []
-            for s in armyops_win.fronts_towards(self, enemy_tag):
-                fk = tuple(s["front_handle"])
-                if fk in seen:
-                    continue
-                seen.add(fk)
-                before = {o["id"] for o in armyops_win.orders(self, orders_group)}
-                ok, err, _cmd = armyops_win.draw_front_line(
-                    self, orders_group, s["front"], s["section"], frm, to,
-                    divisions=divs)
-                fresh = [o["id"] for o in armyops_win.orders(self, orders_group)
-                         if o["id"] not in before and o["id"] not in new_ids]
-                if ok and not fresh:
-                    ok = False
-                    err = "the command posted but no order appeared"
-                new_ids += fresh
-                res.append({"front": s["front_handle"], "section": s["section"],
-                            "ok": ok, "error": err,
-                            "weight": len(s["border_provinces"]),
-                            "new_orders": fresh})
-            return {"ok": all(r["ok"] for r in res) if res else True,
-                    "segments": res, "new_order_ids": new_ids,
-                    "divisions": len(divs)}
-        import armyops
-        res = []
+        # PE 1.19.5.0 通过 COrderNewRootCommand 直接同步入队挂师
+        import armyops_win
+        divs = armyops_win.divisions_of(self, orders_group)
         if front_ptr is not None:
             fp = int(front_ptr, 16) if isinstance(front_ptr, str) else int(front_ptr)
-            ok, err = armyops.draw_front_line(self, orders_group, fp, section, frm, to)
-            return {"ok": ok, "error": err}
+            ok, err, _cmd = armyops_win.draw_front_line(
+                self, orders_group, fp, section, frm, to, divisions=divs)
+            return {"ok": ok, "error": err, "divisions": len(divs)}
         if not enemy_tag:
             return {"ok": False, "error": "enemy_tag or front_ptr is required"}
-        have = {(tuple(o["root_front"]), o["root_section"])
-                for o in armyops.orders_of(self, orders_group)}
-        segs = armyops.fronts_towards(self, enemy_tag)
-        # 2026-11-08: the 7-arg COrderNewRootCommand ctor takes a CFront* and
-        # covers the WHOLE front, so one order per CFront is enough. Drawing one
-        # per section would stack duplicate orders on the same front.
-        seen = set()
-        known = {o["id"] for o in armyops.orders_of(self, orders_group)}
-        new_ids = []
-        for s in segs:
+        seen, res, new_ids = set(), [], []
+        for s in armyops_win.fronts_towards(self, enemy_tag):
             fk = tuple(s["front_handle"])
             if fk in seen:
                 continue
             seen.add(fk)
-            key = (fk, s["section"])
-            if key in have:
-                res.append({"front": s["front_handle"], "section": s["section"],
-                            "ok": True, "error": "already exists"})
-                continue
-            ok, err = armyops.draw_front_line(self, orders_group, s["front"], None, frm, to)
-            # 2026-11-11: CCommand::Run returning true only means "queued for this frame".
-            # Round 3 got 31 x ok:true here and the army still had zero orders, so the
-            # next call died with "no front order to assign to" — a fake success.
-            # Poll the army's order array and refuse to report an order that the
-            # engine never created.
-            fresh = []
-            if ok:
-                for _ in range(6):
-                    self._settle(0.25)
-                    now = armyops.orders_of(self, orders_group)
-                    fresh = [o for o in now
-                             if o["id"] not in known and o["id"] not in new_ids]
-                    if fresh:
-                        break
-                if not fresh:
-                    ok = False
-                    err = ((err + "; ") if err else "") + (
-                        "the command was accepted but the engine created no order")
-            for o in fresh:
-                new_ids.append(o["id"])
+            before = {o["id"] for o in armyops_win.orders(self, orders_group)}
+            ok, err, _cmd = armyops_win.draw_front_line(
+                self, orders_group, s["front"], s["section"], frm, to,
+                divisions=divs)
+            fresh = [o["id"] for o in armyops_win.orders(self, orders_group)
+                     if o["id"] not in before and o["id"] not in new_ids]
+            if ok and not fresh:
+                ok = False
+                err = "the command posted but no order appeared"
+            new_ids += fresh
             res.append({"front": s["front_handle"], "section": s["section"],
-                        "ok": ok, "error": err, "weight": len(s["border_provinces"]),
-                        "new_orders": [o["id"] for o in fresh]})
-        out = {"ok": all(r["ok"] for r in res) if res else True, "segments": res,
-               "new_order_ids": new_ids}
-        if assign and assign != "none":
-            out["assignment"] = self.assign_divisions_to_front(
-                orders_group, enemy_tag, mode=assign, order_ids=new_ids or None)
-        return out
+                        "ok": ok, "error": err,
+                        "weight": len(s["border_provinces"]),
+                        "new_orders": fresh})
+        return {"ok": all(r["ok"] for r in res) if res else True,
+                "segments": res, "new_order_ids": new_ids,
+                "divisions": len(divs)}
 
     def assign_divisions_to_front(self, orders_group, enemy_tag=None, mode="proportional",
                                   divisions=None, order_ids=None):
@@ -380,11 +313,8 @@ class BattleplanOrdersMixin:
         return res
 
     def orders_of(self, orders_group):
-        if sys.platform == "win32":
-            import armyops_win
-            return armyops_win.orders(self, orders_group)
-        import armyops
-        return armyops.orders_of(self, orders_group)
+        import armyops_win
+        return armyops_win.orders(self, orders_group)
 
     def execute_plan(self, orders_group, order_id=0, flag=1, executing=None):
         """Execute or halt a battle plan (or a single type-1 offensive arrow).
@@ -398,14 +328,10 @@ class BattleplanOrdersMixin:
           * `executing=True` (或 `flag=1`)：开启进攻计划。
         """
         eff_exec = bool(executing) if executing is not None else bool(int(flag))
-        if sys.platform == "win32":
-            import armyops_win
-            return armyops_win.set_plan_executing(
-                self, orders_group, order_id=int(order_id or 0), executing=eff_exec
-            )
-        import armyops
-        ok, err = armyops.execute_plan(self, orders_group, order_id)
-        return {"ok": ok, "error": err, "executing": eff_exec}
+        import armyops_win
+        return armyops_win.set_plan_executing(
+            self, orders_group, order_id=int(order_id or 0), executing=eff_exec
+        )
 
     def offensive_line(self, orders_group, parent_order_id, provinces=None,
                        divisions=None, enemy_tag=None, depth=1,
@@ -534,15 +460,10 @@ class BattleplanOrdersMixin:
                     out_e["available_order_groups"] = og_cands[:20]
                 return out_e
             orders_group = og_i
-        if sys.platform == "win32":
-            # 2026-11-23 (复测 9 E-1 根治): Windows 1.19.5.0 统一走 armyops_win.delete_order
-            # （cmdwin.alloc + CanExecute + attach_fake_vtable + 先停/清 type-1 子命令并回读核验），
-            # 彻底废除调用 Linux armyops.delete_order（g.malloc 无 fake_vtable 释放崩堆）。
-            import armyops_win as _A
-            return _A.delete_order(self, orders_group, order_id, allow_child=allow_child)
-        import armyops
-        ok, err = armyops.delete_order(self, orders_group, order_id)
-        return {"ok": ok, "error": err}
+        # 2026-11-23 (复测 9 E-1 根治): Windows 1.19.5.0 统一走 armyops_win.delete_order
+        # （cmdwin.alloc + CanExecute + attach_fake_vtable + 先停/清 type-1 子命令并回读核验）
+        import armyops_win as _A
+        return _A.delete_order(self, orders_group, order_id, allow_child=allow_child)
 
     def empty_order_scan(self, tag=None):
         """Read-only: every battle-plan order that holds 0 divisions.

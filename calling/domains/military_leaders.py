@@ -86,43 +86,12 @@ class MilitaryLeadersMixin:
         cache = getattr(self, "_adv_pool_cache", None)
         if cache and cache[0] == p.pid and cache[1]:
             return cache[1]
-        if sys.platform == "win32":
-            found = {}
-            for addr in self.win_scan_class("CAdvisor"):
-                key = p.stdstring(addr + 0x30)
-                if key:
-                    found[key] = addr
-            self._adv_pool_cache = (p.pid, found)
-            return found
-        target = p.va(self.VT_ADVISOR)
-        needle = struct.pack("<Q", target)
         found = {}
-        for m in p.regions(writable=True):
-            a, b = m["start"], m["end"]
-            cur = a
-            while cur < b:
-                n = min(4 << 20, b - cur)
-                try:
-                    buf = p.try_read(cur, n)
-                except Exception:
-                    buf = None
-                if buf:
-                    k = 0
-                    while True:
-                        k = buf.find(needle, k)
-                        if k < 0:
-                            break
-                        addr = cur + k
-                        try:
-                            key = p.stdstring(addr + 0x30)
-                        except Exception:
-                            key = None
-                        if key and 3 < len(key) < 64 and key not in found:
-                            found[key] = addr
-                        k += 8
-                cur += n
-        if found:
-            self._adv_pool_cache = (p.pid, found)
+        for addr in self.win_scan_class("CAdvisor"):
+            key = p.stdstring(addr + 0x30)
+            if key:
+                found[key] = addr
+        self._adv_pool_cache = (p.pid, found)
         return found
 
     def find_advisor(self, key, tag=None):
@@ -158,27 +127,13 @@ class MilitaryLeadersMixin:
         and is indexed by province id, so the pointer is a pure read now.
         """
         p = self.p
-        if sys.platform == "win32":
-            gs = p.u64(self.va(getattr(O, "G_GAMESTATE", 0x33DD6B0)))
-            if not gs:
-                return 0
-            arr = _arr(p, gs, getattr(O, "GS_PROVINCES", 0x2B0))
-            if 0 <= int(province_id) < len(arr):
-                return arr[int(province_id)]
+        gs = p.u64(self.va(getattr(O, "G_GAMESTATE", 0x33DD6B0)))
+        if not gs:
             return 0
-        mgr = p.u64(self.va(self.G_PROVINCE_MANAGER))
-        if not mgr:
-            return 0
-        vt = p.u64(mgr)
-        if not vt:
-            return 0
-        fn = p.u64(vt + self.VT_PROVINCE_MGR)
-        if not fn:
-            return 0
-        import api
-        api.allow_call(fn - self.base)
-        # thiscall: rdi = manager singleton, esi = province id
-        return self.call(fn - self.base, (mgr, int(province_id)))
+        arr = _arr(p, gs, getattr(O, "GS_PROVINCES", 0x2B0))
+        if 0 <= int(province_id) < len(arr):
+            return arr[int(province_id)]
+        return 0
 
     def _scan_vtable(self, vt_off):
         """All live objects whose first qword is `va(vt_off)`, cached per pid.

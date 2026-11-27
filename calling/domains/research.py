@@ -4,26 +4,21 @@ from __future__ import annotations
 import offsets as O
 import os
 import session_state as _SS
-import struct
 import sys
 
 from ._shared import (
     CALLING_DIR,
-    CO_PROGRAM_STATUS,
-    CO_PROJECT_POOL,
     CO_TECH_STATUS,
-    FN_CAN_RESEARCH,
     RS_CURRENT,
     RS_SPEED,
     TE_ID,
     TE_PROGRESS,
     TS_RESEARCHED,
     TS_SLOTS,
-    TT_ID,
-    TT_NAME,
     TT_RESEARCH_COST,
     _arr,
     item_name,
+    read_scoped,
 )
 
 class ResearchMixin:
@@ -250,34 +245,7 @@ class ResearchMixin:
                 # retries instead of staying dead for the whole process.
                 self._tech_by_name = None
             return
-        db = self.oi.singleton("CTechnologyDatabase")
-        if not db:
-            self._oi = None
-            db = self.oi.singleton("CTechnologyDatabase")
-        if not db:
-            # Built too early (main menu / campaign still loading): do NOT cache an
-            # empty table, otherwise research stays dead for the whole process.
-            self._tech_by_name = None
-            self._tech_by_id = {}
-            self._oi = None
-            return
-        byname, byid = {}, {}
-        for off in (0x48, 0x78, 0xD8):
-            for t in _arr(p, db, off):
-                nm = item_name(p, t + TT_NAME)
-                if nm:
-                    byname[nm] = t
-                    byid[p.i32(t + TT_ID)] = nm
-        if not byname:
-            # The database object exists but is still empty (it is filled after the
-            # campaign finishes loading).  Caching {} here made every later lookup
-            # come back empty for the rest of the process -- hoi4_research_available
-            # then reported count 0 for good.
-            self._tech_by_name = None
-            self._tech_by_id = {}
-            self._oi = None
-            return
-        self._tech_by_name, self._tech_by_id = byname, byid
+        raise NotImplementedError("_load_tech_db requires Windows PE 1.19.5.0")
 
     def tech_name(self, tech_obj):
         """CTechnology* (country object) -> technology name"""
@@ -316,6 +284,7 @@ class ResearchMixin:
             return 0.0
         return self.p.i64(tech_obj + TE_PROGRESS) / float(O.FIXED)
 
+    @read_scoped("research_slots", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def research_slots(self, tag=None):
         """What each research slot is doing, with the UI's own numbers.
 
@@ -810,27 +779,7 @@ class ResearchMixin:
                 out["failure_class"] = fcls
                 out["blocked_by"] = fbb if fbb != "rejected" else "not_occupied"
             return out
-        with self:
-            if FN_CAN_RESEARCH is not None and \
-                    not self.call(FN_CAN_RESEARCH, (self.tech_status(tag), tmpl, 0)) & 0xFF:
-                return {"ok": False, "blocked_by": "can_execute_refused",
-                        "failure_class": "content",
-                        "error": "%s su an arastirilamaz" % tech_name}
-            self.cmd.send("SetResearch", tag=c.tag_id, tech_ptr=tmpl, slot=slot, flag=0)
-        self._settle()
-
-        def _ok():
-            s = self.research_slots(tag)[slot]
-            return bool(s.get("slot_busy")) and \
-                s.get("researching") in (None, tech_name)
-        ok = self._wait_until(_ok)
-        after = self.research_slots(tag)
-        out = {"ok": ok, "slot": slot, "researching": after[slot]["researching"],
-               "slot_busy": after[slot].get("slot_busy")}
-        if not ok:
-            out["blocked_by"] = "not_occupied"
-            out["failure_class"] = "content"
-        return out
+        raise NotImplementedError("start_research requires Windows PE 1.19.5.0")
 
     def fill_all_research_slots(self, preferred_techs=None, tag=None, max_attempts=30):
         """Fill EVERY empty research slot, trying preferred techs first then the
@@ -1036,27 +985,6 @@ class ResearchMixin:
                 self._doc_cache_key = key
                 self._doc_cache = found
             return found
-        target = self.p.va(0x447EFA0)
-        for m in self.p.regions(writable=False):
-            a = m["start"]
-            while a < m["end"]:
-                n = min(4 << 20, m["end"] - a)
-                n -= n % 8
-                if n <= 0:
-                    break
-                buf = self.p.try_read(a, n)
-                if buf:
-                    for i in range(0, len(buf) - 7, 8):
-                        if struct.unpack_from("<Q", buf, i)[0] == target:
-                            obj = a + i
-                            nm = item_name(self.p, obj + 0x20)
-                            if nm:
-                                found[nm] = obj
-                a += n
-            if len(found) >= 12:
-                break
-        self._doc_cache_key = key
-        self._doc_cache = found
         return found
 
     def unlock_doctrine(self, doctrine, tag=None):
@@ -1140,34 +1068,17 @@ class ResearchMixin:
                              "command posted but CanExecute did not flip; the "
                              "doctrine may already be assigned or a popup held "
                              "the clock (drained=%s)" % res.get("drained"))}
-        res = self.send_command("UnlockGrandDoctrine", {"0x28": tpl}, tag)
-        self._settle(0.6)
-        stored = False
-        try:
-            sub = self.p.u64(self._c(tag).ptr + 0x15E0)
-            if sub:
-                data = self.p.read(sub, 0x2000)
-                stored = any(struct.unpack_from("<Q", data, i)[0] == tpl
-                             for i in range(0, len(data) - 7, 8))
-        except Exception:
-            pass
-        accepted = bool((res or {}).get("run_result") or 0)
-        return {"ok": bool(stored) or accepted, "doctrine": doctrine,
-                "localization": loc, "template": hex(tpl), "stored": stored,
-                "accepted": accepted, "command": res}
+        raise NotImplementedError("unlock_doctrine requires Windows PE 1.19.5.0")
 
     def scientists(self, tag=None, limit=60):
         p = self.p
         c = self._c(tag)
         pref = (c.tag + "_").lower()
         out = []
-        if sys.platform == "win32":
-            # oi.instances("CScientist") is empty on the PE build; the country's
-            # own roster is CCountryCharacters+0xA0 (GER 17) plus +0xE8 (4).
-            cc = p.u64(c.ptr + 0xFF0)
-            pool = list(_arr(p, cc, 0xA0)) + list(_arr(p, cc, 0xE8)) if cc else []
-        else:
-            pool = list(self.oi.instances("CScientist"))
+        # oi.instances("CScientist") is empty on the PE build; the country's
+        # own roster is CCountryCharacters+0xA0 plus +0xE8.
+        cc = p.u64(c.ptr + 0xFF0)
+        pool = list(_arr(p, cc, 0xA0)) + list(_arr(p, cc, 0xE8)) if cc else []
         for s in pool:
             nm = None
             for off in range(0, 0x120, 8):
@@ -1192,41 +1103,25 @@ class ResearchMixin:
         """
         p = self.p
         c = self._c(tag)
-        if sys.platform == "win32":
-            # PE 1.19.5.0: CCountry has no CProjectPool pointer (CCountry+0xFA8 is
-            # CProgramStatus, which holds *faction facility programmes* such as
-            # "land_facility", not special projects).  CProjectPool is an RTTI
-            # class, so it is located by vtable scan instead.
-            pools = self.win_scan_class("CProjectPool")
-            prog = p.u64(c.ptr + 0xFA8)
-            res = {"ok": True, "available": True, "source": "pe-rtti vtable scan",
-                   "pool": None, "pool_instances": len(pools),
-                   "program_status": hex(prog) if prog else None,
-                   "program_status_class": self.oi.class_of(prog) if prog else None,
-                   "programs": []}
-            for pr in _arr(p, prog, 0x20) if prog else []:
-                nm = item_name(p, pr + 0x20)
-                res["programs"].append({"program": nm, "ptr": hex(pr)})
-            if pools:
-                res["note"] = ("CProjectPool resolves by vtable (%d live instances, one per "
-                               "country) but no field inside it points back at a CCountry, so "
-                               "a pool cannot be attributed to a tag yet. `programs` is the "
-                               "verified part: CCountry+0xFA8 CProgramStatus -> CPdxArray"
-                               "<CProgram*> at +0x20, program key at +0x20." % len(pools))
-            return res
-        pool = p.u64(c.ptr + CO_PROJECT_POOL)
-        prog = p.u64(c.ptr + CO_PROGRAM_STATUS)
-        if sys.platform == "win32" and not pool:
-            return {"ok": False, "available": False, "pool": None,
-                    "program_status": None,
-                    "error": "special_projects has no verified container on the PE build",
-                    "detail": "CCountry+CO_PROJECT_POOL is null and "
-                              "CSpecialProjectsConsumer is not reachable from CCountry",
-                    "program_status_class": self.oi.class_of(prog) if prog else None}
-        res = {"pool": hex(pool) if pool else None, "program_status": hex(prog) if prog else None}
-        if pool:
-            from probe import describe
-            res["pool_arrays"] = [r for r in describe(p, pool, self.oi, span=0x200) if r["size"]]
+        # PE 1.19.5.0: CCountry has no CProjectPool pointer (CCountry+0xFA8 is
+        # CProgramStatus, which holds faction facility programmes such as
+        # "land_facility", not special projects). CProjectPool is located by vtable scan.
+        pools = self.win_scan_class("CProjectPool")
+        prog = p.u64(c.ptr + 0xFA8)
+        res = {"ok": True, "available": True, "source": "pe-rtti vtable scan",
+               "pool": None, "pool_instances": len(pools),
+               "program_status": hex(prog) if prog else None,
+               "program_status_class": self.oi.class_of(prog) if prog else None,
+               "programs": []}
+        for pr in _arr(p, prog, 0x20) if prog else []:
+            nm = item_name(p, pr + 0x20)
+            res["programs"].append({"program": nm, "ptr": hex(pr)})
+        if pools:
+            res["note"] = ("CProjectPool resolves by vtable (%d live instances, one per "
+                           "country) but no field inside it points back at a CCountry, so "
+                           "a pool cannot be attributed to a tag yet. `programs` is the "
+                           "verified part: CCountry+0xFA8 CProgramStatus -> CPdxArray"
+                           "<CProgram*> at +0x20, program key at +0x20." % len(pools))
         return res
 
     def tech_folders(self):

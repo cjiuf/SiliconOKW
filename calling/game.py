@@ -382,35 +382,13 @@ class Game(
         return True
 
     def _run_cmd(self, cmd):
-        """CCommand::Run (CanExecute -> Post) with a valid libstdc++ std::string sink.
-
-        Five call sites used to do `errbuf = malloc(0x20); write(b"\\0"*0x20)`. That
-        leaves _M_p = NULL, so the moment CanExecute wrote a rejection message the
-        game either dereferenced NULL or freed a wild pointer — the "law/decision
-        randomly refused or crashed" bug. One helper, one correct SSO string.
-        """
-        if sys.platform == "win32":
-            # PE: 0x20AE0A0 is a Linux VA and the error sink is a libstdc++
-            # std::string.  `cmdwin.enqueue` stamps the session tick/seq and hands
-            # the object to the queue, which is the path every working Windows
-            # command (focus / research / construction / war) takes.
-            import cmdwin
-            rv = cmdwin.enqueue(self, cmd)
-            self._last_cmd_error = ""
-            return rv
-        s = self.malloc(0x20)
-        self.p.write(s, struct.pack("<QQ", s + 0x10, 0) + b"\0" * 16)
-        try:
-            rv = self.call(0x20AE0A0, (cmd, s))
-            self._last_cmd_error = self._read_stdstring_at(s)
-        finally:
-            try:
-                ptr = self.p.u64(s)
-                if ptr and ptr != s + 0x10:
-                    self.free(ptr)
-                self.free(s)
-            except Exception:
-                pass
+        """Windows PE 命令入队（经 cmdwin.enqueue 补齐会话 tick/seq 并投递队列）。"""
+        inv = getattr(self, "invalidate_read_scope", None)
+        if callable(inv):
+            inv()
+        import cmdwin
+        rv = cmdwin.enqueue(self, cmd)
+        self._last_cmd_error = ""
         return rv
 
     def _read_stdstring_at(self, s):

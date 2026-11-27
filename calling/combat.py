@@ -728,74 +728,8 @@ def war_relations(g, tag=None, refresh=False):
     This also sees wars that have been declared but have not yet made contact,
     which `combats()` cannot.
     """
-    from game import _arr
-    p = g.p
     me_tag = tag or g.player_tag()
-    if sys.platform == "win32":
-        return _war_relations_win(g, me_tag, refresh=refresh)
-    try:
-        c = g.country(me_tag)
-        mine = _arr(p, p.u64(c.ptr + CO_DIPLOMACY_STATUS), DS_WAR_RELATIONS)
-    except Exception:
-        return []
-    if not mine:
-        return []
-
-    # 2026-11-04: CDiplomacyStatus+0x20 also holds non-war relations in 1.19.4.1
-    # (trade agreements, opinion modifiers). Germany and Romania share a Romanian
-    # oil-trade object, which is exactly how `hoi4_wartime_status` reported
-    # "at war with ROM" for four years of peace. Only accept an element whose RTTI
-    # class actually is a war relation. If RTTI cannot name any of them, the list
-    # is only believed when the battle counter proves that fighting is happening.
-    keep, unknown = [], 0
-    for wr in mine:
-        try:
-            cls = g.oi.class_of(wr) or ""
-        except Exception:
-            cls = ""
-        if not cls:
-            unknown += 1
-            keep.append(wr)
-        elif "War" in cls:
-            keep.append(wr)
-    if unknown == len(mine):
-        try:
-            fighting = p.i32(c.ptr + CO_ARMIES_IN_COMBAT) > 0 or bool(combats(g, only_mine=True))
-        except Exception:
-            fighting = False
-        if not fighting:
-            return []
-    mine = keep
-    if not mine:
-        return []
-    want = set(mine)
-    sides = {}
-    for t in g.tags():
-        try:
-            d = p.u64(g.country(t).ptr + CO_DIPLOMACY_STATUS)
-            for wr in _arr(p, d, DS_WAR_RELATIONS):
-                if wr in want:
-                    sides.setdefault(wr, set()).add(t)
-        except Exception:
-            continue
-    out = []
-    for wr in mine:
-        others = sorted(sides.get(wr, set()) - {me_tag})
-        if not others:
-            continue
-        try:
-            threat = round(p.i64(wr + WR_THREAT) / 1e5, 3)
-        except Exception:
-            threat = None
-        for enemy in others:
-            out.append({"enemy": enemy, "me": me_tag, "threat": threat, "_ptr": wr})
-    if out:
-        return out
-    # FALLBACK: in 1.19.4.1 the diplomacy records of a country that is AT WAR can
-    # be empty, so the enemy cannot be found that way. Find it from the armies
-    # instead: every CArmy carries its owner's country pointer, and the armies
-    # that are in combat belong to the enemy.
-    return _enemies_from_armies(g, me_tag)
+    return _war_relations_win(g, me_tag, refresh=refresh)
 
 
 def _enemies_from_armies(g, me_tag):

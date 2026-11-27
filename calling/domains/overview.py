@@ -12,6 +12,7 @@ from ._shared import (
     _AIR_SNAP,
     _arr,
     _count,
+    enter_read_scope,
 )
 
 class OverviewMixin:
@@ -30,35 +31,25 @@ class OverviewMixin:
 
     def game_speed(self):
         """纯只读获取当前游戏速度（0..4，对应 UI 1~5 格）。"""
-        if sys.platform == "win32":
-            import cmdwin
-            sp = cmdwin.get_game_speed(self)
-            tbl = cmdwin.game_speed_seconds(self)
-            sph = tbl[sp] if (sp is not None and 0 <= sp < len(tbl)) else None
-            return {
-                "speed": sp,
-                "ui_speed": (sp + 1) if (sp is not None and 0 <= sp <= 4) else None,
-                "seconds_per_hour": sph,
-            }
-        return {"speed": None, "ui_speed": None, "seconds_per_hour": None}
+        import cmdwin
+        sp = cmdwin.get_game_speed(self)
+        tbl = cmdwin.game_speed_seconds(self)
+        sph = tbl[sp] if (sp is not None and 0 <= sp < len(tbl)) else None
+        return {
+            "speed": sp,
+            "ui_speed": (sp + 1) if (sp is not None and 0 <= sp <= 4) else None,
+            "seconds_per_hour": sph,
+        }
 
     def set_game_speed(self, speed: int, measure_seconds=None, use_command: bool = False):
         """设置游戏速度（工具层最高允许 engine 3 = UI 4 速；传 4/5 自动钳位至 3），并返回回读/速率验证结果。"""
         speed = int(speed)
         if not 0 <= speed <= 5:
             raise ValueError("speed must be between 0 and 5")
-        if sys.platform == "win32":
-            import cmdwin
-            return cmdwin.set_game_speed(
-                self, speed, measure_seconds=measure_seconds, use_command=use_command
-            )
-        capped = min(speed, 3)
-        with self:
-            self.cmd.send("SetGameSpeed", speed=capped)
-        return {"ok": True, "requested": speed, "speed": capped,
-                "engine_speed": capped, "ui_speed": capped + 1,
-                "max_engine_speed": 3, "max_ui_speed": 4,
-                "clamped": capped != speed}
+        import cmdwin
+        return cmdwin.set_game_speed(
+            self, speed, measure_seconds=measure_seconds, use_command=use_command
+        )
 
     def _air_snapshot(self, max_age=25.0):
         """Player air wings, cached per game pid.
@@ -448,11 +439,11 @@ class OverviewMixin:
             pass
         return out
 
-    def _light_candidates(self, tag, lines, dec_rows=None):
+    def _light_candidates(self, tag, lines, dec_rows=None, _slots=None):
         """Cheap candidates block: no focus ranking, no tech-tree scan."""
         out = {}
         try:
-            slots = self.research_slots(tag)
+            slots = _slots if _slots is not None else self.research_slots(tag)
             out["empty_research_slots"] = [s["slot"] for s in slots
                                            if not s.get("slot_busy")
                                            or s.get("slot_done")]
@@ -490,6 +481,10 @@ class OverviewMixin:
         return out
 
     def overview(self, tag=None):
+        with enter_read_scope(self):
+            return self._overview_body(tag)
+
+    def _overview_body(self, tag=None):
         import time as _t_ov
         c = self._c(tag)
         cur = self.current_focus(c.tag)
@@ -517,7 +512,7 @@ class OverviewMixin:
         # numbers with no way to tell them apart.  Report both, named.  The rows
         # are now parsed once here and handed to _light_candidates.
         dec_mine = [d for d in dec if d.get("mine", True)]
-        cand = self._light_candidates(c.tag, lines, dec_rows=dec)
+        cand = self._light_candidates(c.tag, lines, dec_rows=dec, _slots=research)
         tree = self.focus_tree(c.tag)
         politics = self.politics(c.tag)
         prod = lines

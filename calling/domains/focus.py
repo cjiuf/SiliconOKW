@@ -19,6 +19,7 @@ from ._shared import (
     _arr,
     _count,
     item_name,
+    read_scoped,
 )
 
 class FocusMixin:
@@ -236,6 +237,7 @@ class FocusMixin:
             pass
         return 70.0
 
+    @read_scoped("current_focus", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def current_focus(self, tag=None):
         c = self._c(tag)
         prog = self.p.u64(c.ptr + CO_FOCUS_PROGRESS)
@@ -353,88 +355,44 @@ class FocusMixin:
                         )
                 r["reason"] = reason
             return r
-        with self:
-            self.cmd.send("SetNationalFocus", tag=c.tag_id, focus_ptr=f)
-        self._settle()
-
-        def _ok():
-            prog = self.p.u64(c.ptr + CO_FOCUS_PROGRESS)
-            return bool(prog) and self.p.u64(prog + FP_CURRENT) == f
-        ok = self._wait_until(_ok)
-        return {"ok": ok, "focus": key}
+        raise NotImplementedError("set_focus requires Windows PE 1.19.5.0")
 
     def set_focus_ptr(self, focus_ptr, tag=None):
-        """Start a national focus by its LIVE tree pointer.
-
-        hoi4_selectable_focuses returns pointers read straight out of the running focus
-        tree, while hoi4_set_focus resolves the key through a cached lookup that goes
-        stale after a game restart. For focuses the game lists as selectable but
-        set_focus refuses (Anschluss / inner-circle focuses), post the pointer directly.
-        """
+        """Start a national focus by its LIVE tree pointer."""
         c = self._c(tag)
         f = int(focus_ptr)
-        if sys.platform == "win32":
-            import cmdwin
-            p = self.p          # 2026-11-20: this branch referenced a bare `p`
-                                # that only exists in the POSIX path below, so
-                                # the tool raised NameError every single time.
-            r = cmdwin.set_national_focus(self, f, c.tag_id)
-            self._settle()
-            prog = p.u64(c.ptr + CO_FOCUS_PROGRESS)
-            got = p.u64(prog + FP_CURRENT) if prog else 0
-            r.update({"focus_ptr": hex(f), "current": hex(got) if got else None,
-                      "ok": bool(r.get("ok")) and got == f})
-            if not r["ok"] and not r.get("reason"):
-                k = item_name(p, f + NF_KEY)
-                r["reason"] = self.focus_block_reason(k, tag) if k else (
-                    "the pointer does not resolve to a focus in the live tree")
-            return r
-        with self:
-            self.cmd.send("SetNationalFocus", tag=c.tag_id, focus_ptr=f)
+        import cmdwin
+        p = self.p
+        r = cmdwin.set_national_focus(self, f, c.tag_id)
         self._settle()
-
-        def _ok():
-            prog = self.p.u64(c.ptr + CO_FOCUS_PROGRESS)
-            return bool(prog) and self.p.u64(prog + FP_CURRENT) == f
-        ok = self._wait_until(_ok)
-        return {"ok": ok, "focus_ptr": hex(f), "focus": self.p.u64(self.p.u64(c.ptr + CO_FOCUS_PROGRESS) + FP_CURRENT) == f}
+        prog = p.u64(c.ptr + CO_FOCUS_PROGRESS)
+        got = p.u64(prog + FP_CURRENT) if prog else 0
+        r.update({"focus_ptr": hex(f), "current": hex(got) if got else None,
+                  "ok": bool(r.get("ok")) and got == f})
+        if not r["ok"] and not r.get("reason"):
+            k = item_name(p, f + NF_KEY)
+            r["reason"] = self.focus_block_reason(k, tag) if k else (
+                "the pointer does not resolve to a focus in the live tree")
+        return r
 
     def drop_focus(self, tag=None):
         c = self._c(tag)
         before = self.current_focus(tag)
-        # 2026-11-22 (P3-3): 无进行中国策时直接返回带 reason 的结构化拒绝，
-        # 不浪费 _settle() 也不遗漏 reason 字段。
         if not before:
             return {"ok": False, "posted": 0, "was": None, "current": None,
                     "reason": "no focus in progress"}
-        if sys.platform == "win32":
-            import cmdwin
-            # 2026-11-20: `was` came from cmdwin, which reports the PLAYER's
-            # current focus -- dropping LUX's focus reported Germany's.  Read it
-            # for the country actually being asked about.
-            r = cmdwin.drop_national_focus(self, c.tag_id)
-            self._settle()
-            prog = self.p.u64(c.ptr + CO_FOCUS_PROGRESS)
-            got = self.p.u64(prog + FP_CURRENT) if (prog and FP_CURRENT is not None) else 0
-            ok = bool(r.get("ok")) and got == 0
-            r.update({"was": before.get("key") if isinstance(before, dict) else None,
-                      "current": hex(got) if got else None,
-                      "ok": ok})
-            if not ok and not r.get("reason") and not r.get("error"):
-                r["reason"] = "focus remained active after drop command (game may be paused)"
-            return r
-        with self:
-            self.cmd.send("DropCurrentNationalFocus", tag=c.tag_id)
+        import cmdwin
+        r = cmdwin.drop_national_focus(self, c.tag_id)
         self._settle()
-
-        def _ok():
-            prog = self.p.u64(c.ptr + CO_FOCUS_PROGRESS)
-            return bool(prog) and self.p.u64(prog + FP_CURRENT) == 0
-        ok = self._wait_until(_ok)
-        out = {"ok": ok, "was": before.get("key") if isinstance(before, dict) else None}
-        if not ok:
-            out["reason"] = "focus remained active after drop command"
-        return out
+        prog = self.p.u64(c.ptr + CO_FOCUS_PROGRESS)
+        got = self.p.u64(prog + FP_CURRENT) if (prog and FP_CURRENT is not None) else 0
+        ok = bool(r.get("ok")) and got == 0
+        r.update({"was": before.get("key") if isinstance(before, dict) else None,
+                  "current": hex(got) if got else None,
+                  "ok": ok})
+        if not ok and not r.get("reason") and not r.get("error"):
+            r["reason"] = "focus remained active after drop command (game may be paused)"
+        return r
 
     def focus_detail(self, key, tag=None):
         """Everything about one focus: prerequisites, mutual exclusions, filters.
@@ -526,38 +484,8 @@ class FocusMixin:
                 pass
 
     def _can_start_focus_cmd(self, focus_ptr, tag_id):
-        """Would the ENGINE let this country start this focus right now?
-
-        CSetNationalFocusCommand::CanExecute is slot +0x50 of its vtable
-        (0x4416DD8, 1.19.4.1) — the same entry CCommand::Run calls before it
-        posts. Verified 2026-11-11 against the live game: it returned 1 for
-        GER_befriend_japan and 0 for GER_legion_condor, and set_focus_ptr()
-        then succeeded / failed exactly the same way.
-        """
-        if sys.platform == "win32":
-            return self._can_start_focus_win(focus_ptr, tag_id)
-        import api, commands
-        try:
-            spec = commands.COMMANDS["SetNationalFocus"]
-            vt = self.va(spec["vt"])
-            if vt < self.p.base or vt > self.p.base + 0x3900000:
-                return True          # platform without the Linux command vtable
-            can_fn = self.p.u64(vt + 0x50) - self.p.base
-        except OSError:
-            return True
-        api.allow_call(can_fn)
-        cmd = self.cmd.make("SetNationalFocus", tag=int(tag_id),
-                            focus_ptr=int(focus_ptr))
-        try:
-            with self:
-                return bool(self.call(can_fn, (cmd, 0)) & 0xFF)
-        except Exception:
-            return True          # never hide a focus because of a probe error
-        finally:
-            try:
-                self._free_cmd(cmd)
-            except Exception:
-                pass
+        """调用 Windows PE CSetNationalFocusCommand::CanExecute 判定国策当前是否可启动。"""
+        return self._can_start_focus_win(focus_ptr, tag_id)
 
     def selectable_focuses(self, tag=None, allow_civil_war=False):
         """Selectable focuses, ranked by the country's own historical AI plan.

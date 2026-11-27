@@ -16,7 +16,6 @@ from ._shared import (
     BT_ID,
     BT_KEY,
     BT_NAME,
-    BUILDING_REF_VTABLE,
     CO_PRODUCTION,
     CO_STATES,
     PS_CONSTRUCTION,
@@ -28,6 +27,7 @@ from ._shared import (
     ST_RESISTANCE,
     _arr,
     _count,
+    read_scoped,
     item_name,
 )
 
@@ -141,6 +141,7 @@ class EconomyBuildMixin:
         return {k: {"id": v["id"], "name": v["name"], "province_level": v["province_level"]}
                 for k, v in sorted(self._bld_by_key.items())}
 
+    @read_scoped("construction_queue", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def construction_queue(self, tag=None):
         p = self.p
         self._load_buildings()
@@ -343,34 +344,7 @@ class EconomyBuildMixin:
                                 "not grow -- usually the state has no free "
                                 "building slot for this type")
             return out
-        before = len(self.construction_queue(c.tag))
-        # CBuildingReference (1.19.4.1, verified by disassembly and live test):
-        #   +0x08 = location id   (state id for a state-level building, province id
-        #                          for a province-level one)
-        #   +0x0C = building type id
-        #   +0x10 = 0
-        # The AddConstruction ctor copies ref+8..ref+0x10 into cmd+0x30..+0x3C.
-        loc = int(province or 0)
-        if loc <= 0:
-            loc = int(state_id)
-        with self:
-            cmd = self.cmd.make("AddConstruction", tag=c.tag_id,
-                                ref_vptr=self.va(BUILDING_REF_VTABLE),
-                                province=loc, building_type=b["id"], state=0,
-                                level=level, flag=1)
-            # CCommand::Run: CanExecute -> Post(queue, cmd, 1), the click path.
-            rv = self._run_cmd(cmd)
-        if not (rv & 0xFF):
-            return {"ok": False, "before": before, "after": before,
-                    "error": "the game refused the construction order (CanExecute false)"}
-        # The command is asynchronous: the construction line appears on the next tick.
-        q = self.construction_queue(c.tag)
-        for _ in range(12):
-            if len(q) > before:
-                break
-            self._settle(0.5)
-            q = self.construction_queue(c.tag)
-        return {"ok": len(q) > before, "before": before, "after": len(q), "queue": q}
+        raise NotImplementedError("add_construction requires Windows PE 1.19.5.0")
 
     def remove_construction(self, index: int, tag=None):
         """Remove one queued construction line. Returns ok only if the queue shrank.

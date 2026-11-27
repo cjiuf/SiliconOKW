@@ -28,6 +28,7 @@ from ._shared import (
     RES_STRIDE,
     _arr,
     item_name,
+    read_scoped,
 )
 
 class EconomyMixin:
@@ -116,6 +117,7 @@ class EconomyMixin:
         f = filter_text.lower()
         return sorted(n for n in self._eq_by_name if not f or f in n.lower())
 
+    @read_scoped("_active_variant_names", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def _active_variant_names(self, tag=None):
         """纯内存读取本国已解锁可生产的装备型号名列表（< 1ms）。"""
         p = self.p
@@ -130,6 +132,10 @@ class EconomyMixin:
                 out.append(nm)
         return out
 
+    @read_scoped(
+        "production_lines",
+        key_fn=lambda self, tag=None, include_obsolete=True: (self._rs_tag_key(tag), bool(include_obsolete)),
+    )
     def production_lines(self, tag=None, include_obsolete=True):
         p = self.p
         self._load_equipment()
@@ -217,6 +223,7 @@ class EconomyMixin:
                 pass
         return out
 
+    @read_scoped("factory_allocation", key_fn=lambda self, tag=None: (self._rs_tag_key(tag),))
     def factory_allocation(self, tag=None):
         """引擎精确口径的军工 / 船坞分配账本（纯只读）。
 
@@ -848,19 +855,7 @@ class EconomyMixin:
             else:
                 out["error"] = "CSetProductionLineCommand posted but line variant remained %s" % after_name
             return out
-
-        if dry_run:
-            out.update(ok=True, after=before_name)
-            return out
-        self.send_command("SetProductionLine",
-                          {"0x24": packed_line, "0x2C": packed_var}, tag)
-        self._settle(0.4)
-        after_name = self._eq_by_id.get(p.i32(p.u64(line + ML_VARIANT) + EV_TYPE_ID))
-        out["after"] = after_name
-        out["ok"] = after_name == equipment
-        if not out["ok"]:
-            out["error"] = "the game did not switch the line (CanExecute refused or the handle was wrong)"
-        return out
+        raise NotImplementedError("set_production_line_equipment requires Windows PE 1.19.5.0")
 
     def create_production_line(self, equipment: str, tag=None, dry_run=False,
                                move_to_front: bool = False):
@@ -1067,6 +1062,10 @@ class EconomyMixin:
                 "the game accepted the command but the line is still there"
         return out
 
+    @read_scoped(
+        "equipment_stockpile",
+        key_fn=lambda self, tag=None, limit=120: (self._rs_tag_key(tag), int(limit)),
+    )
     def equipment_stockpile(self, tag=None, limit=120):
         """Equipment counts in the stockpile, per VARIANT (not per equipment name).
 
