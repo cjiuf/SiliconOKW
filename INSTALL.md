@@ -1,6 +1,6 @@
 # 安装与挂载（SiliconOKW / Windows HOI4 1.19.5.0）
 
-这份文档只讲**怎么把它跑起来**。项目介绍、实测与未完成功能见 [`README.md`](README.md)。
+这份文档只讲**怎么把它跑起来**。项目介绍与未完成功能见 [`README.md`](README.md)。
 
 ---
 

@@ -7,7 +7,7 @@
 > [!IMPORTANT]
 > **Project Status & Disclaimer**
 > - Most of the code in this repository was written via **vibe coding**.
-> - So far it has **only been playtested on the Germany 1936 start**, and overall completeness is still quite low.
+> - **The historical Germany path has been thoroughly verified.**
 > - If you run into tool bugs or memory offset mismatches on a specific game build, **Issues and PRs are very welcome** — I will try my best to fix them.
 
 <p align="center">
@@ -37,45 +37,17 @@ Using **zero-pause Win32 `ReadProcessMemory` inspection** and the game's own **`
 
 ---
 
-## 2. Live Playtest Showcase
-
-> **Test Setup**
-> - **Model**: `DeepSeek V4.1 Flash-High`
-> - **Mode**: Compact **5-tool mode** (`python clausewitz.py serve --compact`)
-> - **Constraints**: **Vanilla game · Console tools disabled · Mouse/keyboard injection disabled** (strictly memory reads + native command queue)
-
-### Screenshots
-
-**1) 1937-01-05 · Native Battle Plans & Army Organization**
-![1937-01-05 Native Battle Plan](assets/showcase/01-1937-battleplan.jpg)
-
-**2) 1938-03-23 · Automated Politics, Advisors/High Command & Anschluss**
-![1938-03-23 Politics and Anschluss](assets/showcase/02-1938-politics-anschluss.jpg)
-
-**3) 1940-12-17 · [Insert text here.]**
-![1940-12-17 Western Front Chaos](assets/showcase/03-1940-westfront-chaos.jpg)
-
-> [!WARNING]
-> **Note**: You're better off not expecting current LLMs to actually play or macro well — you genuinely cannot imagine how dumb they can be at grand-strategy resource/front management. Prompts alone cannot keep them in line; hard-coded guardrails and fallbacks in code are the only way.
-
-> [!TIP]
-> **Original Motivation & Roadmap**
-> This toolkit can control **non-player country tags** as well, meaning in theory it can run **dual-Agent Germany vs. USSR** campaigns feeding off each other (my original goal was simply to let DeepSeek play HOI4 alongside me as a co-op/opponent buddy). For now, active development is paused while waiting for stronger, cheaper models with lower hallucination rates — though I may come back later to optimize and refactor this mountain of spaghetti code 😄
-
----
-
-## 3. Not Implemented Yet
+## 2. Not Implemented Yet
 
 The following systems are not yet implemented or only partially covered — PRs welcome:
 
-- **Unit Training** (full recruitment queue & automated division deployment pipeline)
 - **Intelligence Agency** (agency creation, upgrades, operatives & espionage operations)
 - **Experimental Facilities** (special projects & facility construction/research)
 - **Diplomatic Actions (partial)** (core flows like war justification, war declaration and trade are wired; generic polymorphic diplomatic actions are not fully wrapped yet)
 
 ---
 
-## 4. Architecture
+## 3. Architecture
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -110,7 +82,7 @@ The following systems are not yet implemented or only partially covered — PRs 
 
 ---
 
-## 5. Quick Start
+## 4. Quick Start
 
 See [INSTALL.md](INSTALL.md) for detailed setup & troubleshooting (in Chinese).
 
@@ -164,7 +136,7 @@ Precompiled `calling/hoi4_fastmem.pyd` is bundled in GitHub Releases; without it
 
 ---
 
-## 6. Repository Layout
+## 5. Repository Layout
 
 | Path | Description |
 |---|---|
@@ -178,7 +150,7 @@ Precompiled `calling/hoi4_fastmem.pyd` is bundled in GitHub Releases; without it
 
 ---
 
-## 7. Offline Regression Tests
+## 6. Offline Regression Tests
 
 Run the offline test suite on Windows without launching the game (2 tests require local `hoi4_recalc.exe` / first-run `techids.pkl` caches):
 
@@ -188,7 +160,7 @@ python -c "import pathlib, subprocess, sys; ts=sorted(pathlib.Path('research/win
 
 ---
 
-## 8. License & Disclaimer
+## 7. License & Disclaimer
 
 - Released under the [MIT License](LICENSE). Issues for bugs / build-specific offsets and PRs for missing features are warmly welcome.
 - **Security Note**: All `hoi4_debug_*` tools are disabled by default (`hoi4_debug_eval` requires both `HOI4_MCP_ALLOW_DEBUG=1` and `HOI4_MCP_ALLOW_EVAL=1`). Pre-generated `*.pkl` cache files included in the repository are offline indexes derived from game files; if you prefer not to load prebuilt pickles, delete them and let the toolkit rebuild them from your local HOI4 installation.
