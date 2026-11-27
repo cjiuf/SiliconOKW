@@ -105,9 +105,20 @@ def _resolve_injections_count(p):
                     )
 def _status(a):
     g = game()
+    by_caller = {}
+    try:
+        if hasattr(g.p, "injection_breakdown"):
+            by_caller = g.p.injection_breakdown(top=12) or {}
+        elif sys.platform == "win32":
+            from process import winject as _wj
+            by_caller = _wj.call_breakdown(getattr(g.p, "pid", None), top=12) or {}
+    except Exception:
+        by_caller = {}
     out = {"pid": g.p.pid, "image_base": hex(g.p.base), "version": O.VERSION,
            "date": g.date(), "player": g.player_tag(), "countries": len(g.tags()),
            "injections": _resolve_injections_count(g.p),
+           "injections_scope": "current_python_process",
+           "injections_by_caller": by_caller,
            "winject_recovery": _srv()._WINJECT_RECOVERY}
     try:
         sp = g.game_speed()

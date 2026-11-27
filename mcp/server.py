@@ -191,8 +191,8 @@ def _run_with_timeout(fn, args, name):
         # been running, and that the only current way out is to let it finish or
         # restart the server.  Long calls SHOULD be bounded at the source (see the
         # probe budget in selectable_focuses and the air/enqueue paths).
-        _hint = ("Wait for it, or restart the MCP server (Stop-Process the wx_server "
-                 "python pid, then mcp_load('hoi4')) -- Python cannot cancel it.")
+        _hint = ("Wait for it, or restart the HOI4 MCP server process -- Python "
+                 "cannot cancel an in-flight memory read thread.")
         if _el > 120:
             _hint = ("It has been running for %.0f s, far past the %.0f s budget: "
                      "restart the MCP server." % (_el, CALL_TIMEOUT_S))

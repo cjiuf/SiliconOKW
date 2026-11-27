@@ -49,9 +49,10 @@ import session_state as _SS
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = _SS.state_path(_SS.REDDOTS_STATE_NAME)
 
-# 严控五项：默认拒绝普通 ack，必须显式 force=True + 非空 reason，且豁免期 <= 7 游戏日
-# CB_AVAILABLE / JUSTIFY_LOST 绝不放进 AUTO_SOLVABLE_CODES，必须由决策者亲自处置
+# 严控项：默认拒绝普通 ack，必须显式 force=True + 非空 reason，且豁免期 <= 7 游戏日
+# CB_AVAILABLE / JUSTIFY_LOST / PEACE_CONFERENCE 绝不放进 AUTO_SOLVABLE_CODES，必须由决策者亲自处置
 STRICT_CODES = frozenset({
+    "PEACE_CONFERENCE",
     "PENDING_EVENT",
     "NO_FOCUS",
     "IDLE_RESEARCH",
@@ -427,6 +428,27 @@ def _scan_raw_body(g, fast=False):
     date_text, date_raw = _date_info(g)
     st = _get_state(g)
     at_war = _is_at_war(g)
+
+    # ------------------------------------------------------------------ 0. 和平会议（严控阻塞）
+    try:
+        import peacewin as _pw
+        _conf = _pw.live_conference_readonly(g)
+        if _conf:
+            items.append(_make_item(
+                "PEACE_CONFERENCE",
+                "检测到和平会议已开启（推钟已被引擎锁定）",
+                {"conference_ptr": hex(int(_conf)) if isinstance(_conf, int) else str(_conf)},
+                [
+                    "hoi4_peace_status() 查看当前和会参与国、得分与出价状态",
+                    "hoi4_peace_options(loser='<战败国TAG>') 与 hoi4_peace_demands(loser='<战败国TAG>') 提交需求",
+                    "确认后调用 hoi4_peace_finish(action='done') 结束和会并恢复推钟",
+                ],
+                severity="strict",
+                tier=1,
+                signature="PEACE_CONFERENCE:open",
+            ))
+    except Exception:
+        pass
 
     # ------------------------------------------------------------------ 1. 待决事件
     try:

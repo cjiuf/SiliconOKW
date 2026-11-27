@@ -8,19 +8,9 @@ The country-scoped ones among them are detected statically
 and called at runtime.
 """
 from __future__ import annotations
-import os, pickle, re, subprocess
+import os, re
 
-import config
-BIN = config.binary_path(required=False)
 CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats.pkl")
-GET_COUNTRY = 0xD77A90
-
-
-def _dis(va, end, n=14):
-    out = subprocess.run(["objdump", "-d", "--start-address=%#x" % va,
-                          "--stop-address=%#x" % min(end, va + 0x100),
-                          "-M", "intel", BIN], capture_output=True, text=True).stdout
-    return [l.split("\t")[-1].strip() for l in out.splitlines()[7:]][:n]
 
 
 def snake(cls):
@@ -30,11 +20,18 @@ def snake(cls):
     return s
 
 
+_STATS_CACHE = None
+
+
 def build(force=False):
     """{stat_name: (function_vaddr, class)}"""
+    global _STATS_CACHE
+    if _STATS_CACHE is not None and not force:
+        return _STATS_CACHE
     import safe_cache
     if safe_cache.exists(CACHE) and not force:
-        return safe_cache.load(CACHE)
+        _STATS_CACHE = safe_cache.load(CACHE)
+        return _STATS_CACHE
     raise NotImplementedError(
         "Linux ELF/objdump trigger scanner removed; use prebuilt stats.json."
     )

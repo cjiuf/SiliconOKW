@@ -897,15 +897,20 @@ class BattleplanOrdersMixin:
           * 需通过 `confirm_escalation=True` 或具名列表 `ack_co_belligerents=["ENG","FRA"]`
             覆盖所有高危新增保独/裸边境主要国方可放行。
         """
+        import time as _time
+        _t0 = _time.perf_counter()
+        _timings_ms = {}
         c = self._c(tag)
         me = c.tag
         tgt_tag = str(target_tag).upper()
+        _t = _time.perf_counter()
         div = self.divisions(me, limit=1, deep=False)
         my_divs = int(div.get("count") or 0)
         try:
             enemy_divs = int((self.divisions(tgt_tag, limit=1, deep=False) or {}).get("count") or 0)
         except Exception:
             enemy_divs = 0
+        _timings_ms["divisions"] = round((_time.perf_counter() - _t) * 1000.0, 2)
         rifles = 0.0
         try:
             for row in (self.equipment_stockpile(me) or {}).get("stockpile") or []:
@@ -939,12 +944,14 @@ class BattleplanOrdersMixin:
         esc_confirmed = bool(confirm_escalation)
 
         # ---- 2026-11-23 (复测 6 P0-1) + 2026-11-27 (D-20): 实时外交连锁推演与战略门禁拆分
+        _t = _time.perf_counter()
         diplo = {}
         try:
             import diplomacy as _dip_fc
             diplo = _dip_fc.war_escalation_forecast(self, tgt_tag, me_tag=me) or {}
         except Exception as _de:
             diplo = {"error": repr(_de)}
+        _timings_ms["diplomacy"] = round((_time.perf_counter() - _t) * 1000.0, 2)
         checks["diplomacy"] = diplo
         for _db in diplo.get("diplomatic_blockers") or []:
             strategic_blockers.append(_db)
@@ -1039,7 +1046,9 @@ class BattleplanOrdersMixin:
 
         # ---- hard checks 2+3: only when the caller wants them
         if hard:
+            _t = _time.perf_counter()
             bd = self._border_divisions(tgt_tag, tag=tag)
+            _timings_ms["border"] = round((_time.perf_counter() - _t) * 1000.0, 2)
             checks["border"] = bd
             if bd.get("error"):
                 tactical_blockers.append("cannot verify the border: %s" % bd["error"])
@@ -1055,7 +1064,9 @@ class BattleplanOrdersMixin:
             # 2026-11-18: 硬门槛从「frontd 指令 tick 过」换成「原生前线 + 进攻线 +
             # 至少一个集团军已指派」。旧门槛只证明有个后台线程在算，不证明地图上
             # 有任何人会去打仗——1939.07.30 就是这么在 8 个师的状态下宣的战。
+            _t = _time.perf_counter()
             fp = self._front_plan_check(tgt_tag, tag=tag)
+            _timings_ms["front_plan"] = round((_time.perf_counter() - _t) * 1000.0, 2)
             checks["front_plan"] = fp
             if not fp.get("ok"):
                 tactical_blockers.append(fp.get("problem") or
@@ -1064,6 +1075,7 @@ class BattleplanOrdersMixin:
             # 必须有战争借口。Windows 1.19.5 已打通 O(1) 实时直读 CDiplomacyStatus+0x80
             # （0.2ms，100% 包含新造 CB 与国策 CB），不再被旧 fast list 漏新 arena 坑死！
             # 若底层结构读不到（非 Windows 或异常）且未走权威路径，绝不伪报 "missing" 骗模型重造 200 天。
+            _t = _time.perf_counter()
             _cb, _just, _werr = None, [], None
             _wg_source = "unknown"
             _direct_authoritative = False
@@ -1113,6 +1125,7 @@ class BattleplanOrdersMixin:
                              if str((j or {}).get("target") or "").upper() == tgt_tag]
                 except Exception:
                     _just = []
+            _timings_ms["wargoal"] = round((_time.perf_counter() - _t) * 1000.0, 2)
             _prob, _state = _wargoal_gate(tgt_tag, _cb, _just)
             checks["wargoal"] = {
                 "state": _state,
@@ -1162,6 +1175,7 @@ class BattleplanOrdersMixin:
                             "war goal before that is allowed, it just raises world tension"
                             % (" + ".join(self.GER_SNOWBALL[:2]), year, have))
 
+        _timings_ms["total"] = round((_time.perf_counter() - _t0) * 1000.0, 2)
         blockers = list(strategic_blockers) + list(tactical_blockers)
         ready = not blockers
         return {
@@ -1188,6 +1202,7 @@ class BattleplanOrdersMixin:
             "infantry_equipment_stockpile": round(rifles, 1),
             "year": year,
             "completed_snowball": sorted(f for f in self.GER_SNOWBALL if f in completed),
+            "timings_ms": _timings_ms,
         }
 
     def paradrop_targets(self, orders_group=None, source_province=None, limit=2000,

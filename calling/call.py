@@ -1,9 +1,6 @@
-"""Calling functions inside the target process. Platform-independent entry point.
+"""Calling functions inside the target process. Platform entry point.
 
-The real work happens in the platform backend:
-  Linux : ptrace stops every thread and hijacks the main one (process/linux.py)
-
-Windows is not implemented yet; see the roadmap in the project README.
+Delegates to the active platform injector backend in `calling/process/`.
 """
 import os
 import sys

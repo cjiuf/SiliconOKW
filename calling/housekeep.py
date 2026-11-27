@@ -1711,6 +1711,12 @@ class HousekeepMixin:
             _d0 = {}
         if not isinstance(_d0, dict):
             _d0 = {}
+        _paused_before = None
+        try:
+            import session as _sess_hk
+            _paused_before = bool(_sess_hk.is_paused(self))
+        except Exception:
+            _paused_before = None
         out = {"ok": True, "timings": {}}
         budget_exceeded = False
         # 2026-11-22 (复测 5 §3.3 / §3.4):
@@ -1851,9 +1857,21 @@ class HousekeepMixin:
             _d1 = {}
         _h0, _h1 = _d0.get("raw"), _d1.get("raw")
         _adv_h = max(0, int(_h1) - int(_h0)) if (_h0 is not None and _h1 is not None) else 0
+        _paused_after = None
+        try:
+            import session as _sess_hk
+            _paused_after = bool(_sess_hk.is_paused(self))
+        except Exception:
+            _paused_after = None
+        _days_elapsed = round(_adv_h / 24.0, 2)
+        _unpaused_for_drain = bool(_paused_before is True and (_paused_after is False or _adv_h > 0))
         out["date_before"] = _d0.get("text")
         out["date_after"] = _d1.get("text")
         out["clock_advanced_hours"] = _adv_h
+        out["days_elapsed"] = _days_elapsed
+        out["paused_before"] = _paused_before
+        out["paused_after"] = _paused_after
+        out["unpaused_for_drain"] = _unpaused_for_drain
         if _adv_h > 0:
             out["clock_note"] = (
                 "game clock advanced by %d hour(s) during post_drained command execution "

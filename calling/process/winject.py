@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Windows x64 thread-hijack injection for HOI4 1.19.5.0  (generated from stage/winject.py).
+"""Windows x64 thread-hijack injection for HOI4 1.19.5.0.
 
-Model (same as calling/process/linux.py): **freeze every thread, hijack the one that
-owns the game window, restore, thaw.**  Freezing is what makes game-state mutation
-safe: without it a worker can run the simulation while we are inside `pp`.
+Model: **freeze every thread, hijack the one that owns the game window,
+restore, thaw.**  Freezing is what makes game-state mutation safe: without it a
+worker can run the simulation while we are inside `pp`.
 
 Verified on HOI4 1.19.5.0:
   * kernel32 sentinels (GetCurrentProcessId / GetTickCount64) round-trip
@@ -14,6 +14,7 @@ import ctypes.wintypes as wt
 import json
 import os
 import struct
+import sys
 import tempfile
 import time
 
@@ -762,6 +763,9 @@ class Injector:
         try:
             _pid_i = int(self.pid)
             _CALL_COUNTS[_pid_i] = _CALL_COUNTS.get(_pid_i, 0) + 1
+            _lbl = _infer_caller()
+            _bd = _CALL_BREAKDOWN.setdefault(_pid_i, {})
+            _bd[_lbl] = _bd.get(_lbl, 0) + 1
         except Exception:
             pass
         self.last_tid = cand
@@ -834,12 +838,30 @@ class Injector:
 #: that nests stubs and mangles the stack (seen: render thread wedged).
 _DIRTY_PIDS = set()
 
-#: 进程级累计注入计数（跨多次 attach/detach 持久统计，供 hoi4_status.injections 观测）
+#: 进程级累计注入计数（仅统计当前 Python 进程跨多次 attach/detach 的持久统计，供 hoi4_status.injections 观测）
 _CALL_COUNTS = {}
+#: 按调用者分组的累计注入次数 `{pid: {caller: count}}`（仅统计当前 Python 进程）
+_CALL_BREAKDOWN = {}
+_SKIP_CALLER_FILES = frozenset({"winject.py", "windows.py", "mem.py", "api.py", "cmdwin.py"})
+
+
+def _infer_caller():
+    """沿调用栈跳过底层注入/IPC 包装帧，提取首个业务调用者 `<module>.<func>`。"""
+    try:
+        f = sys._getframe(2)
+    except Exception:
+        return "<direct>"
+    while f is not None:
+        co = f.f_code
+        fn = os.path.basename(co.co_filename or "")
+        if fn and fn not in _SKIP_CALLER_FILES and not fn.startswith("<"):
+            return "%s.%s" % (os.path.splitext(fn)[0], co.co_name)
+        f = f.f_back
+    return "<direct>"
 
 
 def call_count(pid=None):
-    """返回指定 pid（或全进程总计）在本会话内完成的真实线程劫持注入次数。"""
+    """返回指定 pid（或全进程总计）在当前 Python 进程内完成的真实线程劫持注入次数。"""
     if pid is None:
         return sum(_CALL_COUNTS.values())
     try:
@@ -848,13 +870,35 @@ def call_count(pid=None):
         return 0
 
 
+def call_breakdown(pid=None, top=12):
+    """返回当前 Python 进程内按调用方统计的函数注入次数排行 `{caller: count}`。"""
+    merged = {}
+    if pid is None:
+        for d in _CALL_BREAKDOWN.values():
+            for k, v in d.items():
+                merged[k] = merged.get(k, 0) + int(v or 0)
+    else:
+        try:
+            src = _CALL_BREAKDOWN.get(int(pid)) or {}
+            merged = {k: int(v or 0) for k, v in src.items()}
+        except Exception:
+            merged = {}
+    items = sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))
+    if top is not None and int(top) > 0:
+        items = items[:int(top)]
+    return dict(items)
+
+
 def reset_call_count(pid=None):
-    """重置累计注入计数（供单测或进程重建使用）。"""
+    """重置累计注入计数与调用方分布（供单测或进程重建使用）。"""
     if pid is None:
         _CALL_COUNTS.clear()
+        _CALL_BREAKDOWN.clear()
         return
     try:
-        _CALL_COUNTS.pop(int(pid), None)
+        _pi = int(pid)
+        _CALL_COUNTS.pop(_pi, None)
+        _CALL_BREAKDOWN.pop(_pi, None)
     except Exception:
         pass
 

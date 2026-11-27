@@ -586,6 +586,30 @@ class TurnLoop:
                 "focus", "research", "production", "construction", "deployment",
             }))
         base = snapshot(g, signals)
+        if base.get("peace_open"):
+            self.last = base
+            paused = self._force_pause_safe(g)
+            sp_now = {}
+            try:
+                sp_now = g.game_speed() or {}
+            except Exception:
+                sp_now = {}
+            return {
+                "woke_because": ["peace conference already open"],
+                "wake_kind": "peace_conference",
+                "blocked_pre_wait": True,
+                "peace_open": True,
+                "clock_stalled": True,
+                "stall_reason": "peace_conference_open",
+                "timed_out": False,
+                "waited_game_days": 0.0,
+                "waited_real_seconds": 0.0,
+                "date": base.get("date"),
+                "paused": paused,
+                "game_speed": sp_now.get("speed"),
+                "game_speed_ui": sp_now.get("ui_speed"),
+                "state": _public(base),
+            }
         start_hours = base.get("date_raw")
         target_hours = None
         if until_date:
@@ -916,6 +940,12 @@ class TurnLoop:
                 # 2026-11-22 (复测 5 P1 §3.2): 超时或被看门狗中断时无条件暂停；
                 # 2026-11-23: 命中红点门禁或和平会议开启同样无条件强制停表！
                 # 2026-11-25: 宣战理由就绪/正当化结束同样无条件强制停表，防止长跑期 CB 过期！
+                paused_before_force = None
+                try:
+                    import session as _sess_w
+                    paused_before_force = bool(_sess_w.is_paused(g))
+                except Exception:
+                    paused_before_force = None
                 peace_woke = bool(cur.get("peace_open") and not prev.get("peace_open"))
                 wargoal_woke = bool(
                     ("wargoals" in prev and "wargoals" in cur and (cur["wargoals"] - prev["wargoals"]))
@@ -924,22 +954,44 @@ class TurnLoop:
                 if want_pause or timed_out or cancelled or red_dot_blocking or peace_woke or wargoal_woke or ap_floor_woke:
                     paused = self._force_pause_safe(g)
                 else:
-                    try:
-                        import session
-                        paused = bool(session.is_paused(g))
-                    except Exception:
-                        paused = None
+                    paused = paused_before_force
                 sp_now = {}
                 try:
                     sp_now = g.game_speed() or {}
                 except Exception:
                     sp_now = {}
+                waited_days = round(((now_h or start_hours or 0) - (start_hours or 0)) / 24.0, 2)
+                is_peace_open = bool(cur.get("peace_open"))
+                clock_stalled = bool(((timed_out or cancelled) and waited_days == 0.0) or is_peace_open)
+                if is_peace_open:
+                    stall_reason = "peace_conference_open"
+                elif clock_stalled and paused_before_force:
+                    stall_reason = "game_paused"
+                elif clock_stalled:
+                    stall_reason = "window_minimized_or_unresponsive"
+                else:
+                    stall_reason = None
+                if peace_woke or is_peace_open:
+                    wake_kind = "peace_conference"
+                elif red_dot_blocking:
+                    wake_kind = "red_dot"
+                elif wargoal_woke:
+                    wake_kind = "wargoal"
+                elif cancelled:
+                    wake_kind = "cancelled"
+                elif timed_out and clock_stalled:
+                    wake_kind = "timeout_stalled"
+                elif timed_out:
+                    wake_kind = "timeout"
+                else:
+                    wake_kind = "signal"
                 ret = {
                     "woke_because": reasons,
+                    "wake_kind": wake_kind,
+                    "clock_stalled": clock_stalled,
                     "timed_out": bool(timed_out or cancelled),
                     "effective_timeout_seconds": timeout_seconds,
-                    "waited_game_days": round(((now_h or start_hours or 0)
-                                               - (start_hours or 0)) / 24.0, 2),
+                    "waited_game_days": waited_days,
                     "waited_real_seconds": round(time.time() - t_start, 1),
                     "date": (g.date().get("text") if isinstance(getattr(g, "date", None) and g.date(), dict) else None),
                     "paused": paused,
@@ -950,6 +1002,10 @@ class TurnLoop:
                                 "last_tick": war_last} if wartime_micro else None,
                     "state": _public(cur),
                 }
+                if stall_reason:
+                    ret["stall_reason"] = stall_reason
+                if is_peace_open:
+                    ret["peace_open"] = True
                 if ap_on and ap_mod is not None:
                     ap_st_ret = ap_mod.status(g)
                     ret["autopilot"] = {
@@ -986,6 +1042,12 @@ class TurnLoop:
 
         # 退出 while 循环（rem_wall <= 0 或 stop_event 在 sleep 期间被触发）→ 强制停表返回
         self.last = cur
+        paused_before_force = None
+        try:
+            import session as _sess_to
+            paused_before_force = bool(_sess_to.is_paused(g))
+        except Exception:
+            paused_before_force = None
         paused = self._force_pause_safe(g)
         now_h = cur.get("date_raw")
         cancelled = bool(stop_event is not None and stop_event.is_set())
@@ -995,16 +1057,30 @@ class TurnLoop:
         except Exception:
             sp_end = {}
         waited_d_end = round(((now_h or start_hours or 0) - (start_hours or 0)) / 24.0, 2)
+        is_peace_open = bool(cur.get("peace_open"))
+        clock_stalled = bool((waited_d_end == 0.0) or is_peace_open)
+        if is_peace_open:
+            stall_reason = "peace_conference_open"
+        elif clock_stalled and paused_before_force:
+            stall_reason = "game_paused"
+        elif clock_stalled:
+            stall_reason = "window_minimized_or_unresponsive"
+        else:
+            stall_reason = None
+        if is_peace_open:
+            wake_kind = "peace_conference"
+        elif cancelled:
+            wake_kind = "cancelled"
+        elif clock_stalled:
+            wake_kind = "timeout_stalled"
+        else:
+            wake_kind = "timeout"
         _diag_end = []
         if not cancelled and waited_d_end == 0.0:
-            if cur.get("peace_open"):
+            if is_peace_open:
                 _diag_end.append("peace_open=True")
-            try:
-                import session as _ss_end
-                if _ss_end.is_paused(g):
-                    _diag_end.append("paused=True")
-            except Exception:
-                pass
+            if paused_before_force:
+                _diag_end.append("paused=True")
         _diag_end_s = (" (clock did not advance: %s)" % ", ".join(_diag_end)) if _diag_end else ""
         reason_txt = (
             "cancelled by server watchdog, paused to prevent background drift"
@@ -1014,6 +1090,8 @@ class TurnLoop:
         )
         out_to = {
             "woke_because": [reason_txt],
+            "wake_kind": wake_kind,
+            "clock_stalled": clock_stalled,
             "timed_out": True,
             "effective_timeout_seconds": timeout_seconds,
             "waited_game_days": waited_d_end,
@@ -1027,6 +1105,10 @@ class TurnLoop:
                         "last_tick": war_last} if wartime_micro else None,
             "state": _public(cur),
         }
+        if stall_reason:
+            out_to["stall_reason"] = stall_reason
+        if is_peace_open:
+            out_to["peace_open"] = True
         if isinstance(timeout_meta, dict):
             out_to["requested_timeout_seconds"] = timeout_meta.get("requested")
             out_to["timeout_max_seconds"] = timeout_meta.get("max_s")

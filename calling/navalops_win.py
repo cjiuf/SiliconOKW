@@ -1,9 +1,9 @@
 """Naval task-force orders on HOI4 1.19.5.0 (PE / Windows).
 
-The Linux module ``navalops.py`` uses ELF ctor addresses (0x2253A90 etc.), the
-fleet array at +0xB0 and the TF handle at +0x18 as a *pointer*; none of that
-matches hoi4.exe. Everything below was recovered with
-research/windows/pedis.py and verified live on 2026-11-16 (pid 10696).
+The legacy Linux offsets (ELF ctor addresses 0x2253A90 etc., fleet array at
++0xB0 and TF handle at +0x18 as a *pointer*) do not match hoi4.exe. Everything
+below was recovered with research/windows/pedis.py and verified live on
+2026-11-16 (pid 10696).
 
 Object layout (all RVAs are vtable / function RVAs in hoi4.exe):
 

@@ -2,22 +2,14 @@
 
 Why this module exists
 ----------------------
-`hoi4_set_front_directive` only writes `calling/front_directives.json`.  The
-stack relied on a *separate* gateway process (`hoi4_gateway.py`, its
-`front_worker` thread) to read that file every 8 s and call
-`tactical_front_tick`.  On this Windows box the running stack is
-`stage/wx_server.py -> mcp/server.py` and nothing else: there is no gateway, so
-nothing ever executed the file.
-
-Live proof, 2026-11-16: `calling/front_directives.json` held a HOL directive
-armed at 1939.05.01 with `last_tick: null`, unchanged for four months of game
-time, while 112 German divisions sat in Berlin and the Allies walked in.
+`hoi4_set_front_directive` writes `front_directives.json` in `%LOCALAPPDATA%\SiliconOKW`.
+Because the Windows MCP stack runs `mcp/server.py` directly with no separate
+worker process, the executor daemon thread runs in-process inside the server.
 
 So the executor now lives in the process that actually exists:
 
   * one daemon thread, started from `server.main()`;
-  * a heartbeat file (`front_worker.json`) so any tool can answer "is anything
-    driving the army right now?";
+  * a heartbeat file (`front_worker.json`) in the session state directory;
   * an exclusive lock file (`front_worker.lock`) so only ONE of the several MCP
     server processes on this machine ticks -- six were alive at once on
     2026-11-16, all importing the same modules;

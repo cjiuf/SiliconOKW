@@ -101,8 +101,10 @@ def country(g, tag):
     idx, ptrs = _index_by_tag(g)
     i = idx.get(tid)
     if i is None or i >= len(ptrs):
-        raise KeyError("no live CCountry carries tag id %d (%s); "
-                       "countries array has %d entries" % (tid, tag, len(ptrs)))
+        raise KeyError(
+            "no live CCountry carries tag id %d (%s); tag may be unformed/annexed/"
+            "absent in this save (countries array has %d entries)" % (tid, tag, len(ptrs))
+        )
     return ptrs[i], tid
 
 
@@ -211,4 +213,65 @@ def selftest(g, tag=None, deep=True):
         "ok": bool(agree and (legacy_ptr == info["ptr"])),
         "note": ("identity and tag2index agree" if agree and legacy_ptr == info["ptr"]
                  else "MISMATCH: do not trust a zero from the legacy path"),
+    }
+
+
+def all_countries_divisions(g, tags=None, non_zero_only=False):
+    """Single-pass division counts across all (or specified) live countries.
+
+    Builds `_index_by_tag(g)` once and reads `CCountry+0x290` array sizes directly
+    without triggering any full-heap scan.
+    """
+    p = g.p
+    if hasattr(g, "_load_tags"):
+        g._load_tags()
+    tag_table = list(getattr(g, "_tags", None) or ())
+    if not tag_table and hasattr(g, "tags"):
+        tag_table = list(g.tags() or ())
+    tag_to_tid = {
+        str(t).upper(): tid
+        for tid, t in enumerate(tag_table)
+        if t and str(t) != "---"
+    }
+    if tags is None:
+        want_tags = sorted(tag_to_tid.keys())
+    else:
+        seen = set()
+        want_tags = []
+        for t in tags:
+            tu = str(t or "").upper()
+            if tu and tu not in seen:
+                seen.add(tu)
+                want_tags.append(tu)
+    idx, ptrs = _index_by_tag(g)
+    by_tag = {}
+    for tu in want_tags:
+        tid = tag_to_tid.get(tu)
+        if tid is None:
+            continue
+        ci = idx.get(tid)
+        if ci is None or not (0 <= ci < len(ptrs)):
+            continue
+        ptr = ptrs[ci]
+        if not ptr:
+            continue
+        n = 0
+        try:
+            n = int(p.i32(ptr + CO_ARMIES + PDX_SIZE))
+        except OSError:
+            n = 0
+        if n < 0 or n > MAX_ARMY:
+            n = len(_arr(p, ptr, CO_ARMIES))
+        if non_zero_only and n == 0:
+            continue
+        by_tag[tu] = n
+    top = [
+        {"tag": t, "count": cnt}
+        for t, cnt in sorted(by_tag.items(), key=lambda kv: (-kv[1], kv[0]))[:20]
+    ]
+    return {
+        "total_divisions": sum(by_tag.values()),
+        "countries_count": len(by_tag),
+        "by_tag": by_tag,
+        "top": top,
     }

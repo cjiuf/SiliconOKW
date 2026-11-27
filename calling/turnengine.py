@@ -1179,9 +1179,12 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
                            include_focus_candidates=True, include_research_candidates=True,
                            include_data=False, reset_state=False):
     t0 = time.perf_counter()
+    _timings = {}
     if reset_state:
         reset_turn_state()
+    _t = time.perf_counter()
     ov = g.overview(tag)
+    _timings["overview"] = round((time.perf_counter() - _t) * 1000.0, 2)
     d_info = _safe_call(lambda: g.date(), {}) or {}
     my_tag = tag or _safe_call(lambda: g.player_tag(), None) or (ov.get("country") or {}).get("tag")
     cur_pid = getattr(getattr(g, "p", None), "pid", None)
@@ -1207,6 +1210,7 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
         last_receipt = persisted.get("last_receipt") or ""
 
     # 1. 待处理事件（纯读 O(1)，附只读 applicable 评估）
+    _t = time.perf_counter()
     events_compact = []
     events_total = 0
     try:
@@ -1245,8 +1249,10 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
             })
     except Exception:
         pass
+    _timings["events"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
     # 2. 战争与活跃战斗（纯读，避免触发 30s 扫描）
+    _t = time.perf_counter()
     war_info = {"at_war": False, "enemies": [], "combats": []}
     try:
         import combat
@@ -1266,8 +1272,10 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
             ]
     except Exception:
         pass
+    _timings["combat"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
     # 2.5 宣战理由 (CB) 与正当化进度（纯只读 O(1)/毫秒级，绝不触发深扫）
+    _t = time.perf_counter()
     wargoals_brief = []
     justifying_brief = []
     try:
@@ -1292,8 +1300,10 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
             })
     except Exception:
         pass
+    _timings["wargoals"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
     # 3. 条件展开：国策空闲时自动列候选
+    _t = time.perf_counter()
     focus_info = ov.get("focus") or {}
     selectable_focuses = []
     if include_focus_candidates and not focus_info.get("current"):
@@ -1302,8 +1312,10 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
             selectable_focuses = sf.get("selectable") or sf.get("focuses") or []
         elif isinstance(sf, list):
             selectable_focuses = sf
+    _timings["selectable_focuses"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
     # 4. 条件展开：科研槽空闲且科技库已就绪时列候选（不阻塞冷扫描）
+    _t = time.perf_counter()
     research_slots = ov.get("research") or []
     free_research = sum(1 for s in research_slots if not s.get("slot_busy"))
     research_candidates = []
@@ -1311,6 +1323,7 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
         if getattr(g, "_tech_by_name", None):
             av = _safe_call(lambda: g.available_research(my_tag), None) or []
             research_candidates = list(av[:25])
+    _timings["research_candidates"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
     # 5. 精简本国决议列表
     cand_block = ov.get("candidates") or {}
@@ -1335,13 +1348,16 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
         if cp is not None and 0.0 <= cp <= 1000.0:
             country_slim["command_power"] = round(cp, 2)
 
+    _t = time.perf_counter()
     rd_eval = None
     try:
         import reddots as _rd
         rd_eval = _rd.evaluate(g, fast=True)
     except Exception:
         rd_eval = None
+    _timings["red_dots"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
+    _t = time.perf_counter()
     health_board = None
     try:
         # 2026-11-26 (A1): 若 g.overview() 刚刚已经计算过本国 health_board，直接复用避免单次简报双算
@@ -1355,7 +1371,9 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
             health_board = _mc.strategic_health_board(g, tag=my_tag)
     except Exception:
         health_board = None
+    _timings["health_board"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
+    _t = time.perf_counter()
     ap_status = None
     try:
         import autopilot as _ap
@@ -1364,6 +1382,7 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
             ap_status = _st_ap
     except Exception:
         ap_status = None
+    _timings["autopilot"] = round((time.perf_counter() - _t) * 1000.0, 2)
 
     cons_all = ov.get("construction") or []
     prod_all = ov.get("production") or []
@@ -1381,6 +1400,7 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
                 "visible": win.get("visible"),
             } if isinstance(win, dict) else {},
             "elapsed_s": round(time.perf_counter() - t0, 3),
+            "timings_ms": _timings,
         },
         "red_dots": rd_eval,
         "health_board": health_board,
@@ -1418,12 +1438,17 @@ def _build_turn_brief_body(g, tag=None, memo=None, last_receipt=None, extra_insp
         "last_receipt": last_receipt,
         "extra_inspect": extra_inspect,
     }
+    _t = time.perf_counter()
     md = _render_brief_markdown(data)
+    _timings["render"] = round((time.perf_counter() - _t) * 1000.0, 2)
+    _timings["total"] = round((time.perf_counter() - t0) * 1000.0, 2)
+    data["meta"]["elapsed_s"] = round(_timings["total"] / 1000.0, 3)
     out = {
         "ok": True,
         "markdown": md,
         "approx_tokens": _estimate_tokens(md),
         "elapsed_s": data["meta"]["elapsed_s"],
+        "timings_ms": _timings,
     }
     if include_data:
         out["brief"] = data
@@ -2430,6 +2455,12 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
     aborted = False
     abort_reason = None
     d_before = _safe_call(lambda: g.date(), {}) or {}
+    paused_before = None
+    try:
+        import session as _sess_exec
+        paused_before = bool(_sess_exec.is_paused(g))
+    except Exception:
+        paused_before = None
 
     for idx, act in enumerate(actions):
         op = act["op"]
@@ -2503,6 +2534,14 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
             pass
 
     ok_count = sum(1 for r in results if r["ok"])
+    paused_after = None
+    try:
+        import session as _sess_exec
+        paused_after = bool(_sess_exec.is_paused(g))
+    except Exception:
+        paused_after = None
+    days_elapsed = round(adv_hours / 24.0, 2)
+    unpaused_for_drain = bool(paused_before is True and (paused_after is False or adv_hours > 0))
     plan_out = {
         "ok": not aborted,
         "aborted": aborted,
@@ -2513,6 +2552,10 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
         "date_before": d_before.get("text"),
         "date_after": d_after.get("text"),
         "clock_advanced_hours": adv_hours,
+        "days_elapsed": days_elapsed,
+        "paused_before": paused_before,
+        "paused_after": paused_after,
+        "unpaused_for_drain": unpaused_for_drain,
         "receipt_text": receipt_text,
         "results": results,
     }
@@ -2582,6 +2625,9 @@ def wait_and_brief(g, max_days=14, until_date=None, signals=None,
     if wait_res.get("wargoal_woke"):
         wait_block["wargoal_woke"] = True
         wait_block["wargoals"] = wait_res.get("wargoals")
+    for _wk in ("wake_kind", "clock_stalled", "stall_reason", "peace_open", "blocked_pre_wait"):
+        if _wk in wait_res and wait_res.get(_wk) is not None:
+            wait_block[_wk] = wait_res.get(_wk)
     if wait_res.get("autopilot") is not None:
         wait_block["autopilot"] = wait_res.get("autopilot")
         if wait_res.get("autopilot_woke"):

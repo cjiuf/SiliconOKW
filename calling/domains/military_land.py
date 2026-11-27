@@ -1461,7 +1461,8 @@ class MilitaryLandMixin:
             out.append({"index": i, "ptr": hex(a),
                         "template": tname,
                         "province_ptr": hex(prov_ptr)})
-        res = {"count": int(count), "divisions": out, "source": source,
+        res = {"tag": me, "scope": "player" if tag is None else "country",
+               "count": int(count), "divisions": out, "source": source,
                "country_ptr": hex(info["ptr"]), "tag_id": info["tid"],
                "verified": bool(info.get("verified"))}
         if warning:

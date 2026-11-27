@@ -52,17 +52,27 @@ class OverviewMixin:
         )
 
     def _air_snapshot(self, max_age=25.0):
-        """Player air wings, cached per game pid.
+        """Player air wings, cached per game pid (longer TTL on static game clock).
 
         2026-11-17: the user's complaint was that nothing ever reminded the model
         to touch the air force -- in the 1940 run all 15 wings sat at mission 0
         from 1936 to 1940.  `hoi4_overview` now reports that, but a CAirWing RTTI
-        scan is expensive, so it is cached for a few seconds and keyed by pid.
+        scan is expensive, so it is cached and keyed by `(pid, date_raw)`.
         """
         import time
         pid = getattr(getattr(self, "p", None), "pid", None)
+        date_raw = None
+        try:
+            d = self.date()
+            if isinstance(d, dict):
+                date_raw = d.get("raw")
+        except Exception:
+            date_raw = None
+        eff_age = max(float(max_age), 120.0) if (
+            date_raw is not None and _AIR_SNAP.get("date_raw") == date_raw
+        ) else float(max_age)
         if (_AIR_SNAP.get("pid") == pid and _AIR_SNAP.get("rows") is not None
-                and (time.time() - float(_AIR_SNAP.get("ts") or 0)) < max_age):
+                and (time.time() - float(_AIR_SNAP.get("ts") or 0)) < eff_age):
             return _AIR_SNAP["rows"]
         rows = []
         try:
@@ -70,7 +80,7 @@ class OverviewMixin:
             rows = AW.german_wings(self).get("wings") or []
         except Exception:
             rows = []
-        _AIR_SNAP.update(pid=pid, ts=time.time(), rows=rows)
+        _AIR_SNAP.update(pid=pid, date_raw=date_raw, ts=time.time(), rows=rows)
         return rows
 
     def _navy_snapshot(self):

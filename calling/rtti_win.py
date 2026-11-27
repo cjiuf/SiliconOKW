@@ -1,12 +1,10 @@
 """MSVC RTTI map for the Windows build: class name -> vtable RVA.
 
-The Linux build is analysed by `calling/rtti.py` (Itanium RTTI + `.rela.dyn`).
 `hoi4.exe` is a PE with MSVC RTTI: every vtable is immediately preceded by a
 `RTTICompleteObjectLocator`, which points at a `TypeDescriptor` whose name is the
 decorated string `.?AVCState@@`.  `research/windows/rtti_win.py` walks the image
-and writes that relation to a pickle; this module loads it and exposes the same
-public surface as `rtti.py`, so `game.py` / `objindex.py` do not need to know
-which build they are talking to:
+and writes that relation; this module loads it and exposes the MSVC RTTI map so
+`game.py` / `objindex.py` can query any C++ class by name:
 
     build() -> {"vtables": {class_name: [vtable_rva, ...]}, "vt": {rva: name}}
 
