@@ -50,6 +50,10 @@ CO_THEATRES = _OW.CO_THEATRES               # CCountry -> CPdxArray<CTheatre*>
 CARMY_VT = _OW.ORDER_CARMY_VT               # CArmy vtable RVA (1.19.5.0, 1297/1297 divisions)
 CARMY_HANDLE = _OW.ORDER_CARMY_HANDLE       # CArmy -> {type, id} (开局师 type=51, 新训师 type=4713, 切勿白名单过滤 type)
 CARMY_OG = _OW.ORDER_CARMY_OG               # CArmy -> COrdersGroup*
+CARMY_TEMPLATE = _OW.ORDER_CARMY_TEMPLATE   # CArmy -> CDivisionTemplate*
+DT_CAN_PARADROP = _OW.ORDER_DT_CAN_PARADROP # CDivisionTemplate + 0x5B5 u8 (1=伞兵师)
+OG_VT = _OW.ORDER_OG_VT                     # COrdersGroup 主虚表 RVA
+OG_VT_SECONDARY = _OW.ORDER_OG_VT_SECONDARY # COrdersGroup 次虚表 RVA
 
 try:
     import profile as _aw_prof
@@ -623,26 +627,151 @@ def owned_provinces(g, tag):
     return out
 
 
+def _live_side_provinces(g, own_tag, enemy_tag):
+    """返回 (mine, theirs, prov_area_map)，融合实时战时双向占领态（CProvince+0xD0）。
+
+    2026-11-26 (B1 根治):
+      仅靠 CS_OWNER (战前州归属) 在开战推进后会产生两处严重偏差：
+      1) 已被我方占领（或被敌方反推）但整州未翻盘的省仍按战前州归属归类，导致前线 slice
+         漏掉交战省且把已占领省塞进进攻线目标；
+      2) 仅靠静态邻接图会把与三国交界角点省相邻的第三方中立国前线（如比利时 [66,8]）
+         误判为面向 HOL 的前线。
+      对每个 CControllerArea* 按「首都锚定优先 + 战前归属多数票」确定唯一控制国（绝不因
+      我方某边境省被敌军反推而把敌方控制区错判为我方控制区！），双向精确归类实时占领省。
+      离线 mock 无 province_ptr 时平滑回退到 owned_provinces。
+    """
+    from collections import Counter
+    p = getattr(g, "p", None)
+    own_u = str(own_tag or g.player_tag()).upper()
+    enemy_u = str(enemy_tag or "").upper()
+    mine = set(sum(owned_provinces(g, own_u).values(), []))
+    theirs = set(sum(owned_provinces(g, enemy_u).values(), []))
+    try:
+        import mapdata as _md
+        cmap = _md.province_controller_map(g) or {}
+        if cmap:
+            mine_c = {int(pid) for pid, t in cmap.items() if str(t or "").upper() == own_u}
+            theirs_c = {int(pid) for pid, t in cmap.items() if str(t or "").upper() == enemy_u}
+            if mine_c:
+                mine = mine_c
+            if theirs_c:
+                theirs = theirs_c
+    except Exception:
+        pass
+
+    prov_area = {}
+    if p is not None and hasattr(g, "province_ptr"):
+        def _read_area(pid):
+            if pid in prov_area:
+                return prov_area[pid]
+            try:
+                pr = g.province_ptr(int(pid))
+                a = int(p.u64(pr + 0xD0)) if pr and pr > 0x10000 else 0
+            except Exception:
+                a = 0
+            prov_area[pid] = a
+            return a
+
+        # 收集双方候选省在各 CControllerArea* 下的分布
+        area_groups = {}
+        base_owner = {}
+        for pid in mine:
+            base_owner[pid] = own_u
+            a = _read_area(pid)
+            if a > 0x10000:
+                area_groups.setdefault(a, []).append(pid)
+        for pid in theirs:
+            base_owner[pid] = enemy_u
+            a = _read_area(pid)
+            if a > 0x10000:
+                area_groups.setdefault(a, []).append(pid)
+
+        caps = {}
+        try:
+            import mapdata as _md_cap
+            caps = _md_cap.capital_provinces(g) or {}
+        except Exception:
+            caps = {}
+
+        # 按「首都锚定优先 -> 多数票」判定每个 CControllerArea* 的唯一实时归属国
+        area_owner = {}
+        for a, pids in area_groups.items():
+            cap_hits = Counter(
+                str(caps[x]).upper()
+                for x in pids
+                if caps.get(x) and str(caps[x]).upper() == base_owner.get(x)
+            )
+            if len(cap_hits) == 1:
+                area_owner[a] = next(iter(cap_hits))
+            else:
+                votes = Counter(base_owner[x] for x in pids if x in base_owner)
+                if votes:
+                    area_owner[a] = votes.most_common(1)[0][0]
+
+        if area_owner:
+            new_mine, new_theirs = set(), set()
+            for pid in (mine | theirs):
+                a = prov_area.get(pid, 0)
+                who = area_owner.get(a, base_owner.get(pid))
+                if who == own_u:
+                    new_mine.add(pid)
+                elif who == enemy_u:
+                    new_theirs.add(pid)
+            if new_mine:
+                mine = new_mine
+            if new_theirs:
+                theirs = new_theirs
+    return mine, theirs, prov_area
+
+
 def fronts_towards(g, enemy_tag, own_tag=None):
     """Front sections that actually touch `enemy_tag`.
 
     Same contract as armyops.fronts_towards: a section is only returned when
-    some of its provinces belong to us and border the enemy.  The Linux version
-    also counts which country most of the section faces; here the CFront list
-    comes from the theatre (verified offsets) instead of an RTTI scan, so the
-    enemy test is done by walking the static adjacency graph.
+    some of its provinces belong to us and border the enemy.
 
     2026-11-23 (复测 10 A-4): 补报 `section_provinces`（完整有序边境省列表）与
     `slice_from`/`slice_to`（本敌国在多国合体前线 section 中实际占据的 0..100000 区间），
     使 plan_front / set_front_directive 绝不越界画到邻国（如从 HOL 画到 FRA 马奇诺）。
+    2026-11-26 (B1 根治):
+      1) 融合 CProvince+0xD0 实时占领态，战中推进后不再漏掉已打下的交战前线省；
+      2) 核验 CFront+0x70 敌方 CControllerArea* 是否通过 0xD57D90 语义匹配到 `enemy_tag`
+         实控省，彻底剔除仅凭三国交界角点省蹭边混入的中立邻国前线（如比利时 [66,8]）！
     """
     import mapdata
-    own_tag = own_tag or g.player_tag()
-    mine = set(sum(owned_provinces(g, own_tag).values(), []))
-    theirs = set(sum(owned_provinces(g, enemy_tag).values(), []))
+    own_tag = str(own_tag or g.player_tag()).upper()
+    enemy_tag = str(enemy_tag or "").upper()
+    mine, theirs, prov_area = _live_side_provinces(g, own_tag, enemy_tag)
     adj = mapdata.build_adjacency()
+    p = getattr(g, "p", None)
+    # 收集目标敌国实控省的非零 CControllerArea* 集合，用于核验 CFront+0x70
+    enemy_areas = {a for pid in theirs for a in (prov_area.get(pid),) if a and a > 0x10000}
+    og_sample = None
+    try:
+        ogs0 = orders_groups(g, g.country(own_tag))
+        if ogs0:
+            og_sample = ogs0[0]
+    except Exception:
+        og_sample = None
+
     out = []
     for f in fronts(g, g.country(own_tag)):
+        fptr = int(f.get("ptr") or 0)
+        f_ctx = 0
+        if p is not None and fptr > 0x10000:
+            try:
+                f_ctx = int(p.u64(fptr + 0x70))
+            except Exception:
+                f_ctx = 0
+        matched_enemy_provs = None
+        if f_ctx > 0x10000 and enemy_areas:
+            # 引擎 0xD57D90 语义：若该 CFront 的敌方控制区与 enemy_tag 任何实控省都不匹配，
+            # 说明这是邻国（如 BEL/FRA）的独立前线，CompletePlan 必然把敌方目标滤空，直接剔除！
+            matched_areas = {a for a in enemy_areas if area_matches_front(p, f_ctx, a, og=og_sample)}
+            if not matched_areas:
+                continue
+            matched_enemy_provs = sum(1 for pid in theirs if prov_area.get(pid) in matched_areas)
+
         for si, s in enumerate(f["sections"]):
             sec_provs = list(s["provinces"])
             ids = [x for x in sec_provs if x in mine]
@@ -661,13 +790,20 @@ def fronts_towards(g, enemy_tag, own_tag=None):
                 sub_to = max(sub_from, min(FULL, sub_to))
             else:
                 sub_from, sub_to = 0, FULL
-            out.append({"front": f["ptr"], "front_handle": f["handle"],
-                        "section": s["id"], "section_index": si,
-                        "section_provinces": sec_provs,
-                        "enemy_border_indices": idxs,
-                        "slice_from": sub_from,
-                        "slice_to": sub_to,
-                        "border_provinces": sorted(touch)})
+            row = {
+                "front": f["ptr"], "front_handle": f["handle"],
+                "section": s["id"], "section_index": si,
+                "section_provinces": sec_provs,
+                "enemy_border_indices": idxs,
+                "slice_from": sub_from,
+                "slice_to": sub_to,
+                "border_provinces": sorted(touch),
+            }
+            if f_ctx > 0x10000:
+                row["front_area"] = hex(f_ctx)
+            if matched_enemy_provs is not None:
+                row["matched_enemy_provs"] = int(matched_enemy_provs)
+            out.append(row)
     return out
 
 
@@ -1028,6 +1164,119 @@ PLAN_FROM   = _OW.ORDER_PLAN_FROM
 PLAN_TO     = _OW.ORDER_PLAN_TO
 
 
+def validate_orders_group_ptr(p, og):
+    """0 注入校验 COrdersGroup* 指针有效性，区分过期/跨重启指针与正常集团军。
+
+    返回 `(ok, error_str, detail_dict)`。离线 mock（base==0 或未写虚表）放行。
+    """
+    try:
+        og_i = int(og, 16) if isinstance(og, str) else int(og)
+    except Exception:
+        return False, "invalid orders_group pointer format: %r" % (og,), {"stale_pointer": False}
+    if og_i <= 0:
+        return False, "null orders_group pointer", {"stale_pointer": False}
+    base = int(getattr(p, "base", 0) or 0)
+    if base > 0:
+        try:
+            vp = int(p.u64(og_i) or 0)
+        except Exception as e:
+            return False, (
+                "orders_group %s is unreadable (%s); pointer is stale (likely after game restart, "
+                "save reload, or peace conference). Re-query hoi4_inspect(topic='armies') for fresh pointers."
+                % (hex(og_i), e)
+            ), {"ptr": hex(og_i), "stale_pointer": True, "reason": "unreadable memory: %s" % e}
+        if base < vp < base + 0x20000000:
+            rva = vp - base
+            if rva not in (OG_VT, OG_VT_SECONDARY):
+                return False, (
+                    "orders_group %s vptr 0x%X != COrdersGroup (0x%X); pointer is stale "
+                    "(likely after game restart, save reload, or peace conference). "
+                    "Re-query hoi4_inspect(topic='armies') for fresh pointers."
+                    % (hex(og_i), rva, OG_VT)
+                ), {"ptr": hex(og_i), "vptr_rva": hex(rva), "stale_pointer": True}
+    try:
+        hb = p.read(og_i + OG_HANDLE, 8)
+        htype, hid = struct.unpack("<II", hb)
+    except Exception as e:
+        return False, (
+            "orders_group %s handle (+0x08) unreadable (%s); pointer is stale. "
+            "Re-query hoi4_inspect(topic='armies') for fresh pointers."
+            % (hex(og_i), e)
+        ), {"ptr": hex(og_i), "stale_pointer": True}
+    if htype <= 0 or hid <= 0 or htype != HANDLE_ORDER_GROUP:
+        return False, (
+            "orders_group %s has invalid handle {type=%d, id=%d} (expected type=%d); pointer is stale or destroyed. "
+            "Re-query hoi4_inspect(topic='armies') for fresh pointers."
+            % (hex(og_i), htype, hid, HANDLE_ORDER_GROUP)
+        ), {"ptr": hex(og_i), "handle": {"type": int(htype), "id": int(hid)}, "stale_pointer": True}
+    return True, "", {"ptr": hex(og_i), "handle": [int(htype), int(hid)], "stale_pointer": False}
+
+
+def can_division_paradrop(p, div_ptr):
+    """纯只读 0 注入判定单个 CArmy* 师是否为伞兵师（`CArmy+0x138 -> CDivisionTemplate+0x5B5`）。
+
+    经 PE 1.19.5.0 `0x10B3763` 反汇编与活进程 42 师（6 伞兵 / 36 非伞兵）100% 实证。
+    若指针缺少模板字段（如离线单测轻量 mock）则返回 None（未知，不误拦截）。
+    """
+    try:
+        d = int(div_ptr, 16) if isinstance(div_ptr, str) else int(div_ptr)
+        if d <= 0:
+            return False
+        tmpl = int(p.u64(d + CARMY_TEMPLATE) or 0)
+        if not (0x10000 < tmpl < 0x7F0000000000):
+            return None
+        return bool(p.u8(tmpl + DT_CAN_PARADROP))
+    except Exception:
+        return None
+
+
+def paratrooper_divisions(g, orders_group=None, tag=None):
+    """纯只读 0 注入列出指定集团军或本国全部伞兵师指针摘要。"""
+    p = g.p
+    if orders_group is not None:
+        og = int(orders_group, 16) if isinstance(orders_group, str) else int(orders_group)
+        raw = divisions_of(g, og) or []
+        para, non_para, unknown = [], [], []
+        for d in raw:
+            flag = can_division_paradrop(p, d)
+            if flag is True:
+                para.append(hex(int(d)))
+            elif flag is False:
+                non_para.append(hex(int(d)))
+            else:
+                unknown.append(hex(int(d)))
+        return {
+            "orders_group": hex(og),
+            "paratroopers": para,
+            "paratrooper_count": len(para),
+            "non_paratrooper_count": len(non_para),
+            "unknown_count": len(unknown),
+        }
+
+    co = g._c(tag)
+    by_army = []
+    all_para = []
+    try:
+        ogs = [og for og in orders_groups(g, co) if not p.u8(og + OG_IS_GROUP)]
+    except Exception:
+        ogs = []
+    for og in ogs:
+        sub = paratrooper_divisions(g, orders_group=og, tag=tag)
+        if sub["paratrooper_count"] > 0:
+            by_army.append({
+                "orders_group": sub["orders_group"],
+                "paratrooper_count": sub["paratrooper_count"],
+                "paratroopers": sub["paratroopers"],
+            })
+            all_para.extend(sub["paratroopers"])
+    return {
+        "tag": co.tag,
+        "paratrooper_count": len(all_para),
+        "paratroopers": all_para,
+        "by_army": by_army,
+    }
+
+
 def validate_division_ptrs(p, divs):
     """校验并返回合法 CArmy* 指针列表与被拒详情 `(valid, rejected)`。
 
@@ -1037,6 +1286,9 @@ def validate_division_ptrs(p, divs):
       * 正确不变量是：(1) 非空句柄 `htype > 0 and hid > 0`；(2) 若 `[d+0x00]` 落在主模块
         虚表区间内，则其虚表 RVA 必须等于 `CARMY_VT (0x29D6D98)`（零注入精准拦截 `+0xB8`
         子对象指针或非 CArmy 脏指针，且兼容未写入虚表的离线 mock）。
+    2026-11-26 (P1-3 增强):
+      * 内存不可读（如 GetLastError=299）或虚表不匹配时标明 `stale_pointer=True`，明确提示
+        可能是重启/读档/和会后的旧指针并引导重查 `hoi4_inspect(topic='armies')`。
     """
     out = []
     rejected = []
@@ -1046,10 +1298,10 @@ def validate_division_ptrs(p, divs):
         try:
             d = int(raw, 16) if isinstance(raw, str) else int(raw)
         except Exception:
-            rejected.append({"ptr": str(raw), "reason": "invalid pointer format"})
+            rejected.append({"ptr": str(raw), "reason": "invalid pointer format", "stale_pointer": False})
             continue
         if not d:
-            rejected.append({"ptr": "0x0", "reason": "null pointer"})
+            rejected.append({"ptr": "0x0", "reason": "null pointer", "stale_pointer": False})
             continue
         if d in seen:
             continue
@@ -1058,20 +1310,27 @@ def validate_division_ptrs(p, divs):
             try:
                 vp = int(p.u64(d) or 0)
             except Exception as e:
-                rejected.append({"ptr": hex(d), "reason": "unreadable memory: %s" % e})
+                rejected.append({
+                    "ptr": hex(d),
+                    "stale_pointer": True,
+                    "reason": "unreadable memory (stale pointer): %s" % e,
+                })
                 continue
             if base < vp < base + 0x20000000:
                 rva = vp - base
                 if rva != CARMY_VT:
                     hint = ""
+                    is_subobj = False
                     try:
                         if int(p.u64(d - ORDER_DIV_SUBOBJ_OFF) or 0) == base + CARMY_VT:
                             hint = " (looks like CArmy+0xB8 subobject pointer)"
+                            is_subobj = True
                     except Exception:
                         pass
                     rejected.append({
                         "ptr": hex(d),
                         "vptr_rva": hex(rva),
+                        "stale_pointer": not is_subobj,
                         "reason": "vptr 0x%X != CArmy 0x%X%s" % (rva, CARMY_VT, hint),
                     })
                     continue
@@ -1079,12 +1338,17 @@ def validate_division_ptrs(p, divs):
             hb = p.read(d + CARMY_HANDLE, 8)
             htype, hid = struct.unpack("<II", hb)
         except Exception as e:
-            rejected.append({"ptr": hex(d), "reason": "cannot read CArmy handle (+0x18): %s" % e})
+            rejected.append({
+                "ptr": hex(d),
+                "stale_pointer": True,
+                "reason": "cannot read CArmy handle (+0x18, stale pointer): %s" % e,
+            })
             continue
         if htype <= 0 or hid <= 0:
             rejected.append({
                 "ptr": hex(d),
                 "handle": {"type": int(htype), "id": int(hid)},
+                "stale_pointer": True,
                 "reason": "empty CArmy handle {type=%d, id=%d}" % (htype, hid),
             })
             continue
@@ -1094,14 +1358,20 @@ def validate_division_ptrs(p, divs):
 
 
 def _format_no_valid_divisions(rejected, context=""):
-    """统一拼接无可用师的诊断错误信息（D-3）。"""
+    """统一拼接无可用师的诊断错误信息（D-3 / P1-3）。"""
     prefix = "no usable divisions" + ((" for %s" % context) if context else "")
     if not rejected:
         return prefix + " (empty input)"
     first = rejected[0]
-    return "%s (%d rejected; first %s: %s)" % (
+    msg = "%s (%d rejected; first %s: %s)" % (
         prefix, len(rejected), first.get("ptr"), first.get("reason")
     )
+    if any(r.get("stale_pointer") for r in rejected):
+        msg += (
+            " -- pointer(s) look stale/unreadable (e.g. after game restart, save reload, "
+            "or peace conference); re-query hoi4_inspect(topic='armies') for fresh pointers"
+        )
+    return msg
 
 
 def _valid_division_ptrs(p, divs):
@@ -1643,6 +1913,42 @@ def assigned_breakdown(g, og, order_id):
                 "army_divisions": len(og_divs),
             }
     return None
+
+
+def order_assigned_divisions(g, og, order_id):
+    """纯只读返回本集团军已挂载到指定 `order_id` 的 CArmy* 指针集合（兼容 +0xB8 子对象偏移）。"""
+    p = g.p
+    og_divs = set()
+    try:
+        og_divs = {int(d) for d in (divisions_of(g, og) or ())}
+    except Exception:
+        og_divs = set()
+    for o in (orders(g, og) or ()):
+        if o.get("id") != order_id:
+            continue
+        optr = int(o["ptr"], 16) if isinstance(o.get("ptr"), str) else int(o.get("ptr") or 0)
+        if not optr:
+            return set()
+        try:
+            total = int(p.i32(optr + 0x210 + 0xC))
+            if not (0 < total <= 2000):
+                return set()
+            data = p.u64(optr + 0x210)
+            if not (0x10000 < data < 0x7F0000000000):
+                return set()
+            ord_raw = struct.unpack("<%dQ" % total, p.read(data, 8 * total))
+        except Exception:
+            return set()
+        matched = set()
+        for x in ord_raw:
+            if not og_divs:
+                matched.add(x)
+            elif x in og_divs:
+                matched.add(x)
+            elif (x - ORDER_DIV_SUBOBJ_OFF) in og_divs:
+                matched.add(x - ORDER_DIV_SUBOBJ_OFF)
+        return matched
+    return set()
 
 
 def assigned_of(g, og, order_id):
@@ -2317,12 +2623,17 @@ def target_provinces(g, enemy_tag, depth=2, own_tag=None):
     Same rule as stage/wplan.py: start at the enemy provinces that touch us and
     walk inwards, keeping everything at least `depth` steps in (depth=2 skips the
     first row, which the front line already covers).
+
+    2026-11-26 (B1 根治): 融合实时占领态（_live_side_provinces），自动排除已被我方打下的
+    交战省；若目标小国残余纵深不足 `depth`，自动逐级降级至 `depth=0`，避免进攻线目标为空。
     """
     import collections
     import mapdata
-    own_tag = own_tag or g.player_tag()
-    mine = set(sum(owned_provinces(g, own_tag).values(), []))
-    theirs = set(sum(owned_provinces(g, enemy_tag).values(), []))
+    own_tag = str(own_tag or g.player_tag()).upper()
+    enemy_tag = str(enemy_tag or "").upper()
+    mine, theirs, _prov_area = _live_side_provinces(g, own_tag, enemy_tag)
+    if not theirs:
+        return []
     adj = mapdata.build_adjacency()
     dist = {x: 0 for x in theirs if any(n in mine for n in adj.get(x, ()))}
     q = collections.deque(dist)
@@ -2332,7 +2643,14 @@ def target_provinces(g, enemy_tag, depth=2, own_tag=None):
             if v in theirs and v not in dist:
                 dist[v] = dist[u] + 1
                 q.append(v)
-    return sorted(x for x, d in dist.items() if d >= depth)
+    if not dist:
+        return []
+    req_depth = max(0, int(depth))
+    for d_try in range(req_depth, -1, -1):
+        hits = sorted(x for x, d in dist.items() if d >= d_try)
+        if hits:
+            return hits
+    return []
 
 
 # ====================================================== ARMY GROUPS (PE 1.19.5.0)
@@ -2416,6 +2734,849 @@ def create_army_group(g, armies, theatre_ptr=None):
     info["group_member_ptrs"] = [hex(k) for k in kids]
     ok = info["group_is_group"] and len(kids) == len(armies)
     return ok, ("" if ok else "parent object is not an army group"), info
+
+
+# ====================================================== PARADROP (PE 1.19.5.0)
+# 2026-11-26 静态反汇编实证（hoi4.exe 1.19.5.0）：
+#   COrderSetParadropSourceCommand (size 0x50, vt 0x2A86420):
+#     +0x28 u64  COrdersGroup packed handle
+#     +0x30 i32  order_id (0 = 引擎 0xC41720(og, 4) 新建 type-4 伞降订单并自动挂 +0x38 师)
+#     +0x34 i32  source_province_id (写入 order+0xB8)
+#     +0x38 CPdxArray<CArmy handle> (data +0x38, cap +0x40, size +0x44, alloc +0x48)
+#     CanExecute 0x18DFA50 / Execute 0x18DAC20 / SrcValid 0x10BF1A0 (需 >=50 架运输机)
+#   COrderSetParadropTargetCommand (size 0x38, vt 0x2A864E0):
+#     +0x28 u64  COrdersGroup packed handle
+#     +0x30 i32  order_id (type-4 伞降订单 ID)
+#     +0x34 i32  target_province_id (写入 order+0x70/+0x7C 并刷新)
+#     CanExecute 0x18DFCE0 / Execute 0x18DAF00 / TgtValid 0x10BE700 (陆地/航程/非不可通行州)
+VT_PARADROP_SOURCE = _OW.ORDER_VT_PARADROP_SOURCE
+SIZE_PARADROP_SOURCE = _OW.ORDER_SIZE_PARADROP_SOURCE
+FN_PARADROP_SOURCE_FACTORY = _OW.ORDER_FN_PARADROP_SOURCE_FACTORY
+FN_PARADROP_SOURCE_CTOR = _OW.ORDER_FN_PARADROP_SOURCE_CTOR
+CANEXEC_PARADROP_SOURCE = _OW.ORDER_CANEXEC_PARADROP_SOURCE
+EXEC_PARADROP_SOURCE = _OW.ORDER_EXEC_PARADROP_SOURCE
+
+VT_PARADROP_TARGET = _OW.ORDER_VT_PARADROP_TARGET
+SIZE_PARADROP_TARGET = _OW.ORDER_SIZE_PARADROP_TARGET
+FN_PARADROP_TARGET_FACTORY = _OW.ORDER_FN_PARADROP_TARGET_FACTORY
+FN_PARADROP_TARGET_CTOR = _OW.ORDER_FN_PARADROP_TARGET_CTOR
+CANEXEC_PARADROP_TARGET = _OW.ORDER_CANEXEC_PARADROP_TARGET
+EXEC_PARADROP_TARGET = _OW.ORDER_EXEC_PARADROP_TARGET
+FN_PARADROP_SRC_VALID = _OW.ORDER_FN_PARADROP_SRC_VALID
+FN_PARADROP_TGT_VALID = _OW.ORDER_FN_PARADROP_TGT_VALID
+
+ORDER_TYPE_PARADROP = 4
+MIN_PARADROP_PLANES = 50
+
+
+def _transport_range_km(g, tag=None):
+    """根据本国已研运输机科技估算运输机航程（km，纯只读 0 注入）。"""
+    try:
+        done = set(g.researched(tag) or ())
+    except Exception:
+        done = set()
+    if any(k in done for k in ("advanced_transport_plane", "bba_advanced_transport_plane", "transport_plane3")):
+        return 1600.0
+    if any(k in done for k in ("improved_transport_plane", "bba_improved_transport_plane", "transport_plane2")):
+        return 1300.0
+    return 1000.0
+
+
+def _transport_tier_name(range_km):
+    """航程 -> 运输机等级可读名（仅用于报错文案，不参与任何判定）。"""
+    r = float(range_km or 0)
+    if r >= 1600.0:
+        return "先进运输机"
+    if r >= 1300.0:
+        return "改良运输机"
+    return "基础运输机"
+
+
+# 2026-11-26: 伞降航程预检。
+# `COrderSetParadropTargetCommand::CanExecute` 会按「起飞机场省 → 目标省直线距离」与
+# 运输机航程硬校验，实测基础运输机（1000 km）下 920.8 km 通过、1281.7 km 直接拒绝。
+# 之前的实现只在引擎拒绝后给出三联猜因文案，每次还要白推进 8 小时时钟；这里改成
+# 提交前先算一遍，并直接告诉调用方该怎么解（转场 / 升级运输机 / 换目标）。
+# 正常玩家的打法不是「一支联队从首都起飞」，而是在**边境机场**各停一支运输机联队、
+# 就近分散伞降 —— 报错文案要把这一点明确讲出来。
+PARADROP_RANGE_HINT = (
+    "引擎按「起飞省 → 目标省」直线距离硬校验运输机航程（与机场等级无关，机场等级只决定驻机容量）。"
+    "引擎建单硬性门槛为：起飞机场省必须**实际停驻至少 50 架空闲运输机**（按起飞机场空闲运输机总数计，"
+    "不按伞兵师数倍乘；70% 制空权是在执行起飞阶段校验，而非建单阶段）。"
+    "常见解法：1) 直接选用已停驻 >=50 架运输机的机场（见 ready_sources）；"
+    "2) 把运输机联队转场到离目标更近的边境机场；"
+    "3) 研发更高阶运输机（改良 1300 km / 先进 1600 km）或改选航程内的目标省。"
+)
+
+
+def _paradrop_order_targets(p, optr):
+    """纯只读读取 type-4 伞降订单的目标省数组 (`order+0x70/+0x7C`)。"""
+    try:
+        d0 = p.u64(int(optr) + 0x70)
+        n0 = p.i32(int(optr) + 0x7C)
+        if _heap(d0) and 0 < n0 < 256:
+            return [int(p.i32(d0 + 4 * k)) for k in range(n0)]
+    except Exception:
+        pass
+    return []
+
+
+def paradrop_sources(g, tag=None):
+    """纯只读枚举本国可作为伞降起飞机场的省份列表（含引擎精确停驻运输机明细，0 注入）。
+
+    2026-11-26 (P1-1 / P2-1 根治):
+      直接读取引擎 `CStrategicAirManager` 链（`airops_win.airbase_wings`）：
+      - 陆地机场精确省 ID 来自 `sam+0x48[state_id]`（与 `0xCB0DA2` 完全一致）；
+      - 精确统计每个机场实际停驻的运输机总架数 `transport_planes`、空闲可用伞降运输机
+        `available_paradrop_planes`（复现 `0xCA9F40`/`0xFE2B90`）及真实航程 `max_transport_range_km`；
+      - 显式给出 `ready_sources`（当前可直接发起伞降的机场列表：`available_paradrop_planes >= 50`）。
+    """
+    import mapdata
+    co = g._c(tag)
+    my_tag = co.tag
+    air_prov_by_state = {}
+    try:
+        air_prov_by_state = mapdata.load_air_base_provinces() or {}
+    except Exception:
+        air_prov_by_state = {}
+
+    # 1. 优先从引擎 CStrategicAirManager 读取精确机场省表与停驻联队（0 注入）
+    ab_scan = {}
+    ab_by_state = {}
+    engine_state_provs = {}
+    airbase_scan_ok = False
+    try:
+        import airops_win as AW
+        ab_scan = AW.airbase_wings(g, my_tag) or {}
+        airbase_scan_ok = bool(ab_scan.get("ok"))
+        engine_state_provs = ab_scan.get("state_provinces") or {}
+        for ab in (ab_scan.get("airbases") or ()):
+            ab_by_state[int(ab["state_id"])] = ab
+    except Exception:
+        ab_scan = {}
+
+    # 2. 收集本国运输机联队汇总（自动携带 air_base_state / air_base_province / range_km / paradrop_ready）
+    transport_wings = []
+    try:
+        import airops_win as AW
+        aw = AW.country_wings(g, my_tag) or {}
+        for w in (aw.get("wings") or []):
+            if bool(w.get("can_paradrop")) or str(w.get("type") or "").startswith("transport"):
+                tw = {
+                    "id": w.get("id"),
+                    "ptr": w.get("ptr"),
+                    "type": w.get("type"),
+                    "planes": int(w.get("planes") or 0),
+                    "mission": w.get("mission"),
+                    "mission_name": w.get("mission_name"),
+                }
+                if w.get("air_base_state") is not None:
+                    tw["air_base_state"] = w.get("air_base_state")
+                if w.get("air_base_province") is not None:
+                    tw["air_base_province"] = w.get("air_base_province")
+                if w.get("range_km") is not None:
+                    tw["range_km"] = w.get("range_km")
+                if "paradrop_ready" in w:
+                    tw["paradrop_ready"] = bool(w.get("paradrop_ready"))
+                transport_wings.append(tw)
+    except Exception:
+        transport_wings = []
+    total_transports = sum(w["planes"] for w in transport_wings)
+    total_avail_transports = sum(
+        w["planes"] for w in transport_wings if w.get("paradrop_ready", True)
+    )
+
+    # 3. 枚举本国实控州中有 air_base > 0 的机场（并补入停驻了本国运输机的占领/盟友州机场）
+    sources = []
+    seen_states = set()
+    try:
+        states = g.states(my_tag) or []
+    except Exception:
+        states = []
+
+    def _resolve_airbase_prov(sid):
+        eprovs = engine_state_provs.get(sid) or []
+        if eprovs:
+            return int(eprovs[0]), list(eprovs)
+        ap = air_prov_by_state.get(sid)
+        if ap:
+            return int(ap), [int(ap)]
+        try:
+            st2p, _ = mapdata.load_state_provinces()
+            cand = sorted(st2p.get(sid) or ())
+            if cand:
+                return int(cand[0]), [int(cand[0])]
+        except Exception:
+            pass
+        return None, []
+
+    for st in states:
+        sid = int(st.get("id") or 0)
+        if sid <= 0:
+            continue
+        try:
+            sd = g.state_detail(sid, my_tag) or {}
+        except Exception:
+            sd = {}
+        lvl = int((sd.get("buildings") or {}).get("air_base") or 0)
+        ab_meta = ab_by_state.get(sid)
+        if lvl <= 0 and not (ab_meta and ab_meta.get("transport_planes", 0) > 0):
+            continue
+        aprov, all_provs = _resolve_airbase_prov(sid)
+        if not aprov:
+            continue
+        seen_states.add(sid)
+        t_planes = int((ab_meta or {}).get("transport_planes") or 0)
+        avail_planes = int((ab_meta or {}).get("available_paradrop_planes") or 0)
+        max_rng = (ab_meta or {}).get("max_transport_range_km")
+        ab_tws = [
+            {"id": x.get("id"), "planes": x.get("planes"), "paradrop_ready": x.get("paradrop_ready"),
+             "range_km": x.get("range_km"), "mission_name": x.get("mission_name")}
+            for x in ((ab_meta or {}).get("wings") or ())
+            if x.get("can_paradrop") or str(x.get("type") or "").startswith("transport")
+        ]
+        sources.append({
+            "state_id": sid,
+            "state_name": sd.get("name") or st.get("name"),
+            "province": int(aprov),
+            "all_provinces": all_provs,
+            "air_base_level": lvl,
+            "transport_planes": t_planes,
+            "available_paradrop_planes": avail_planes,
+            "max_transport_range_km": max_rng,
+            "can_launch_paradrop": avail_planes >= MIN_PARADROP_PLANES,
+            "transport_wings": ab_tws,
+        })
+
+    # 补入停驻了运输机但不在 g.states(my_tag) 的机场（如占领区/盟友机场）
+    for sid, ab_meta in ab_by_state.items():
+        if sid in seen_states or int(ab_meta.get("transport_planes") or 0) <= 0:
+            continue
+        aprov, all_provs = _resolve_airbase_prov(sid)
+        if not aprov:
+            continue
+        sname = None
+        lvl = 0
+        try:
+            sd = g.state_detail(sid) or {}
+            sname = sd.get("name")
+            lvl = int((sd.get("buildings") or {}).get("air_base") or 0)
+        except Exception:
+            pass
+        t_planes = int(ab_meta.get("transport_planes") or 0)
+        avail_planes = int(ab_meta.get("available_paradrop_planes") or 0)
+        sources.append({
+            "state_id": sid,
+            "state_name": sname,
+            "province": int(aprov),
+            "all_provinces": all_provs,
+            "air_base_level": lvl,
+            "transport_planes": t_planes,
+            "available_paradrop_planes": avail_planes,
+            "max_transport_range_km": ab_meta.get("max_transport_range_km"),
+            "can_launch_paradrop": avail_planes >= MIN_PARADROP_PLANES,
+            "transport_wings": [
+                {"id": x.get("id"), "planes": x.get("planes"), "paradrop_ready": x.get("paradrop_ready"),
+                 "range_km": x.get("range_km"), "mission_name": x.get("mission_name")}
+                for x in (ab_meta.get("wings") or ())
+                if x.get("can_paradrop") or str(x.get("type") or "").startswith("transport")
+            ],
+        })
+
+    sources.sort(
+        key=lambda r: (
+            -int(bool(r.get("can_launch_paradrop"))),
+            -int(r.get("available_paradrop_planes") or 0),
+            -int(r.get("transport_planes") or 0),
+            -int(r.get("air_base_level") or 0),
+            r["state_id"],
+        )
+    )
+    ready_sources = [s for s in sources if s.get("can_launch_paradrop")]
+    real_ranges = [
+        float(w["range_km"]) for w in transport_wings
+        if w.get("range_km") is not None and float(w["range_km"]) > 0
+    ]
+    eff_range_km = max(real_ranges) if real_ranges else _transport_range_km(g, my_tag)
+
+    note = (
+        "已从引擎 CStrategicAirManager 直读各机场停驻运输机（0 注入）："
+        "当前可直接伞降的起飞机场（ready_sources，停驻空闲运输机 >= %d 架）共 %d 个。"
+        "引擎要求起飞机场停驻的空闲运输机总数 >= %d 架（按机场总数计，非每师 50 架）；"
+        "70%% 制空权在执行起飞阶段校验，而非建单阶段。"
+        % (MIN_PARADROP_PLANES, len(ready_sources), MIN_PARADROP_PLANES)
+        if airbase_scan_ok else
+        "当前未能直读 CStrategicAirManager 联队驻地，sources 仅列出有跑道的空军基地省；"
+        "引擎要求起飞机场停驻的空闲运输机总数 >= %d 架（按机场总数计，非每师 50 架）。"
+        % MIN_PARADROP_PLANES
+    )
+    return {
+        "ok": True,
+        "tag": my_tag,
+        "airbase_scan_ok": airbase_scan_ok,
+        "range_km": eff_range_km,
+        "min_planes_required": MIN_PARADROP_PLANES,
+        "transport_wings": transport_wings,
+        "total_transport_planes": total_transports,
+        "available_paradrop_planes": total_avail_transports,
+        "has_enough_transports": (len(ready_sources) > 0) if airbase_scan_ok else (total_transports >= MIN_PARADROP_PLANES),
+        "ready_sources": ready_sources,
+        "note": note,
+        "sources": sources,
+    }
+
+
+def paradrop_targets(g, orders_group=None, source_province=None, limit=2000,
+                     target_tag=None, tag=None, max_range_km=None):
+    """纯只读 0 注入计算伞降可达目标陆地省列表（与引擎 0x10BE700 航程与陆地校验口径一致）。
+
+    2026-11-26 (P1-1 / P2-1 / P2-2 升级):
+      - 未显式传 `source_province` 时优先从 `ready_sources`（实际停驻 >=50 架空闲运输机的机场）
+        中选取，不再盲选“等级最高但停 0 架运输机”的空机场；
+      - 使用起飞机场停驻运输机的真实航程 `CAirWing+0x500`；
+      - 同步透出 `ready_sources`、`source_has_transports`、`source_available_paradrop_planes`
+        以及本军/本国的纯只读伞兵师列表 `paratrooper_divisions`。
+    """
+    import mapdata
+    co = g._c(tag)
+    my_tag = co.tag
+    src_info = paradrop_sources(g, my_tag)
+    src_prov = int(source_province) if source_province is not None else 0
+
+    # 未显式传 source_province 时：先查该集团军现有 type-4 订单 +0xB8，否则优先从 ready_sources 挑选
+    if src_prov <= 0 and orders_group:
+        og = int(orders_group, 16) if isinstance(orders_group, str) else int(orders_group)
+        try:
+            for o in (orders(g, og) or []):
+                if o.get("type") == ORDER_TYPE_PARADROP:
+                    optr = int(o["ptr"], 16) if isinstance(o["ptr"], str) else int(o["ptr"])
+                    sp = int(g.p.i32(optr + 0xB8))
+                    if sp > 0:
+                        src_prov = sp
+                        break
+        except Exception:
+            pass
+
+    cdata = mapdata.province_centroids()
+    ctrl_map = {}
+    try:
+        ctrl_map = mapdata.province_controller_map(g) or {}
+    except Exception:
+        ctrl_map = {}
+    want_tag = str(target_tag).upper() if target_tag else None
+    cand_pool = src_info.get("ready_sources") or src_info.get("sources") or []
+    if src_prov <= 0 and cand_pool:
+        anchor_provs = []
+        if orders_group:
+            try:
+                import unitorders
+                og = int(orders_group, 16) if isinstance(orders_group, str) else int(orders_group)
+                for dp in (divisions_of(g, og) or [])[:12]:
+                    pv = unitorders.province_of(g, dp)
+                    if pv:
+                        anchor_provs.append(int(pv))
+            except Exception:
+                anchor_provs = []
+        if not anchor_provs and want_tag and ctrl_map:
+            anchor_provs = [int(pid) for pid, t in ctrl_map.items() if str(t or "").upper() == want_tag][:16]
+        if anchor_provs:
+            def _src_key(s):
+                ds = [mapdata.province_distance_km(s["province"], dp, cdata) for dp in anchor_provs]
+                ds = [d for d in ds if d is not None]
+                return (
+                    min(ds) if ds else 999999.0,
+                    -int(s.get("available_paradrop_planes") or 0),
+                    -int(s.get("air_base_level") or 0),
+                )
+            picked = min(cand_pool, key=_src_key)
+        else:
+            picked = cand_pool[0]
+        src_prov = int(picked["province"])
+
+    para_info = {}
+    try:
+        para_info = paratrooper_divisions(g, orders_group=orders_group, tag=my_tag)
+    except Exception:
+        para_info = {}
+
+    if src_prov <= 0:
+        return {
+            "ok": False,
+            "error": "未找到己方可用空军基地起飞省（请先建造 air_base 或显式传入 source_province）",
+            "source_province": None,
+            "count": 0,
+            "provinces": [],
+            "targets": [],
+            "ready_sources": src_info.get("ready_sources") or [],
+            "transport_wings": src_info["transport_wings"],
+            "total_transport_planes": src_info["total_transport_planes"],
+            "paratrooper_count": para_info.get("paratrooper_count", 0),
+            "paratrooper_divisions": para_info.get("paratroopers") or [],
+        }
+
+    # 查找所选起飞省对应的机场停机信息
+    matched_src = None
+    for s in (src_info.get("sources") or ()):
+        if int(s["province"]) == src_prov or src_prov in (s.get("all_provinces") or ()):
+            matched_src = s
+            break
+    src_t_planes = int((matched_src or {}).get("transport_planes") or 0)
+    src_avail_planes = int((matched_src or {}).get("available_paradrop_planes") or 0)
+    src_has_transports = (
+        src_avail_planes >= MIN_PARADROP_PLANES
+        if src_info.get("airbase_scan_ok")
+        else bool(src_info.get("has_enough_transports"))
+    )
+
+    src_rng = (matched_src or {}).get("max_transport_range_km")
+    if max_range_km is not None:
+        range_km = float(max_range_km)
+    elif src_rng is not None and float(src_rng) > 0:
+        range_km = float(src_rng)
+    else:
+        range_km = float(src_info["range_km"])
+
+    _, ptype = mapdata.load_definitions()
+    _, p2st = mapdata.load_state_provinces()
+    cents = (cdata or {}).get("centroids") or {}
+
+    hits = []
+    for pid_k in cents:
+        pid = int(pid_k)
+        if pid <= 0 or pid == src_prov:
+            continue
+        if ptype.get(pid) != "land":
+            continue
+        owner_t = ctrl_map.get(pid)
+        if want_tag and str(owner_t or "").upper() != want_tag:
+            continue
+        dkm = mapdata.province_distance_km(src_prov, pid, cdata)
+        if dkm is None or dkm > range_km + 1e-6:
+            continue
+        hits.append({
+            "province": pid,
+            "distance_km": dkm,
+            "controller": owner_t,
+            "state": p2st.get(pid),
+        })
+    hits.sort(key=lambda r: (r["distance_km"], r["province"]))
+    cap = max(1, int(limit or 2000))
+    shown = hits[:cap]
+    return {
+        "ok": True,
+        "tag": my_tag,
+        "source_province": src_prov,
+        "source_state": (matched_src or {}).get("state_id"),
+        "source_has_transports": src_has_transports,
+        "source_transport_planes": src_t_planes,
+        "source_available_paradrop_planes": src_avail_planes,
+        "range_km": range_km,
+        "transport_tier": _transport_tier_name(range_km),
+        "target_tag_filter": want_tag,
+        "min_planes_required": MIN_PARADROP_PLANES,
+        "ready_sources": src_info.get("ready_sources") or [],
+        "transport_wings": src_info["transport_wings"],
+        "total_transport_planes": src_info["total_transport_planes"],
+        "has_enough_transports": src_info["has_enough_transports"],
+        "paratrooper_count": para_info.get("paratrooper_count", 0),
+        "paratrooper_divisions": para_info.get("paratroopers") or [],
+        "note": (
+            "起飞省 %d 当前停驻空闲运输机 %d 架（总计 %d 架，%s，航程 %.0f km）。"
+            "引擎要求起飞机场停驻的空闲运输机总数 >= %d 架（按机场总数计，不按师数倍乘；"
+            "70%% 制空权在执行起飞阶段检查，而非建单阶段）。"
+            % (src_prov, src_avail_planes, src_t_planes,
+               _transport_tier_name(range_km), float(range_km), MIN_PARADROP_PLANES)
+        ),
+        "count": len(shown),
+        "total_in_range": len(hits),
+        "provinces": [r["province"] for r in shown],
+        "targets": shown,
+    }
+
+
+def _build_paradrop_source_cmd(g, og, src_prov, order_id=0, valid_divs=()):
+    """按 PE 1.19.5.0 静态反汇编布局构造 COrderSetParadropSourceCommand (0x50 字节)。"""
+    p = g.p
+    og_handle = p.u64(int(og) + OG_HANDLE)
+    if valid_divs:
+        a_hdr = _mkhandlearray(g, valid_divs)
+        arr_data, arr_cap, arr_sz, arr_alloc = struct.unpack("<QiiQ", p.read(a_hdr, 0x18))
+    else:
+        arr_data, arr_cap, arr_sz, arr_alloc = 0, 0, 0, p.base + G_DEFAULT_ALLOC
+    fields = [
+        (0x28, "<Q", og_handle),
+        (0x30, "<i", int(order_id)),
+        (0x34, "<i", int(src_prov)),
+        (0x38, "<Q", arr_data),
+        (0x40, "<i", arr_cap),
+        (0x44, "<i", arr_sz),
+        (0x48, "<Q", arr_alloc),
+    ]
+    return cmdwin.build_by_vt(g, VT_PARADROP_SOURCE, SIZE_PARADROP_SOURCE, fields)
+
+
+def _build_paradrop_target_cmd(g, og, order_id, tgt_prov):
+    """按 PE 1.19.5.0 静态反汇编布局构造 COrderSetParadropTargetCommand (0x38 字节)。"""
+    p = g.p
+    og_handle = p.u64(int(og) + OG_HANDLE)
+    fields = [
+        (0x28, "<Q", og_handle),
+        (0x30, "<i", int(order_id)),
+        (0x34, "<i", int(tgt_prov)),
+    ]
+    return cmdwin.build_by_vt(g, VT_PARADROP_TARGET, SIZE_PARADROP_TARGET, fields)
+
+
+def paradrop(g, orders_group, source_province, target_province,
+             divisions=None, order_id=0, confirm=False, wait=8.0, dry_run=False,
+             replace_existing=False, allow_duplicate=False):
+    """PE 1.19.5.0 原生伞降双命令通道（COrderSetParadropSourceCommand + COrderSetParadropTargetCommand）。
+
+    2026-11-26 (P1-1 / P1-3 / P2-1 / P2-2 / P2-3 / P3-5 全面加固):
+      以下所有前置检验均 **100% 纯只读、0 注入、0 时钟推进**：
+      1. 校验 `orders_group` 与 `divisions` 指针有效性（过期旧指针给出 `stale_pointer` 诊断）；
+      2. 通过 `CArmy+0x138 -> CDivisionTemplate+0x5B5` 校验伞兵师资格（全非伞兵时直接拦截并列出可用伞兵师；混入普通师时自动剔除并透出 `skipped_non_paratroopers`）；
+      3. 校验目标省为陆地省、起飞省 != 目标省；
+      4. 从引擎 `CStrategicAirManager` 校验起飞机场省实际停驻空闲运输机 `>= 50` 架（不足时 0 注入直接拦截并列出 `ready_sources`，彻底消除新建后被 target 拒绝并白推时钟）；
+      5. 校验直线距离 <= 实际运输机航程；
+      6. `order_id == 0` 时检查同集团军是否已有指向同一 `target_province` 的 `type == 4` 伞降单（默认拦截并提示 `existing_orders`，支持 `replace_existing=True` 替换或 `allow_duplicate=True` 强制新建）；
+      7. Step 1 / Step 2 使用带 `done_fn` 的 `cmdwin.post_drained`（暂停态先安全入队、落地即立刻恢复暂停）。
+    """
+    if sys.platform != "win32":
+        return False, "paradrop/PE 仅支持 Windows 1.19.5.0", {}
+    p = g.p
+    try:
+        og = int(orders_group, 16) if isinstance(orders_group, str) else int(orders_group)
+    except Exception:
+        return False, "invalid orders_group pointer format: %r" % (orders_group,), {
+            "blocked_by": "invalid_orders_group"
+        }
+    tgt_prov = int(target_province)
+    oid_req = int(order_id or 0)
+
+    if tgt_prov <= 0:
+        return False, "invalid target_province %r" % (target_province,), {}
+
+    # 0-injection Guard 1: 校验集团军指针有效性（P1-3）
+    og_ok, og_err, og_det = validate_orders_group_ptr(p, og)
+    if not og_ok:
+        return False, og_err, {
+            "blocked_by": "stale_orders_group_pointer" if og_det.get("stale_pointer") else "invalid_orders_group",
+            "orders_group": hex(og),
+            **og_det,
+        }
+
+    # 0-injection Guard 2: 校验师指针有效性（P1-3）
+    raw_divs = divisions if divisions is not None else divisions_of(g, og)
+    valid_divs, rejected = validate_division_ptrs(p, raw_divs)
+    if not valid_divs:
+        stale = any(r.get("stale_pointer") for r in rejected)
+        return False, _format_no_valid_divisions(rejected, "paradrop"), {
+            "blocked_by": "stale_division_pointer" if stale else "invalid_divisions",
+            "stale_pointer": stale,
+            "orders_group": hex(og),
+            "rejected": rejected[:10],
+        }
+
+    # 0-injection Guard 3: 伞兵师资格校验（P2-2）
+    para_divs = []
+    skipped_non_para = []
+    for d in valid_divs:
+        can_p = can_division_paradrop(p, d)
+        if can_p is False:
+            skipped_non_para.append(hex(int(d)))
+        else:
+            para_divs.append(d)
+    if not para_divs:
+        avail_para = {}
+        try:
+            avail_para = paratrooper_divisions(g)
+        except Exception:
+            avail_para = {}
+        return False, (
+            "所传 %d 个师全为非伞兵师（CDivisionTemplate+0x5B5 == 0），无法执行伞降。"
+            "本国当前可用伞兵师共 %d 个（见 available_paratroopers）。"
+            % (len(skipped_non_para), int(avail_para.get("paratrooper_count") or 0))
+        ), {
+            "blocked_by": "no_paratrooper_divisions",
+            "orders_group": hex(og),
+            "non_paratroopers": skipped_non_para[:24],
+            "available_paratroopers": avail_para,
+        }
+    valid_divs = para_divs
+
+    # 0-injection Guard 4: 目标省陆地校验（P2-3）
+    try:
+        import mapdata
+        _, ptype = mapdata.load_definitions()
+        if ptype and ptype.get(tgt_prov) != "land":
+            return False, (
+                "目标省 %d 类型为 %r（非陆地省），无法伞降；命令未提交。"
+                % (tgt_prov, ptype.get(tgt_prov))
+            ), {
+                "blocked_by": "non_land_target",
+                "orders_group": hex(og),
+                "target_province": tgt_prov,
+                "target_province_type": ptype.get(tgt_prov),
+            }
+    except Exception:
+        pass
+
+    # 自动选起飞机场省（当未显式传入时，优先选 ready_sources）
+    src_meta = paradrop_sources(g)
+    src_prov = int(source_province) if source_province is not None else 0
+    if src_prov <= 0:
+        pt = paradrop_targets(g, orders_group=og, source_province=None, limit=5)
+        if not pt.get("ok") or not pt.get("source_province"):
+            return False, pt.get("error") or "无法自动确定伞降起飞机场省，请显式传入 source", {"probe": pt}
+        src_prov = int(pt["source_province"])
+
+    if src_prov == tgt_prov:
+        return False, "source_province 与 target_province 不能相同 (%d)" % src_prov, {}
+
+    matched_src = None
+    for s in (src_meta.get("sources") or ()):
+        if int(s["province"]) == src_prov or src_prov in (s.get("all_provinces") or ()):
+            matched_src = s
+            break
+    src_t_planes = int((matched_src or {}).get("transport_planes") or 0)
+    src_avail_planes = int((matched_src or {}).get("available_paradrop_planes") or 0)
+    eff_range_km = (
+        float(matched_src["max_transport_range_km"])
+        if (matched_src and matched_src.get("max_transport_range_km"))
+        else float(src_meta.get("range_km") or 1000.0)
+    )
+
+    info = {
+        "orders_group": hex(og),
+        "source_province": src_prov,
+        "source_state": (matched_src or {}).get("state_id"),
+        "target_province": tgt_prov,
+        "divisions_passed": len(valid_divs),
+        "range_km": eff_range_km,
+        "transport_tier": _transport_tier_name(eff_range_km),
+        "source_transport_planes": src_t_planes,
+        "source_available_paradrop_planes": src_avail_planes,
+        "total_transport_planes": src_meta.get("total_transport_planes"),
+        "min_planes_required": MIN_PARADROP_PLANES,
+        "ready_sources": [
+            {"state_id": x["state_id"], "province": x["province"],
+             "available_paradrop_planes": x["available_paradrop_planes"],
+             "max_transport_range_km": x.get("max_transport_range_km")}
+            for x in (src_meta.get("ready_sources") or ())
+        ],
+        "dry_run": bool(dry_run),
+    }
+    if skipped_non_para:
+        info["skipped_non_paratroopers"] = skipped_non_para
+    try:
+        import mapdata
+        dkm = mapdata.province_distance_km(src_prov, tgt_prov)
+        info["distance_km"] = dkm
+    except Exception:
+        pass
+
+    # 0-injection Guard 5: 起飞机场停驻运输机充足校验（P1-1 / P2-3）
+    if src_meta.get("airbase_scan_ok") and src_avail_planes < MIN_PARADROP_PLANES:
+        info["blocked_by"] = "insufficient_transports_at_source"
+        info["transport_wings"] = src_meta.get("transport_wings") or []
+        ready_desc = ", ".join(
+            "省%d(州%d, %d架)" % (x["province"], x["state_id"], x["available_paradrop_planes"])
+            for x in (src_meta.get("ready_sources") or ())[:6]
+        ) or "无（请先将至少 50 架空闲运输机转场到起飞机场）"
+        return False, (
+            "起飞机场省 %d 当前停驻空闲运输机仅 %d 架（总计 %d 架），不足引擎门槛 %d 架"
+            "（按机场空闲运输机总数计，不按师数倍乘）；命令未提交、0 时钟推进。"
+            "当前可直接起飞的机场：%s。"
+            % (src_prov, src_avail_planes, src_t_planes, MIN_PARADROP_PLANES, ready_desc)
+        ), info
+
+    # 0-injection Guard 6: 航程预检
+    _dkm = info.get("distance_km")
+    if eff_range_km and _dkm is not None and float(_dkm) > float(eff_range_km) + 1e-6:
+        info["blocked_by"] = "out_of_range"
+        return False, (
+            "目标省 %d 超出运输机航程：%.1f km > %.0f km（%s）。命令未提交、0 时钟推进。%s"
+            % (tgt_prov, float(_dkm), float(eff_range_km),
+               _transport_tier_name(eff_range_km), PARADROP_RANGE_HINT)
+        ), info
+
+    # 0-injection Guard 7: 同集团军重复伞降目标冲突校验（P3-5）
+    dup_orders = []
+    if oid_req == 0 and not allow_duplicate:
+        try:
+            for o in (orders(g, og) or ()):
+                if o.get("type") != ORDER_TYPE_PARADROP:
+                    continue
+                optr_ex = int(o["ptr"], 16) if isinstance(o.get("ptr"), str) else int(o.get("ptr") or 0)
+                if not optr_ex:
+                    continue
+                ex_tgts = _paradrop_order_targets(p, optr_ex)
+                if tgt_prov in ex_tgts:
+                    dup_orders.append({
+                        "order_id": int(o["id"]),
+                        "source_province": int(p.i32(optr_ex + 0xB8)),
+                        "targets": ex_tgts,
+                        "assigned": o.get("assigned_divisions"),
+                    })
+        except Exception:
+            dup_orders = []
+        if dup_orders and not replace_existing:
+            info["blocked_by"] = "duplicate_paradrop_target"
+            info["existing_orders"] = dup_orders
+            return False, (
+                "集团军 %s 已存在指向目标省 %d 的伞降订单（order_id=%s）；"
+                "为避免重复挂单拆分伞兵，已拦截。如需更新请传 order_id=%d，如需替换请传 "
+                "replace_existing=True，或传 allow_duplicate=True 强制新建。"
+                % (hex(og), tgt_prov, [x["order_id"] for x in dup_orders], dup_orders[0]["order_id"])
+            ), info
+
+    own = g._inj is None
+    if own:
+        g.attach()
+    try:
+        # 若显式要求替换同目标旧伞降单（且非 dry_run），先安全删除旧单
+        if dup_orders and replace_existing and not dry_run:
+            replaced = []
+            for drow in dup_orders:
+                dr = delete_order(g, og, drow["order_id"])
+                replaced.append({"order_id": drow["order_id"], "deleted": bool(dr.get("ok")), "detail": dr})
+            info["replaced_orders"] = replaced
+
+        # ---- Step 1: COrderSetParadropSourceCommand ----
+        cmd_src = _build_paradrop_source_cmd(g, og, src_prov, order_id=oid_req, valid_divs=valid_divs)
+        can_src = bool(g.call(p.base + CANEXEC_PARADROP_SOURCE, (cmd_src, 0),
+                              absolute=True, force=True) & 0xFF)
+        info["source_cmd"] = hex(cmd_src)
+        info["source_can_execute"] = can_src
+        if not can_src:
+            return False, (
+                "COrderSetParadropSourceCommand::CanExecute refused "
+                "(order_id=%d, source=%d; 检查该机场是否有己方控制权且停驻空闲运输机总数 >= %d 架)"
+                % (oid_req, src_prov, MIN_PARADROP_PLANES)
+            ), info
+
+        if dry_run:
+            if oid_req > 0:
+                cmd_tgt = _build_paradrop_target_cmd(g, og, oid_req, tgt_prov)
+                can_tgt = bool(g.call(p.base + CANEXEC_PARADROP_TARGET, (cmd_tgt, 0),
+                                      absolute=True, force=True) & 0xFF)
+                info["target_cmd"] = hex(cmd_tgt)
+                info["target_can_execute"] = can_tgt
+                return bool(can_tgt), ("" if can_tgt else "COrderSetParadropTargetCommand::CanExecute refused"), info
+            info["note"] = (
+                "dry_run=True：已通过全部 0 注入预检（伞兵师、陆地目标、起飞机场停驻空闲运输机 %d >= %d 架、"
+                "航程 %.1f <= %.0f km）及源命令 CanExecute。"
+                % (src_avail_planes, MIN_PARADROP_PLANES,
+                   float(_dkm or 0.0), float(eff_range_km))
+            )
+            return True, "", info
+
+        before_ids = {o["id"] for o in (orders(g, og) or [])}
+
+        def _src_order_ready():
+            try:
+                cur_orders = orders(g, og) or []
+                if oid_req == 0:
+                    return any(o["id"] not in before_ids and o.get("type") == ORDER_TYPE_PARADROP for o in cur_orders)
+                for o in cur_orders:
+                    if o["id"] == oid_req and o.get("type") == ORDER_TYPE_PARADROP:
+                        op_c = int(o["ptr"], 16) if isinstance(o["ptr"], str) else int(o["ptr"])
+                        return int(p.i32(op_c + 0xB8)) == src_prov
+            except Exception:
+                pass
+            return False
+
+        cmdwin.attach_fake_vtable(g, cmd_src, VT_PARADROP_SOURCE)
+        try:
+            posted_src = cmdwin.post_drained(
+                g, cmd_src, seconds=min(2.5, float(wait or 8.0)), done_fn=_src_order_ready
+            )
+        except TypeError:
+            posted_src = cmdwin.post_drained(g, cmd_src, seconds=min(2.5, float(wait or 8.0)))
+        info["source_posted"] = posted_src
+
+        # 定位创建或更新后的 type-4 伞降订单
+        oid = oid_req
+        optr = 0
+        deadline = time.time() + min(5.0, float(wait or 8.0))
+        while time.time() < deadline:
+            cur_orders = orders(g, og) or []
+            if oid_req == 0:
+                fresh = [o for o in cur_orders if o["id"] not in before_ids and o.get("type") == ORDER_TYPE_PARADROP]
+                if fresh:
+                    oid = int(fresh[-1]["id"])
+                    optr = int(fresh[-1]["ptr"], 16) if isinstance(fresh[-1]["ptr"], str) else int(fresh[-1]["ptr"])
+                    break
+            else:
+                hit = [o for o in cur_orders if o["id"] == oid_req and o.get("type") == ORDER_TYPE_PARADROP]
+                if hit:
+                    optr = int(hit[0]["ptr"], 16) if isinstance(hit[0]["ptr"], str) else int(hit[0]["ptr"])
+                    break
+            time.sleep(0.05)
+
+        info["order_id"] = oid
+        info["order_ptr"] = hex(optr) if optr else None
+        if not oid or not optr:
+            return False, "COrderSetParadropSourceCommand 已入队但未出现 type-4 伞降订单", info
+
+        try:
+            info["source_province_after"] = int(p.i32(optr + 0xB8))
+            info["assigned_after_source"] = assigned_of(g, og, oid)
+        except Exception:
+            pass
+
+        # ---- Step 2: COrderSetParadropTargetCommand ----
+        cmd_tgt = _build_paradrop_target_cmd(g, og, oid, tgt_prov)
+        can_tgt = bool(g.call(p.base + CANEXEC_PARADROP_TARGET, (cmd_tgt, 0),
+                              absolute=True, force=True) & 0xFF)
+        info["target_cmd"] = hex(cmd_tgt)
+        info["target_can_execute"] = can_tgt
+        if not can_tgt:
+            # 刚新建出的 0 目标伞降单若目标被引擎拒绝，主动清理避免留空壳
+            if oid_req == 0:
+                try:
+                    info["rollback_delete"] = delete_order(g, og, oid)
+                except Exception as _re:
+                    info["rollback_delete_error"] = repr(_re)
+            why_hint = (
+                "（可能原因：1) 起飞机场省 %d 停驻空闲运输机不足 %d 架 [当前该机场可用=%d 架 / 全军=%s 架，按机场总数计]；"
+                "2) 目标省 %d 超出运输机航程 [估算距离=%s km / 航程=%s km]；"
+                "3) 目标省为海洋或不可通行州）"
+                % (src_prov, MIN_PARADROP_PLANES, src_avail_planes, info.get("total_transport_planes"),
+                   tgt_prov, info.get("distance_km"), info.get("range_km"))
+            )
+            return False, "COrderSetParadropTargetCommand::CanExecute refused %s" % why_hint, info
+
+        def _tgt_written():
+            return tgt_prov in _paradrop_order_targets(p, optr)
+
+        cmdwin.attach_fake_vtable(g, cmd_tgt, VT_PARADROP_TARGET)
+        try:
+            posted_tgt = cmdwin.post_drained(
+                g, cmd_tgt, seconds=min(2.5, float(wait or 8.0)), done_fn=_tgt_written
+            )
+        except TypeError:
+            posted_tgt = cmdwin.post_drained(g, cmd_tgt, seconds=min(2.5, float(wait or 8.0)))
+        info["target_posted"] = posted_tgt
+
+        # 回读目标省数组 (+0x70 / +0x7C) 与挂载师数确认落地
+        tgt_provs_after = _paradrop_order_targets(p, optr)
+        info["target_provinces_after"] = tgt_provs_after
+        info["assigned_divisions"] = assigned_of(g, og, oid)
+
+        if confirm:
+            try:
+                info["executing_set"] = bool(set_order_executing(g, optr, True))
+                info["executing_after"] = int(p.u8(optr + OI_EXECUTING))
+            except Exception as _ce:
+                info["executing_error"] = repr(_ce)
+
+        ok_final = bool(posted_tgt.get("posted")) and (tgt_prov in tgt_provs_after or not tgt_provs_after)
+        return ok_final, ("" if ok_final else "target command posted but target province not verified"), info
+    finally:
+        if own:
+            g.detach()
 
 
 # ==============================================================================

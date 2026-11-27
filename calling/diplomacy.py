@@ -370,7 +370,46 @@ def _ensure_tags_map(g):
     return _resolve
 
 
-def _decode_wargoal_obj(p, w, inv_types, resolve_tag):
+def _target_country_exists(g, target_tag, owner_tag=None):
+    """O(1) 纯只读判定目标国家是否仍然存在（拥有 >= 1 州）；离线未填 CO_STATES 的 mock 保守返回 True。
+
+    2026-11-26 (长跑 §6 根治): 和会完全吞并某国（如 HOL）后，CDiplomacyStatus+0x80
+    可能残留指向已灭亡国家（0 州）的旧 CWarGoal*；不剔除会导致 CB_AVAILABLE 红点长期霸屏。
+    物理不变量防误杀：先核验发起国自身 CO_STATES 计数 > 0，仅在 CO_STATES 布局可读且有效时
+    才判定目标国 0 州为已灭亡（离线轻量 mock 内存未填 CO_STATES 时 owner 计数也为 0，直接保守放行）。
+    """
+    if not target_tag:
+        return True
+    p = getattr(g, "p", None)
+    if p is None or not hasattr(g, "country"):
+        return True
+    try:
+        from game import _count, CO_STATES
+        # 先用发起国（或玩家国）验证 CO_STATES 在当前进程/桩中是否真实可读且非空
+        ref_tag = owner_tag
+        if not ref_tag and hasattr(g, "player_tag"):
+            try:
+                ref_tag = g.player_tag()
+            except Exception:
+                ref_tag = None
+        if ref_tag:
+            rc = g.country(ref_tag)
+            rptr = getattr(rc, "ptr", None)
+            if not rptr or not (0x10000 < int(rptr) < 0x7F0000000000):
+                return True
+            if int(_count(p, int(rptr), CO_STATES)) <= 0:
+                return True
+        c = g.country(target_tag)
+        cptr = getattr(c, "ptr", None)
+        if not cptr or not (0x10000 < int(cptr) < 0x7F0000000000):
+            return True
+        cnt = int(_count(p, int(cptr), CO_STATES))
+        return cnt > 0
+    except Exception:
+        return True
+
+
+def _decode_wargoal_obj(p, w, inv_types, resolve_tag, exists_fn=None):
     """把单个 CWarGoal* 指针解码为标准化 dict。"""
     wid = p.u64(w + WG_ID)
     owner = p.i32(w + WG_OWNER)
@@ -379,6 +418,7 @@ def _decode_wargoal_obj(p, w, inv_types, resolve_tag):
     tname = inv_types.get(tptr)
     ow_tag = resolve_tag(owner)
     tg_tag = resolve_tag(target)
+    tgt_exists = True if (exists_fn is None or not tg_tag) else bool(exists_fn(tg_tag))
     rec = {
         "ptr": hex(w),
         "id": wid,
@@ -387,11 +427,15 @@ def _decode_wargoal_obj(p, w, inv_types, resolve_tag):
         "owner_tag": ow_tag,
         "target_tag": tg_tag,
         "wargoal": tname,
+        "target_exists": tgt_exists,
     }
     rec["valid"] = (
         bool(wid) and tname is not None
         and 0 <= owner < 4096 and 0 <= target < 4096
+        and tgt_exists
     )
+    if not tgt_exists:
+        rec["invalid_reason"] = "target_annexed"
     rec["tags_resolved"] = bool(ow_tag and tg_tag)
     return rec
 
@@ -416,6 +460,12 @@ def country_wargoals_direct(g, tag=None, valid_only=True):
     except Exception:
         types = {}
     inv = {v: k for k, v in (types or {}).items()}
+    exists_cache = {}
+
+    def _exists(t):
+        if t not in exists_cache:
+            exists_cache[t] = _target_country_exists(g, t, owner_tag=tag)
+        return exists_cache[t]
 
     if tag:
         try:
@@ -450,7 +500,7 @@ def country_wargoals_direct(g, tag=None, valid_only=True):
                 continue
             seen.add(w)
             try:
-                rec = _decode_wargoal_obj(p, w, inv, resolve_tag)
+                rec = _decode_wargoal_obj(p, w, inv, resolve_tag, exists_fn=_exists)
                 rec["source"] = "CDiplomacyStatus+0x80"
                 if valid_only and not rec["valid"]:
                     continue
@@ -493,12 +543,16 @@ def wargoals(g, tag=None, deep=None, valid_only=False):
                     hits.append(a)
         except Exception:
             pass
+    exists_cache = {}
     for w in hits:
         if w in seen:
             continue
         seen.add(w)
         try:
-            rec = _decode_wargoal_obj(p, w, inv, resolve_tag)
+            rec = _decode_wargoal_obj(
+                p, w, inv, resolve_tag,
+                exists_fn=lambda t: exists_cache.setdefault(t, _target_country_exists(g, t)),
+            )
             if want_owner is not None and rec["owner_index"] != want_owner:
                 continue
             if valid_only and not rec["valid"]:
@@ -703,26 +757,158 @@ def _add_game_days(g, days):
 
 
 # ---------------------------------------------------------------- 工期模型
-# 1.19.4.1 游戏自己的数据：common/wargoals/00_invasion.txt
+# 1.19.5.0 游戏原生数据：common/wargoals/00_invasion.txt
 #   take_state = { generate_base_cost = 200  generate_per_state_cost = 50 }
-# 加上 NDiplomacy 的常数：
-#   WARGOAL_JUSTIFY_TENSION_FROM_PRODUCTION = 30.0   （生产规模满额时 +30 天）
+# NDiplomacy 常数（common/defines/00_defines.lua）：
 #   WARGOAL_PER_JUSTIFY_AND_WAR_COST_FACTOR = 1.5    （每多一个同存正当化/交战对象 x1.5）
 #   BASE_GENERATE_WARGOAL_DAILY_PP          = 0.2    （每天烧 0.2 PP）
 #   POLITICAL_POWER_UPPER_CAP               = 2000.0
-# 这个模型在 2026-11-08 的两个实测点上完全吻合：HOL[35] = 230 天、BEL[6] = 345 天。
+# 注意（2026-11-26 A7 核证）：
+#   defines 中的 WARGOAL_JUSTIFY_TENSION_FROM_PRODUCTION = 30.0 是世界紧张度增长系数，
+#   不是正当化天数！旧代码误将其当作 +30 天加进基础工期，导致单州无并发高估 30 天 / 6 PP
+#   （实机 1936 GER->HOL take_state 真实为 200 天 / 40 PP，非 230 天 / 46 PP）。
 WARGOAL_BASE_COST = 200.0
 WARGOAL_PER_STATE_COST = 50.0
-WARGOAL_PRODUCTION_TERM = 30.0
+WARGOAL_PRODUCTION_TERM = 0.0   # 保留符号兼容外部引用；非天数项，已归零
 WARGOAL_PER_COUNTRY = 1.5
 WARGOAL_DAILY_PP = 0.2
 POLITICAL_POWER_CAP = 2000.0
 
+# 2026-11-26 (A1 PE 1.19.5.0 反汇编实锤 O(1) 根治):
+# 反汇编 CIsJustifyingWargoalAgainst (0x3f9490) -> CDiplomacyStatus::IsJustifyingWargoalAgainst (0xda4a10)
+# 证实引擎在每个国家直接维护两处 O(1) 数组，无需扫描 3.8 GB 堆即可获知正当化活动：
+#   1) CCountry + 0xF88 (CDiplomacyStatus*) + 0xE0 -> CPdxArray<CCountryTag> (data +0xE0, cap +0xE8, size +0xEC)
+#   2) CCountry + 0xF90 (CPoliticalStatus*) + 0x08 -> CPdxArray<CTimedActivity*> (data +0x08, cap +0x10, size +0x14)
+WIN_CO_POL_STATUS       = 0xF90
+WIN_DS_JUSTIFYING_TAGS  = 0xE0
+WIN_PS_TIMED_ACTIVITIES = 0x08
+
 
 def _estimate_days(n_states, n_concurrent):
-    base = (WARGOAL_BASE_COST + WARGOAL_PRODUCTION_TERM
-            + WARGOAL_PER_STATE_COST * max(0, n_states - 1))
-    return round(base * (WARGOAL_PER_COUNTRY ** max(0, n_concurrent)), 1)
+    base = WARGOAL_BASE_COST + WARGOAL_PER_STATE_COST * max(0, int(n_states) - 1)
+    return round(base * (WARGOAL_PER_COUNTRY ** max(0, int(n_concurrent))), 1)
+
+
+def _win_direct_timed_activities(g, want=None):
+    """Windows PE 纯只读 O(1) 读 CPoliticalStatus+0x08 与 CDiplomacyStatus+0xE0。
+
+    返回 (ptrs, has_justifying_flag, direct_ok)：
+      - ptrs: [(owner_tag, activity_ptr), ...]
+      - has_justifying_flag: 任意被检国家 CDiplomacyStatus+0xE0 的 size > 0
+      - direct_ok: 是否成功通过引擎结构体完成校验（离线 mock 或无效内存时返回 False 以走兜底）
+    """
+    p = getattr(g, "p", None)
+    if p is None or not hasattr(g, "country"):
+        return [], False, False
+    if want:
+        tags = [str(want).upper()]
+    else:
+        try:
+            tags = list(g.tags() or ())
+        except Exception:
+            return [], False, False
+    if not tags:
+        return [], False, False
+
+    ptrs = []
+    seen = set()
+    has_flag = False
+    checked = 0
+
+    # 批量扫描多国时优先使用 fastmem.read_batch（两趟批读覆盖 439 国，<1ms）
+    if not want and len(tags) > 8 and hasattr(g, "_load_tags") and hasattr(g, "country_ptrs"):
+        try:
+            import fastmem as _fm
+            g._load_tags()
+            cptrs = g.country_ptrs() or []
+            gtags = getattr(g, "_tags", None) or []
+            t2i = getattr(g, "_tag2idx", None) or []
+            pairs = []
+            for tid, t in enumerate(gtags):
+                if not t or t == "---" or tid >= len(t2i):
+                    continue
+                ci = t2i[tid]
+                if 0 <= ci < len(cptrs):
+                    cp = int(cptrs[ci])
+                    if 0x10000 < cp < 0x7F0000000000:
+                        pairs.append((t, cp))
+            if pairs:
+                # WIN_CO_DIPLO_STATUS (0xF88) 与 WIN_CO_POL_STATUS (0xF90) 紧邻，一次读 16B
+                hdrs = _fm.read_batch(p, [(cp + WIN_CO_DIPLO_STATUS, 16) for _, cp in pairs])
+                if hdrs is not None and len(hdrs) == len(pairs):
+                    valid_sub = []
+                    sub_reqs = []
+                    for (t, _cp), raw in zip(pairs, hdrs):
+                        if not raw or len(raw) < 16:
+                            continue
+                        dip, pol = struct.unpack("<QQ", raw)
+                        if 0x10000 < dip < 0x7F0000000000 and 0x10000 < pol < 0x7F0000000000:
+                            valid_sub.append(t)
+                            # dip+0xE8: (j_cap, j_sz) 8B; pol+0x08: (a_data, a_cap, a_sz) 16B
+                            sub_reqs.append((dip + WIN_DS_JUSTIFYING_TAGS + 0x08, 8))
+                            sub_reqs.append((pol + WIN_PS_TIMED_ACTIVITIES, 16))
+                    sub_raw = _fm.read_batch(p, sub_reqs) if sub_reqs else []
+                    if sub_raw is not None and len(sub_raw) == len(sub_reqs):
+                        for idx, t in enumerate(valid_sub):
+                            j_raw = sub_raw[idx * 2]
+                            a_raw = sub_raw[idx * 2 + 1]
+                            if not j_raw or len(j_raw) < 8 or not a_raw or len(a_raw) < 16:
+                                continue
+                            j_cap, j_sz = struct.unpack("<ii", j_raw)
+                            a_data, a_cap, a_sz = struct.unpack("<Qii", a_raw)
+                            if not (0 <= j_sz <= 64 and 0 <= j_cap <= 4096 and j_sz <= max(j_cap, 0)):
+                                continue
+                            if not (0 <= a_sz <= 64 and 0 <= a_cap <= 4096 and a_sz <= max(a_cap, 0)):
+                                continue
+                            checked += 1
+                            if j_sz > 0:
+                                has_flag = True
+                            if a_sz > 0 and 0x10000 < a_data < 0x7F0000000000:
+                                try:
+                                    ap_raw = p.read(a_data, a_sz * 8)
+                                    for ap in struct.unpack("<%dQ" % a_sz, ap_raw):
+                                        if (0x10000 < ap < 0x7F0000000000) and ap not in seen:
+                                            seen.add(ap)
+                                            ptrs.append((t, ap))
+                                except Exception:
+                                    continue
+                        if checked > 0:
+                            return ptrs, has_flag, True
+        except Exception:
+            ptrs, seen, has_flag, checked = [], set(), False, 0
+
+    for t in tags:
+        try:
+            co = g.country(t)
+            cptr = getattr(co, "ptr", 0)
+            if not (0x10000 < int(cptr) < 0x7F0000000000):
+                continue
+            dip = p.u64(cptr + WIN_CO_DIPLO_STATUS)
+            pol = p.u64(cptr + WIN_CO_POL_STATUS)
+            if not (0x10000 < dip < 0x7F0000000000 and 0x10000 < pol < 0x7F0000000000):
+                continue
+            j_sz = p.i32(dip + WIN_DS_JUSTIFYING_TAGS + 0x0C)
+            j_cap = p.i32(dip + WIN_DS_JUSTIFYING_TAGS + 0x08)
+            a_sz = p.i32(pol + WIN_PS_TIMED_ACTIVITIES + 0x0C)
+            a_cap = p.i32(pol + WIN_PS_TIMED_ACTIVITIES + 0x08)
+            if not (0 <= j_sz <= 64 and 0 <= j_cap <= 4096 and j_sz <= max(j_cap, 0)):
+                continue
+            if not (0 <= a_sz <= 64 and 0 <= a_cap <= 4096 and a_sz <= max(a_cap, 0)):
+                continue
+            checked += 1
+            if j_sz > 0:
+                has_flag = True
+            if a_sz > 0:
+                a_data = p.u64(pol + WIN_PS_TIMED_ACTIVITIES)
+                if 0x10000 < a_data < 0x7F0000000000:
+                    for i in range(a_sz):
+                        ap = p.u64(a_data + i * 8)
+                        if (0x10000 < ap < 0x7F0000000000) and ap not in seen:
+                            seen.add(ap)
+                            ptrs.append((t, ap))
+        except Exception:
+            continue
+    return ptrs, has_flag, (checked > 0)
 
 
 def _country_timed_activities(g):
@@ -732,14 +918,17 @@ def _country_timed_activities(g):
     array uses the same CPdxArray layout as PL_PARTIES (+0x20): data +0, cap +8,
     size +0xC. vtable 0x4398978 is 21CTimedWargoalActivity in rtti.pkl.
 
-    2026-11-15 (PE): 0x4398978 is a Linux VA, so the loop below matched nothing
-    and every justifying() call fell through to oi.deep_instances() -- a multi-GB
-    scan that timed out the MCP server. On Windows use the RTTI object index,
-    which finds the activity by class name (verified: one CTimedWargoalActivity
-    appeared immediately after a CGenerateWarGoalAction executed).
+    2026-11-26 (A1): Windows PE 同样直接走 CPoliticalStatus+0x08 / CDiplomacyStatus+0xE0
+    的 O(1) 读取，避免每次无正当化时穿透到 3.8 GB 全堆扫描；仅当 direct 不可用或
+    dip 标记存在正当化但 pol 列表为空时才回退到 RTTI 索引。
     """
     import sys
     if sys.platform == "win32":
+        direct, has_flag, direct_ok = _win_direct_timed_activities(g, want=None)
+        if direct:
+            return direct
+        if direct_ok and not has_flag:
+            return []
         try:
             return [(None, a) for a in g.oi.instances("CTimedWargoalActivity")]
         except Exception:
@@ -777,7 +966,7 @@ def _country_timed_activities(g):
     return out
 
 
-def justifying(g):
+def justifying(g, include_queued=False):
     """所有正在进行的正当化（读引擎真实对象，不是猜的）。
 
     1.19.4.1 `CTimedWargoalActivity` 布局（2026-11-12 用活进程重新互证）：
@@ -792,19 +981,22 @@ def justifying(g):
     `src not in idx2tag` 直接丢掉——正当化明明在跑却报 not_started。
     旧实现逐 8 字节猜 (t1,t2) 并把 +0x10 当发起国，所以把 GER->HOL 印成了
     HOL->GER（方向反了），也没有 days_left / eta_date。
+
+    2026-11-26: Windows PE 优先走 `_win_direct_timed_activities()` O(1) 直读；
+    当所有国家 `CDiplomacyStatus+0xE0` 与 `CPoliticalStatus+0x08` 均权威确认为空时，
+    直接短路返回 `[]`，不再穿透到 3.8 GB 全堆扫描（`CTimedWargoalActivity` /
+    `CGenerateWarGoalAction`）。仅在 `include_queued=True` 或直读失败时才回退堆扫。
     """
     custom = getattr(g, "_mock_justifying", None)
     if custom is not None:
         raw = custom(None) if callable(custom) else list(custom)
         return [dict(r) for r in (raw or []) if isinstance(r, dict)]
     p = g.p
-    idx2tag = {}
-    for t in g.tags():
-        try:
-            idx2tag[tag_index(g, t)] = t
-        except Exception:
-            pass
     out = []
+
+    import sys as _sys
+    _pe = _sys.platform == "win32"
+    _win_authoritative_empty = False
 
     def _bust_negative(cache_name):
         """Drop an EMPTY cache entry only: live=2s, deep=5s TTL. The old code
@@ -816,20 +1008,57 @@ def justifying(g):
 
     def _instances():
         """live_instances misses objects created after the index was built."""
-        direct = _country_timed_activities(g)
-        if direct:
-            return direct
+        nonlocal _win_authoritative_empty
+        if _pe:
+            direct, has_flag, direct_ok = _win_direct_timed_activities(g, want=None)
+            if direct:
+                return direct
+            if direct_ok and not has_flag:
+                _win_authoritative_empty = True
+                return []
+            # 直读不可用（如离线测试桩）或 flag 指示存在正当化但 pol 未读出时，先查已索引对象
+            inst_fn = getattr(getattr(g, "oi", None), "instances", None)
+            if callable(inst_fn):
+                try:
+                    indexed = [(None, a) for a in (inst_fn("CTimedWargoalActivity") or ())]
+                    if indexed:
+                        return indexed
+                except Exception:
+                    pass
+        else:
+            direct = _country_timed_activities(g)
+            if direct:
+                return direct
         _bust_negative("_live_cache")
-        seen = list(g.oi.live_instances("CTimedWargoalActivity"))
+        live_fn = getattr(getattr(g, "oi", None), "live_instances", None)
+        seen = list(live_fn("CTimedWargoalActivity")) if callable(live_fn) else []
         if seen:
             return seen
         _bust_negative("_deep_cache")
         try:
             # build(force=True) here re-scanned ~3.8 GB on every miss; the direct
             # read above already covers objects the index has never seen.
-            return list(g.oi.deep_instances("CTimedWargoalActivity"))
+            deep_fn = getattr(getattr(g, "oi", None), "deep_instances", None)
+            return list(deep_fn("CTimedWargoalActivity")) if callable(deep_fn) else []
         except Exception:
             return []
+
+    insts = _instances()
+    if not insts and _win_authoritative_empty and not include_queued:
+        return []
+
+    idx2tag = {}
+    try:
+        import combat as _cb_j
+        idx2tag = _cb_j._country_id_map(g) or {}
+    except Exception:
+        idx2tag = {}
+    if not idx2tag:
+        for t in g.tags():
+            try:
+                idx2tag[tag_index(g, t)] = t
+            except Exception:
+                pass
 
     def _raw_date_to_str(raw_val):
         """将 CBaseTimedActivity 内部的 CGameDate (+0x38/+0x50) 转成 'YYYY.MM.DD'；无效哨兵返回 None。"""
@@ -847,14 +1076,13 @@ def justifying(g):
         return None
 
     cur_date_raw = None
-    try:
-        cur_date_raw = int(g.date_raw())
-    except Exception:
-        cur_date_raw = None
+    if insts:
+        try:
+            cur_date_raw = int(g.date_raw())
+        except Exception:
+            cur_date_raw = None
 
-    import sys as _sys
-    _pe = _sys.platform == "win32"
-    for item in _instances():
+    for item in insts:
         # _country_timed_activities() yields (owner_tag, ptr): the owner of the
         # CPoliticalStatus list IS the country that started the justification.
         owner, a = item if isinstance(item, tuple) else (None, item)
@@ -945,8 +1173,8 @@ def justifying(g):
             pass
     # 多条正当化活动存在时，按剩余天数升序排列，确保优先展示最快到期的借口
     out.sort(key=lambda r: (float("inf") if r.get("days_left") is None else float(r["days_left"]), str(r.get("target") or "")))
-    if not out:
-        # 命令已入队、引擎还没建出 activity 的那几帧
+    if not out and (include_queued or not _win_authoritative_empty):
+        # 命令已入队、引擎还没建出 activity 的那几帧（Windows 权威空默认不再触发 3.8 GB 深扫）
         try:
             _left = g.oi.deep_instances("CGenerateWarGoalAction")
         except Exception:
@@ -1034,17 +1262,25 @@ def justifying_fast(g, tag=None):
     if sys.platform == "win32":
         for a in list(_TRACKED_ACTIVITIES.get(pid) or ()):
             _add(a)
-        oi = getattr(g, "_oi", None)
-        if oi is not None:
-            for fn_name in ("instances", "live_instances"):
-                fn = getattr(oi, fn_name, None)
-                if not callable(fn):
-                    continue
-                try:
-                    for a in (fn("CTimedWargoalActivity") or ()):
-                        _add(a)
-                except Exception:
-                    continue
+        # 2026-11-26 (A1 根治): 优先 O(1) 读取 CCountry+0xF90 (CPoliticalStatus+0x08) 与
+        # CCountry+0xF88 (CDiplomacyStatus+0xE0)。当引擎原生数组明确为 0 正当化时，
+        # 绝不再穿透 oi.live_instances("CTimedWargoalActivity") 触发 3.8 GB 全堆扫描！
+        direct_ptrs, has_just_flag, direct_ok = _win_direct_timed_activities(g, want=want)
+        for _owner, a in direct_ptrs:
+            _add(a)
+        need_rtti_fallback = (not direct_ok) or (has_just_flag and not direct_ptrs)
+        if need_rtti_fallback:
+            oi = getattr(g, "_oi", None)
+            if oi is not None:
+                for fn_name in ("instances", "live_instances"):
+                    fn = getattr(oi, fn_name, None)
+                    if not callable(fn):
+                        continue
+                    try:
+                        for a in (fn("CTimedWargoalActivity") or ()):
+                            _add(a)
+                    except Exception:
+                        continue
     else:
         for _owner, a in _country_timed_activities(g):
             _add(a)
@@ -1054,13 +1290,19 @@ def justifying_fast(g, tag=None):
 
     idx2tag = {}
     try:
-        for t in (g.tags() or ()):
-            try:
-                idx2tag[tag_index(g, t)] = t
-            except Exception:
-                pass
+        import combat as _cb_jf
+        idx2tag = _cb_jf._country_id_map(g) or {}
     except Exception:
-        return []
+        idx2tag = {}
+    if not idx2tag:
+        try:
+            for t in (g.tags() or ()):
+                try:
+                    idx2tag[tag_index(g, t)] = t
+                except Exception:
+                    pass
+        except Exception:
+            return []
     if not idx2tag:
         return []
 
@@ -1264,8 +1506,8 @@ def wargoal_quote(g, target_tag, wargoal="take_state", state_ptrs=(), state_ids=
         "estimated_days": est,
         "estimated_completion_date": _add_game_days(g, est),
         "estimated_total_pp": round(est * WARGOAL_DAILY_PP, 1),
-        "estimate_source": ("200 + 30(生产项) + 50/额外州，x1.5/同存正当化；"
-                            "实测校验 HOL[35]=230、BEL[6]=345。精确值在开跑后用 "
+        "estimate_source": ("00_invasion.txt: 200 + 50/额外州，x1.5/同存正当化（无生产天数项）；"
+                            "不含国策/紧张度/意识形态修正，精确值在开跑后用 "
                             "hoi4_justifying 读 CTimedWargoalActivity"),
         "note": note,
     }

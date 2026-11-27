@@ -139,6 +139,62 @@ def _selfheal_check(g) -> None:
             import diag as _diag
             _diag.warn("mcp.runtime.reattach.kick_tech_scan", _e)
 
+def _clear_world_instance_caches(g, tag: str = "world_epoch") -> None:
+    """清理同 PID 内换档/重开新局或日期倒跳后失效的 `Game` 实例级派生缓存。"""
+    try:
+        import win_pipeline as _wp
+        _wp.clear_version_cache(g)
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn(f"mcp.runtime.{tag}.clear_version_cache", _e)
+    try:
+        type(g)._VT_SCAN.clear()
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn(f"mcp.runtime.{tag}.clear_vt_scan", _e)
+    for attr in ("_oi", "_oi_world", "_tags", "_tag2idx", "_tags_pid",
+                 "_faction_objects_cache", "_adv_pool_cache", "_last_overview_hb"):
+        if hasattr(g, attr):
+            try:
+                setattr(g, attr, None)
+            except Exception as _e:
+                import diag as _diag
+                _diag.warn(f"mcp.runtime.{tag}.reset_attr", _e, detail=attr)
+    for attr in ("_div_tagmap", "_win_date", "_win_date_pid", "_win_date_last",
+                 "_date_exact_cache", "_date_addr", "_date_last", "_date_high",
+                 "_doctrine_done", "_hk_state_key", "_heal_last_raw"):
+        if hasattr(g, attr):
+            try:
+                delattr(g, attr)
+            except Exception as _e:
+                import diag as _diag
+                _diag.warn(f"mcp.runtime.{tag}.del_attr", _e, detail=attr)
+    try:
+        g.reset_front_snapshot()
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn(f"mcp.runtime.{tag}.reset_front", _e)
+
+
+def _world_epoch_check(g) -> bool:
+    """将 `session_state.sync(g)` 挂入 MCP `game()` 主入口，感知同 PID 内换档/重开新局。
+
+    当 `CCurrentGameState*` 地址变化（即使日期前进或倒退 <= 30 天）时，自动清零全部已注册
+    模块级缓存，并同步重置 `Game` 实例级派生缓存。
+    """
+    try:
+        import session_state as _ss
+        changed = bool(_ss.sync(g))
+    except Exception as _e:
+        import diag as _diag
+        _diag.warn("mcp.runtime.world_epoch.sync", _e)
+        return False
+    if changed:
+        _stderr("[self-heal] world epoch changed (same-pid save reload/restart): clearing caches")
+        _clear_world_instance_caches(g, tag="world_epoch")
+    return changed
+
+
 def _date_backjump(g) -> None:
     """Rescan the date address when the game date jumps BACKWARD > 30 days
     (i.e. another save was loaded)."""
@@ -160,32 +216,7 @@ def _date_backjump(g) -> None:
         except Exception as _e:
             import diag as _diag
             _diag.warn("mcp.runtime.backjump.invalidate_session", _e)
-        try:
-            import win_pipeline as _wp
-            _wp.clear_version_cache(g)
-        except Exception as _e:
-            import diag as _diag
-            _diag.warn("mcp.runtime.backjump.clear_version_cache", _e)
-        try:
-            type(g)._VT_SCAN.clear()
-        except Exception as _e:
-            import diag as _diag
-            _diag.warn("mcp.runtime.backjump.clear_vt_scan", _e)
-        if hasattr(g, "_oi"):
-            g._oi = None
-        for attr in ("_div_tagmap", "_win_date", "_win_date_pid", "_win_date_last",
-                     "_doctrine_done", "_hk_state_key"):
-            if hasattr(g, attr):
-                try:
-                    delattr(g, attr)
-                except Exception as _e:
-                    import diag as _diag
-                    _diag.warn("mcp.runtime.backjump.del_attr", _e, detail=attr)
-        try:
-            g.reset_front_snapshot()
-        except Exception as _e:
-            import diag as _diag
-            _diag.warn("mcp.runtime.backjump.reset_front", _e)
+        _clear_world_instance_caches(g, tag="backjump")
         try:
             g.find_date_address(force=True)
         except Exception as e:

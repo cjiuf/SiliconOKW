@@ -844,13 +844,19 @@ def _scan_raw(g, fast=False):
             if xt is not None:
                 if svc == "army":
                     acts = [
-                        "推荐 1 步高收益方案：hoi4_upgrade_template_preset(preset='inf_9_3', auto_rebalance=true, dry_run=true) 一键把主力步兵升为 9步3炮+工兵+炮支并自动从超储线挪厂！",
-                        "或用 hoi4_unlock_doctrine() 解锁陆军学说 / hoi4_template_edit() 调整编制",
+                        "推荐 1 步高收益方案：upgrade_template_preset(preset='inf_9_3', auto_rebalance=true, dry_run=true) 一键把主力步兵升为 9步3炮+工兵+炮支并自动从超储线挪厂！",
+                        "或用 unlock_doctrine(doctrine='<陆军学说>') 解锁学说（如 mobile_warfare / superior_firepower / grand_battleplan / mass_assault）",
+                    ]
+                elif svc == "navy":
+                    acts = [
+                        "直接调用 unlock_doctrine(doctrine='<海军学说>') 消耗海军经验（如 fleet_in_being / base_strike / convoy_raiding）",
+                        "如确需蓄力设计，调用 ack_red_dot(code='%s', reason='说明具体目标', snooze_days=30)"
+                        % code,
                     ]
                 else:
                     acts = [
-                        "建议用于：%s" % spend,
-                        "如确需蓄力设计，调用 hoi4_ack_red_dot(code='%s', reason='说明具体目标', snooze_days=30)"
+                        "直接调用 unlock_doctrine(doctrine='<空军学说>') 消耗空军经验（如 battlefield_support / operational_integrity / strategic_destruction）",
+                        "如确需蓄力设计，调用 ack_red_dot(code='%s', reason='说明具体目标', snooze_days=30)"
                         % code,
                     ]
                 items.append(_make_item(
@@ -1085,8 +1091,8 @@ def _scan_raw(g, fast=False):
                     "scarce_core_types": zero_core,
                 },
                 [
-                    "检查并缩减/取消多余训练队列，或提高步枪/火炮军工配额",
-                    "如确需抢训应急部队，调用 hoi4_ack_red_dot(code='DEFICIT_OVER_TRAINING', reason='...')",
+                    "调用 cancel_training(lines=<削减线数>) 缩减多余训练队列，或提高步枪/火炮军工配额",
+                    "如确需抢训应急部队，调用 ack_red_dot(code='DEFICIT_OVER_TRAINING', reason='...')",
                 ],
                 severity="block",
                 tier=total_train_lines,
@@ -1250,6 +1256,8 @@ def _scan_raw(g, fast=False):
         cb_rows = []
         if wg_ok:
             for r in (wg_rows or []):
+                if r.get("target_exists") is False or r.get("valid") is False:
+                    continue
                 tgt_t = str(r.get("target_tag") or "").upper()
                 if not tgt_t or tgt_t == str(tag).upper() or tgt_t in enemies_now:
                     continue
@@ -1447,6 +1455,32 @@ def evaluate(g, fast=False):
         for old_xc in list(last_xp_map.keys()):
             if old_xc not in cur_codes:
                 last_xp_map.pop(old_xc, None)
+
+        # 2026-11-26 (P1-3 根治): DEFICIT_OVER_TRAINING 若训练线数实际下降，或步枪库存较上次
+        # 记录显著回升 (>= 250) 或脱离危急 (<200 -> >=200)，说明玩家已采取实质改善而非空口糊弄，
+        # 自动重置其连续 ack 计数，避免误判 ack_streak_exceeded 导致死锁。
+        last_def = st.setdefault("last_deficit_state", {})
+        def_item = next((it for it in raw["items"] if it.get("code") == "DEFICIT_OVER_TRAINING"), None)
+        if def_item is not None:
+            det = def_item.get("detail") or {}
+            cur_tl = det.get("training_lines")
+            cur_rf = det.get("rifles_stockpile")
+            prev_tl = last_def.get("training_lines")
+            prev_rf = last_def.get("rifles_stockpile")
+            improved = False
+            if isinstance(cur_tl, (int, float)) and isinstance(prev_tl, (int, float)) and cur_tl < prev_tl:
+                improved = True
+            if isinstance(cur_rf, (int, float)) and isinstance(prev_rf, (int, float)):
+                if cur_rf >= prev_rf + 250.0 or (prev_rf < 200.0 and cur_rf >= 200.0):
+                    improved = True
+            if improved:
+                streaks.pop("DEFICIT_OVER_TRAINING", None)
+            if isinstance(cur_tl, (int, float)):
+                last_def["training_lines"] = int(cur_tl)
+            if isinstance(cur_rf, (int, float)):
+                last_def["rifles_stockpile"] = float(cur_rf)
+        else:
+            last_def.clear()
 
         blocking, acked, advisory = [], [], []
         for it in raw["items"]:

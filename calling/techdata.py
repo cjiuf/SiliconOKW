@@ -11,6 +11,28 @@ import config
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "techdefs.pkl")
+DEFAULT_BASE_TECH_COST = 110.0  # HOI4 1.19 common/defines/00_defines.lua NTechnology.BASE_TECH_COST
+
+
+def load_base_tech_cost():
+    """从游戏 common/defines/00_defines.lua 读取 NTechnology.BASE_TECH_COST（1.19 实测为 110）。"""
+    game = config.game_dir(required=False)
+    if game:
+        p = os.path.join(game, "common", "defines", "00_defines.lua")
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                txt = f.read()
+            m = re.search(r"\bBASE_TECH_COST\s*=\s*([0-9]+(?:\.[0-9]+)?)", txt)
+            if m:
+                val = float(m.group(1))
+                if 20.0 <= val <= 500.0:
+                    return val
+        except OSError:
+            pass
+    return DEFAULT_BASE_TECH_COST
+
+
+BASE_TECH_COST = load_base_tech_cost()
 
 FILE_CATEGORY = {
     "infantry": "infantry",
@@ -80,7 +102,7 @@ def _top_blocks(text):
 def _parse_block(body):
     m = re.search(r"\bstart_year\s*=\s*(\d+)", body)
     year = int(m.group(1)) if m else 1936
-    # 脚本 research_cost 通常为 1.0 / 1.5 / 2.0 等倍率（基础 1.0 ≈ 100 天）
+    # 脚本 research_cost 通常为 1.0 / 1.5 / 2.0 等倍率（1.19 BASE_TECH_COST = 110 天）
     m_rc = re.search(r"\bresearch_cost\s*=\s*([0-9]+(?:\.[0-9]+)?)", body)
     research_cost = float(m_rc.group(1)) if m_rc else 1.0
     m = re.search(r"\bfolder\s*=\s*\{.*?\bname\s*=\s*([A-Za-z0-9_]+)", body, re.S)
@@ -110,7 +132,7 @@ def _parse_block(body):
     )
     always_no = bool(re.search(r"\ballow\s*=\s*\{\s*always\s*=\s*no\s*\}", body, re.S))
     return {"year": year, "research_cost": research_cost,
-            "base_cost_days": round(research_cost * 100.0, 1),
+            "base_cost_days": round(research_cost * BASE_TECH_COST, 1),
             "folder": folder, "categories": cats,
             "leads_to": leads, "xor": xor,
             "special_project_gated": sp_gated,
@@ -193,7 +215,7 @@ def tech_info(tech_id, defs=None):
         "key": tech_id,
         "start_year": int(d.get("year") or 1936),
         "research_cost": rc,
-        "base_cost_days": round(float(d.get("base_cost_days") or rc * 100.0), 1),
+        "base_cost_days": round(rc * BASE_TECH_COST, 1),
         "category": d.get("category") or "other",
         "folder": d.get("folder") or "",
         "categories": list(d.get("categories") or ()),

@@ -417,42 +417,151 @@ def province_objects(g, force=False):
 
 
 _CAP_PROV_CACHE = {}
+_SS.register_cache("mapdata._CAP_PROV_CACHE", container=_CAP_PROV_CACHE)
 
 
 def capital_provinces(g):
-    """province_id -> tag for every country's capital state (cached per pid).
+    """province_id -> tag for every living country's capital state (cached per session/day).
 
-    `CCountry+0xFF0` is a STATE id (verified: GER -> 64 -> Berlin 9496). The
-    capital state's provinces come from the static state table, so no per-country
-    CO_STATES walk is needed and two countries can never claim the same capital.
+    Linux: `CCountry+0xFF0`；Windows 1.19.5.0 PE: `CCountry+0x1018`（实测 GER=64 柏林,
+    CHI=1037 迁都重庆；`+0xFF0` 在 PE 为 `CO_CHARACTERS` 指针）。同时过滤已灭亡无州国
+    （`CO_STATES` 与 `CO_STATES_B` 均为空），防止已吞并旧都覆盖存活国。
     """
-    key = getattr(g.p, "pid", None)
-    if key in _CAP_PROV_CACHE:
+    import offsets as _O
+    cap_off = getattr(_O, "CO_CAPITAL_STATE", None)
+    if cap_off is None:
+        if sys.platform == "win32":
+            return {}
+        cap_off = 0xFF0
+
+    p = getattr(g, "p", None)
+    pid = getattr(p, "pid", None)
+    day_str = ""
+    try:
+        if hasattr(g, "date"):
+            day_str = str((g.date() or {}).get("text") or "")[:10]
+    except Exception:
+        day_str = ""
+    use_cache = isinstance(pid, int) and pid > 0 and getattr(p, "base", None) is not None
+    key = (pid, _SS.SESSION.save_epoch, day_str) if use_cache else None
+    if key is not None and key in _CAP_PROV_CACHE:
         return _CAP_PROV_CACHE[key]
+
     out = {}
     try:
         g._load_tags()
-        ptrs = g.country_ptrs()
+        ptrs = g.country_ptrs() or []
         st2p, _ = load_state_provinces()
-        state_tag = {}
+        co_states = getattr(_O, "CO_STATES", None)
+        co_states_b = getattr(_O, "CO_STATES_B", None)
+        arr_sz_off = getattr(_O, "PDXARRAY_SIZE", 0x0C)
+
+        cands = []
         for tid, tag in enumerate(g._tags):
             if not tag or tag == "---":
                 continue
             try:
                 ci = g._tag2idx[tid]
-                if not (0 <= ci < len(ptrs)):
-                    continue
-                sid = int(g.p.i32(ptrs[ci] + 0xFF0))
-                if sid > 0:
-                    state_tag.setdefault(sid, tag)
+                if 0 <= ci < len(ptrs):
+                    cp = int(ptrs[ci])
+                    if cp > 0x10000:
+                        cands.append((tag, cp))
             except Exception:
                 continue
+
+        state_tag = {}
+        batched = None
+        if len(cands) > 8:
+            try:
+                import fastmem as _fm
+                reqs = []
+                for _tag, cp in cands:
+                    reqs.append((cp + cap_off, 4))
+                    if co_states is not None:
+                        reqs.append((cp + co_states + arr_sz_off, 4))
+                    if co_states_b is not None:
+                        reqs.append((cp + co_states_b + arr_sz_off, 4))
+                batched = _fm.read_batch(p, reqs)
+            except Exception:
+                batched = None
+
+        stride = 1 + (1 if co_states is not None else 0) + (1 if co_states_b is not None else 0)
+        if batched is not None and len(batched) == len(cands) * stride:
+            # 先探测本进程中是否存在任意存活国（避免离线轻量桩未填 CO_STATES 时误全滤）
+            any_alive_known = False
+            parsed = []
+            for idx, (tag, _cp) in enumerate(cands):
+                base_i = idx * stride
+                raw_sid = batched[base_i]
+                if not raw_sid or len(raw_sid) < 4:
+                    continue
+                sid = struct.unpack("<i", raw_sid)[0]
+                if sid <= 0 or sid >= 100000:
+                    continue
+                st_cnt = None
+                pos = base_i + 1
+                if co_states is not None:
+                    rb = batched[pos]
+                    pos += 1
+                    if rb and len(rb) >= 4:
+                        v = struct.unpack("<i", rb)[0]
+                        if 0 <= v <= 10000:
+                            st_cnt = (st_cnt or 0) + v
+                if co_states_b is not None:
+                    rb = batched[pos]
+                    if rb and len(rb) >= 4:
+                        v = struct.unpack("<i", rb)[0]
+                        if 0 <= v <= 10000:
+                            st_cnt = (st_cnt or 0) + v
+                if st_cnt is not None and st_cnt > 0:
+                    any_alive_known = True
+                parsed.append((tag, sid, st_cnt))
+            for tag, sid, st_cnt in parsed:
+                if any_alive_known and st_cnt is not None and st_cnt <= 0:
+                    continue
+                state_tag.setdefault(sid, tag)
+        else:
+            any_alive_known = False
+            parsed = []
+            for tag, cp in cands:
+                try:
+                    sid = int(p.i32(cp + cap_off))
+                    if sid <= 0 or sid >= 100000:
+                        continue
+                    st_cnt = None
+                    if co_states is not None:
+                        try:
+                            v = int(p.i32(cp + co_states + arr_sz_off))
+                            if 0 <= v <= 10000:
+                                st_cnt = (st_cnt or 0) + v
+                        except Exception:
+                            pass
+                    if co_states_b is not None:
+                        try:
+                            v = int(p.i32(cp + co_states_b + arr_sz_off))
+                            if 0 <= v <= 10000:
+                                st_cnt = (st_cnt or 0) + v
+                        except Exception:
+                            pass
+                    if st_cnt is not None and st_cnt > 0:
+                        any_alive_known = True
+                    parsed.append((tag, sid, st_cnt))
+                except Exception:
+                    continue
+            for tag, sid, st_cnt in parsed:
+                if any_alive_known and st_cnt is not None and st_cnt <= 0:
+                    continue
+                state_tag.setdefault(sid, tag)
+
         for sid, tag in state_tag.items():
             for q in st2p.get(sid, ()):
                 out[q] = tag
     except Exception:
         out = {}
-    _CAP_PROV_CACHE[key] = out
+    if key is not None:
+        if len(_CAP_PROV_CACHE) >= 4:
+            _CAP_PROV_CACHE.clear()
+        _CAP_PROV_CACHE[key] = out
     return out
 
 
@@ -669,3 +778,138 @@ def load_state_provinces(game=GAME, force=False):
         _MEM.pop(("states", game), None)
         return _once(("states", game), lambda: _load_state_provinces_raw(game, True))
     return _once(("states", game), lambda: _load_state_provinces_raw(game))
+
+
+import session_state as _SS_MAP
+
+CENTROID_CACHE = _SS_MAP.state_path("mapcentroids.pkl")
+AIRBASE_PROV_CACHE = _SS_MAP.state_path("mapairbases.pkl")
+MAP_SCALE_PIXEL_TO_KM = 7.114
+
+
+def _build_province_centroids_raw(game=GAME, force=False):
+    """计算全图每个省在 provinces.bmp 中的像素质心 (cx, cy) 与地图尺寸 (w, h)。
+
+    2026-11-26: 供 Windows PE 伞降只读目标枚举 (paradrop_targets) 零注入计算航程。
+    使用 numpy 向量化 bincount 一次完成（~0.4s），结果持久化至磁盘 JSON 缓存。
+    """
+    import safe_cache
+    if not force and safe_cache.exists(CENTROID_CACHE):
+        cached = safe_cache.load(CENTROID_CACHE)
+        if isinstance(cached, dict) and cached.get("centroids"):
+            return cached
+    col2id, _ = load_definitions(game)
+    img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
+    h, w, _ = img.shape
+    key = (img[:, :, 0].astype(np.uint32) << 16) | (img[:, :, 1].astype(np.uint32) << 8) | img[:, :, 2]
+    uniq = np.unique(key)
+    lut = {}
+    for (r, g, b), pid in col2id.items():
+        lut[(r << 16) | (g << 8) | b] = int(pid)
+    m = np.zeros(int(uniq.max()) + 1, dtype=np.int32)
+    for k in uniq:
+        m[int(k)] = lut.get(int(k), 0)
+    ids = m[key]
+    max_pid = int(ids.max())
+    flat = ids.ravel()
+    ys, xs = np.divmod(np.arange(flat.size, dtype=np.int64), w)
+    cnt = np.bincount(flat, minlength=max_pid + 1)
+    sum_x = np.bincount(flat, weights=xs, minlength=max_pid + 1)
+    sum_y = np.bincount(flat, weights=ys, minlength=max_pid + 1)
+    centroids = {}
+    nz = np.nonzero(cnt)[0]
+    for pid in nz.tolist():
+        if pid <= 0:
+            continue
+        c = float(cnt[pid])
+        centroids[int(pid)] = [round(float(sum_x[pid]) / c, 2), round(float(sum_y[pid]) / c, 2)]
+    out = {"width": int(w), "height": int(h), "centroids": centroids}
+    safe_cache.save(CENTROID_CACHE, out, fmt="json")
+    return out
+
+
+def _load_air_base_provinces_raw(game=GAME, force=False):
+    """解析 map/buildings.txt 中每个州的 air_base 精确像素落点省 ID -> {state_id: prov_id}。"""
+    import safe_cache
+    if not force and safe_cache.exists(AIRBASE_PROV_CACHE):
+        cached = safe_cache.load(AIRBASE_PROV_CACHE)
+        if isinstance(cached, dict) and cached:
+            return {int(k): int(v) for k, v in cached.items()}
+    bp = os.path.join(game, "map", "buildings.txt")
+    if not os.path.exists(bp):
+        return {}
+    col2id, ptype = load_definitions(game)
+    img = _read_bmp_rgb(os.path.join(game, "map", "provinces.bmp"))
+    h, w, _ = img.shape
+    st2p, _ = load_state_provinces(game)
+    cdata = province_centroids(game)
+    cents = cdata.get("centroids") or {}
+    out = {}
+    with open(bp, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if ";air_base;" not in line:
+                continue
+            parts = line.strip().split(";")
+            if len(parts) < 5:
+                continue
+            try:
+                sid = int(parts[0])
+                bx = float(parts[2])
+                bz = float(parts[4])
+            except ValueError:
+                continue
+            px = max(0, min(w - 1, int(round(bx))))
+            py = max(0, min(h - 1, int(round(h - 1 - bz))))
+            rgb = (int(img[py, px, 0]), int(img[py, px, 1]), int(img[py, px, 2]))
+            pid = col2id.get(rgb)
+            st_provs = st2p.get(sid) or set()
+            if pid and (not st_provs or pid in st_provs) and ptype.get(pid) == "land":
+                out[sid] = int(pid)
+            elif st_provs:
+                # 兜底：选该州内距 (px, py) 最近的陆地省
+                best_p, best_d2 = None, None
+                for cand in st_provs:
+                    if ptype.get(cand) != "land":
+                        continue
+                    xy = cents.get(cand) or cents.get(str(cand))
+                    if not xy:
+                        continue
+                    d2 = (xy[0] - px) ** 2 + (xy[1] - py) ** 2
+                    if best_d2 is None or d2 < best_d2:
+                        best_p, best_d2 = int(cand), d2
+                if best_p is not None:
+                    out[sid] = best_p
+    if out:
+        safe_cache.save(AIRBASE_PROV_CACHE, {str(k): v for k, v in out.items()}, fmt="json")
+    return out
+
+
+def province_centroids(game=GAME, force=False):
+    if force:
+        _MEM.pop(("centroids", game), None)
+        return _once(("centroids", game), lambda: _build_province_centroids_raw(game, True))
+    return _once(("centroids", game), lambda: _build_province_centroids_raw(game))
+
+
+def load_air_base_provinces(game=GAME, force=False):
+    if force:
+        _MEM.pop(("airbases", game), None)
+        return _once(("airbases", game), lambda: _load_air_base_provinces_raw(game, True))
+    return _once(("airbases", game), lambda: _load_air_base_provinces_raw(game))
+
+
+def province_distance_km(pid_a, pid_b, centroids_data=None, game=GAME):
+    """两省像素质心之间的地图距离（公里，含东西经度回绕，比例 7.114 km/px）。"""
+    import math
+    cd = centroids_data if centroids_data is not None else province_centroids(game)
+    cents = (cd or {}).get("centroids") or {}
+    w = float((cd or {}).get("width") or 5632)
+    a = cents.get(int(pid_a)) or cents.get(str(int(pid_a)))
+    b = cents.get(int(pid_b)) or cents.get(str(int(pid_b)))
+    if not a or not b:
+        return None
+    dx = abs(float(a[0]) - float(b[0]))
+    if w > 0 and dx > w * 0.5:
+        dx = w - dx
+    dy = float(a[1]) - float(b[1])
+    return round(math.hypot(dx, dy) * MAP_SCALE_PIXEL_TO_KM, 1)

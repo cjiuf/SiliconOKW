@@ -139,14 +139,19 @@ def naval_invasion(g, orders_group, order_id, source_province, target_province,
 
 
 def paradrop(g, orders_group, source_province, target_province,
-             divisions=None, order_id=0, confirm=False, wait=8.0):
-    return False, "paradrop 仅原 Linux ELF 路径支持，Windows PE 尚未实现原生通道"
+             divisions=None, order_id=0, confirm=False, wait=8.0, dry_run=False,
+             replace_existing=False, allow_duplicate=False):
+    return _aw.paradrop(
+        g, orders_group, source_province, target_province,
+        divisions=divisions, order_id=order_id, confirm=confirm,
+        wait=wait, dry_run=dry_run,
+        replace_existing=replace_existing, allow_duplicate=allow_duplicate,
+    )
 
 
-def paradrop_targets(g, orders_group, source_province=None, limit=2000):
-    return {
-        "ok": False,
-        "unsupported_on_windows": True,
-        "error": "paradrop_targets 仅原 Linux ELF 路径支持，Windows PE 尚未实现原生通道",
-        "targets": [],
-    }
+def paradrop_targets(g, orders_group=None, source_province=None, limit=2000,
+                     target_tag=None, tag=None, max_range_km=None):
+    return _aw.paradrop_targets(
+        g, orders_group=orders_group, source_province=source_province,
+        limit=limit, target_tag=target_tag, tag=tag, max_range_km=max_range_km,
+    )

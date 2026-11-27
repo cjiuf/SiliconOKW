@@ -1300,6 +1300,19 @@ def _is_irreversible_focus(key):
     return any(kw in kl for kw in IRREVERSIBLE_FOCUS_KEYWORDS)
 
 
+def _expect_list(raw, key, path, errors):
+    """严格校验配置字段必须是 JSON 列表；拦截裸布尔/数字/对象避免炸出 TypeError。"""
+    val = raw.get(key)
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return list(val)
+    errors.append(
+        "%s 必须是 JSON 数组（收到 %s: %r）" % (path, type(val).__name__, val)
+    )
+    return []
+
+
 def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
     """编译并规范化单个阶段的完整策略配置，同时执行静态存在性与冲突校验。"""
     norm = {}
@@ -1353,9 +1366,9 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         f_raw = {}
     else:
         _check_unknown_keys(f_raw, _FOCUS_ALLOWED_KEYS, "%s.focus" % stage_path, errors)
-    f_must = list(f_raw.get("must") or ())
-    f_queue = list(f_raw.get("queue") or ())
-    f_avoid = list(f_raw.get("avoid") or ())
+    f_must = _expect_list(f_raw, "must", "%s.focus.must" % stage_path, errors)
+    f_queue = _expect_list(f_raw, "queue", "%s.focus.queue" % stage_path, errors)
+    f_avoid = _expect_list(f_raw, "avoid", "%s.focus.avoid" % stage_path, errors)
     f_on_blocked = str(f_raw.get("on_blocked") or "wake").strip().lower()
     if f_on_blocked not in ("wake", "wait", "skip"):
         errors.append("%s.focus.on_blocked=%r 无效（仅支持 wake/wait/skip）" % (stage_path, f_on_blocked))
@@ -1419,6 +1432,12 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         "allow_exclusive_focus": allow_excl,
         "allow_skip_snowball": allow_skip_snowball,
     }
+    if norm["focus"]["enabled"] and f_on_blocked == "skip" and f_fallback == "none":
+        warnings.append(
+            "%s.focus.on_blocked='skip' 但 fallback='none'：当 queue 中剩余国策全部阻塞或完成时不会自动从 "
+            "selectable_focuses 补选，而是触发 focus_queue_empty 唤醒（如需自动兜底请显式设 fallback='tier_score'）"
+            % stage_path
+        )
 
     # 2) Research
     r_raw = st_raw.get("research") or {}
@@ -1427,8 +1446,8 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         r_raw = {}
     else:
         _check_unknown_keys(r_raw, _RESEARCH_ALLOWED_KEYS, "%s.research" % stage_path, errors)
-    r_queue = list(r_raw.get("queue") or ())
-    r_never = list(r_raw.get("never") or ())
+    r_queue = _expect_list(r_raw, "queue", "%s.research.queue" % stage_path, errors)
+    r_never = _expect_list(r_raw, "never", "%s.research.never" % stage_path, errors)
     max_ahead = r_raw.get("max_ahead_years", 0.5)
     if isinstance(max_ahead, bool) or not isinstance(max_ahead, (int, float)) or float(max_ahead) < 0:
         errors.append("%s.research.max_ahead_years 必须是非负数值" % stage_path)
@@ -1513,7 +1532,7 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         errors.append("%s.construction.count_existing_in_queue 必须是布尔值" % stage_path)
         count_existing = False
     c_queue = []
-    for idx_q, item in enumerate(c_raw.get("queue") or ()):
+    for idx_q, item in enumerate(_expect_list(c_raw, "queue", "%s.construction.queue" % stage_path, errors)):
         if not isinstance(item, dict) or not item.get("building"):
             errors.append("%s.construction.queue[%d] 必须是含 building 的对象" % (stage_path, idx_q))
             continue
@@ -1546,7 +1565,7 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
             "until": q_until,
         })
     c_rules = []
-    for idx_r, rule in enumerate(c_raw.get("rules") or ()):
+    for idx_r, rule in enumerate(_expect_list(c_raw, "rules", "%s.construction.rules" % stage_path, errors)):
         if not isinstance(rule, dict) or not rule.get("building"):
             errors.append("%s.construction.rules[%d] 必须是含 building 的对象" % (stage_path, idx_r))
             continue
@@ -1576,6 +1595,14 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         warnings.append(
             "%s.construction 配置了显式 queue 但 rules 为空：显式配额建完后将无后续补位规则，届时队列耗尽将触发唤醒"
             "（如需无缝续建请添加兜底 rules，例如 arms_factory / industrial_complex）"
+            % stage_path
+        )
+    elif c_enabled and not c_queue and c_rules and all(
+        (r.get("when") not in (None, {"always": True})) or (r.get("until") is not None)
+        for r in c_rules
+    ):
+        warnings.append(
+            "%s.construction.rules 全部带有 when/until 条件且无无条件兜底规则：当条件均未满足时建造队列将为空、民工闲置并触发 construction_queue_empty 唤醒"
             % stage_path
         )
     norm["construction"] = {
@@ -1646,7 +1673,7 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         warnings.append("%s.pp_policy.auto_fallback_ideas=true 会自动消费非议程项目（仍受 reserve_pp 保护），请确认有意开启" % stage_path)
 
     agenda_norm = []
-    for idx_a, item in enumerate(pp_raw.get("agenda") or ()):
+    for idx_a, item in enumerate(_expect_list(pp_raw, "agenda", "%s.pp_policy.agenda" % stage_path, errors)):
         if not isinstance(item, dict):
             errors.append("%s.pp_policy.agenda[%d] 必须是 JSON 对象" % (stage_path, idx_a))
             continue
@@ -1693,7 +1720,7 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
             "cost": int(est_cost),
             "when": when_p,
         })
-    if not agenda_norm and (pp_raw or float(ctx.get("political_power") or 0.0) >= 300.0):
+    if not agenda_norm and not auto_fb and (pp_raw or float(ctx.get("political_power") or 0.0) >= 300.0):
         warnings.append(
             "%s.pp_policy.agenda 为空：自动驾驶期间不会消费政治点数（容易积压至 2000 顶格浪费）；"
             "请先用 hoi4_inspect(topic='idea_catalog') 与 hoi4_inspect(topic='decisions') 补齐可用顾问/设计商/决议，"
@@ -1731,7 +1758,7 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         }
 
     xp_upgrades = []
-    for idx_u, item in enumerate(xp_raw.get("army_template_upgrades") or ()):
+    for idx_u, item in enumerate(_expect_list(xp_raw, "army_template_upgrades", "%s.xp_policy.army_template_upgrades" % stage_path, errors)):
         if not isinstance(item, dict):
             errors.append("%s.xp_policy.army_template_upgrades[%d] 必须是 JSON 对象" % (stage_path, idx_u))
             continue
@@ -1764,7 +1791,7 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
         })
 
     xp_doctrines = []
-    for idx_d, item in enumerate(xp_raw.get("doctrines") or ()):
+    for idx_d, item in enumerate(_expect_list(xp_raw, "doctrines", "%s.xp_policy.doctrines" % stage_path, errors)):
         if isinstance(item, str):
             item = {"doctrine": item}
         if not isinstance(item, dict):
@@ -1870,6 +1897,13 @@ def _compile_stage_profile(g, st_raw, stage_path, ctx, refs, errors, warnings):
     else:
         _check_unknown_keys(fl_raw, _FUEL_ALLOWED_KEYS, "%s.fuel" % stage_path, errors)
     pmode = str(fl_raw.get("peacetime_mode") or "conserve").strip().lower()
+    _pmode_aliases = {"save": "conserve", "eco": "conserve", "saving": "conserve", "conservative": "conserve"}
+    if pmode in _pmode_aliases:
+        warnings.append(
+            "%s.fuel.peacetime_mode=%r 已自动归一化为 %r"
+            % (stage_path, pmode, _pmode_aliases[pmode])
+        )
+        pmode = _pmode_aliases[pmode]
     if pmode not in ("conserve", "normal"):
         errors.append("%s.fuel.peacetime_mode=%r 无效（仅支持 conserve/normal）" % (stage_path, pmode))
     crit = fl_raw.get("critical_threshold", 50.0)
@@ -2401,12 +2435,36 @@ def clear_standing_orders(g, reason="", tag=None):
     return {"ok": True, "was_active": was_active, "reason": str(reason or "manual_clear")}
 
 
+def _read_ack_baselines(g, tag):
+    """0 注入纯只读抓取当前核心法案、执政意识形态与 PP（与 collect_context 完全同源）。"""
+    out = {}
+    try:
+        if hasattr(g, "politics"):
+            pol = g.politics(tag) or {}
+            raw_ideas = pol.get("active_ideas") or ()
+            active_keys = {str(k) for k in raw_ideas if k}
+            if active_keys:
+                laws = _extract_core_laws(active_keys)
+                if laws:
+                    out["core_laws"] = laws
+            if pol.get("ruling_ideology") or pol.get("ruling_party"):
+                out["ruling_ideology"] = str(pol.get("ruling_ideology") or pol.get("ruling_party"))
+            if pol.get("political_power") is not None:
+                out["political_power"] = float(pol["political_power"])
+    except Exception:
+        pass
+    return out
+
+
 def acknowledge_wakeup(g, tag=None, reason=None, extend_max_days=False):
     """模型收到心跳或熔断唤醒并检查完毕后签收放行（0 引擎注入、免前台窗口）。
 
-    默认重置心跳基准时间（last_heartbeat_date_raw）与连续无进展计数（no_progress_streak）；
-    若显式传 extend_max_days=True 且已接近/达到 max_autopilot_days，则以当前日期为新起点
-    续跑一轮（仍受原 max_autopilot_days 硬上限约束，绝不关闭地板）。
+    默认重置心跳基准时间（last_heartbeat_date_raw）、连续无进展计数（no_progress_streak），
+    并同步吸收当前已确认的核心法案（known_core_laws）、执政意识形态（known_ruling_ideology）
+    与当前 PP 基线（last_pp），避免签收 external_law_or_regime_change / pp_reserve_breach 后
+    在下一帧继续以旧基线反复触发 0 天死循环；
+    若显式传 extend_max_days=True，则以当前日期为新起点续跑一轮（仍受原 max_autopilot_days
+    硬上限约束，绝不关闭地板）。
     """
     st = get_active_state(g, tag=tag)
     if not st:
@@ -2414,7 +2472,10 @@ def acknowledge_wakeup(g, tag=None, reason=None, extend_max_days=False):
     d = _safe_date(g)
     compiled = st["profile"]
     kf = compiled["kernel_floor"]
+    my_tag = tag or compiled.get("tag")
+    cur_base = _read_ack_baselines(g, my_tag)
     extended = False
+    synced_baselines = {}
     with _LOCK:
         if d.get("raw") is not None:
             st["last_heartbeat_date_raw"] = d["raw"]
@@ -2422,21 +2483,41 @@ def acknowledge_wakeup(g, tag=None, reason=None, extend_max_days=False):
                 st["started_date_raw"] = d["raw"]
                 st["days_elapsed"] = 0.0
                 extended = True
+        if cur_base.get("core_laws"):
+            old_laws = dict(st.get("known_core_laws") or {})
+            new_laws = dict(cur_base["core_laws"])
+            if new_laws != old_laws:
+                synced_baselines["core_laws"] = {"from": old_laws, "to": new_laws}
+            st["known_core_laws"] = new_laws
+        if cur_base.get("ruling_ideology"):
+            old_ideo = st.get("known_ruling_ideology")
+            new_ideo = cur_base["ruling_ideology"]
+            if old_ideo != new_ideo:
+                synced_baselines["ruling_ideology"] = {"from": old_ideo, "to": new_ideo}
+            st["known_ruling_ideology"] = new_ideo
+        if "political_power" in cur_base:
+            st["last_pp"] = cur_base["political_power"]
         st["no_progress_streak"] = 0
+        # 2026-11-26 (P1-5): 若本次唤醒含弱编提醒，签收后同步静默该提醒，避免下一 tick 立即复醒
+        if any("weak_infantry_template" in str(x) for x in (st.get("last_wake_trigger") or ())):
+            st["weak_template_warned"] = True
         st["last_wake_trigger"] = None
         if reason:
+            jdet = {"reason": str(reason)[:200], "extend_max_days": extended}
+            if synced_baselines:
+                jdet["synced_baselines"] = synced_baselines
             _append_journal(
                 st, d.get("text"), st.get("current_phase"), "system",
                 "ack_wakeup" + (":extend_max" if extended else ""),
                 ok=True,
-                detail={"reason": str(reason)[:200], "extend_max_days": extended},
+                detail=jdet,
             )
         st["updated_at"] = time.time()
         _save_persisted()
     cur_raw = d.get("raw")
     start_raw = st.get("started_date_raw")
     days_el = round(max(0.0, (int(cur_raw) - int(start_raw)) / 24.0), 2) if (cur_raw is not None and start_raw is not None) else 0.0
-    return {
+    out = {
         "ok": True,
         "active": True,
         "acked": True,
@@ -2447,6 +2528,9 @@ def acknowledge_wakeup(g, tag=None, reason=None, extend_max_days=False):
         "days_until_heartbeat": float(kf["heartbeat_days"]),
         "days_until_max": round(max(0.0, float(kf["max_autopilot_days"]) - days_el), 1),
     }
+    if synced_baselines:
+        out["synced_baselines"] = synced_baselines
+    return out
 
 
 # ===================================================================== 事件分级器
@@ -2697,11 +2781,13 @@ def check_kernel_floor(g, st, ctx=None, prev_snap=None, cur_snap=None):
         if cls == "decisive":
             triggers.append({
                 "floor": "decisive_event",
+                "event_id": ev["event_id"],
                 "detail": "decisive event %s (%s)" % (ev["event_id"], ev.get("reason")),
             })
         elif ev_strat == "wake_all" and cls in ("trivial_single_option", "trivial_equivalent_news"):
             triggers.append({
                 "floor": "decisive_event",
+                "event_id": ev["event_id"],
                 "detail": "event %s (events.strategy=wake_all)" % ev["event_id"],
             })
 
@@ -2857,8 +2943,18 @@ def _tick_events(g, st, st_cfg, ctx, dry_run=False):
                     "ok": False,
                     "detail": det,
                 })
-        elif cls == "decisive" or (strat == "wake_all" and cls != "unresolved_scope"):
-            out["wake"].append({"floor": "decisive_event", "detail": "event %s (%s)" % (ev["event_id"], ev.get("reason"))})
+        elif cls == "decisive":
+            out["wake"].append({
+                "floor": "decisive_event",
+                "event_id": ev["event_id"],
+                "detail": "decisive event %s (%s)" % (ev["event_id"], ev.get("reason")),
+            })
+        elif strat == "wake_all" and cls != "unresolved_scope":
+            out["wake"].append({
+                "floor": "decisive_event",
+                "event_id": ev["event_id"],
+                "detail": "event %s (events.strategy=wake_all)" % ev["event_id"],
+            })
     return out
 
 
@@ -2968,7 +3064,14 @@ def _tick_focus(g, st, st_cfg, ctx, dry_run=False):
                 "detail": "only previously-started uncompleted focus(es) remain selectable: %s" % ", ".join(skipped_repeated[:5]),
             })
         elif (st_cfg.get("interrupts_extra") or {}).get("on_focus_queue_empty", True):
-            out["wake"].append({"floor": "interrupt_extra:focus_queue_empty", "detail": "no planned focus selectable"})
+            fb_mode = f_cfg.get("fallback") or "none"
+            extra_hint = ""
+            if fb_mode == "none" and sel_rows:
+                extra_hint = " (%d selectable focuses available; focus.fallback='none' -- set fallback='tier_score' to auto-pick)" % len(sel_rows)
+            out["wake"].append({
+                "floor": "interrupt_extra:focus_queue_empty",
+                "detail": "no planned focus selectable" + extra_hint,
+            })
         return out
 
     if dry_run:
@@ -3194,7 +3297,7 @@ def _tick_research(g, st, st_cfg, ctx, dry_run=False):
             # 真实空槽上的内容拒绝：计数退避，连拒 2 次进会话临时黑名单并同槽立即换下一个候选
             cnt = int(fail_counts.get(pick) or 0) + 1
             fail_counts[pick] = cnt
-            if cnt >= 2 or blocked_by in ("already_researched", "mutually_exclusive", "unknown_tech"):
+            if cnt >= 2 or blocked_by in ("already_researched", "mutually_exclusive", "unknown_tech", "inactive_dlc_folder"):
                 if pick not in temp_bl:
                     temp_bl.add(pick)
                     temp_bl_list.append(pick)
@@ -3282,13 +3385,41 @@ def _tick_pp_policy(g, st, st_cfg, ctx, dry_run=False):
             if ok:
                 done_list.append(key)
                 done_set.add(key)
-                active_ideas.add(key)
-                # 同步登记自有法案变更，避免误报 external_law_or_regime_change
-                st["known_core_laws"] = _extract_core_laws(active_ideas)
+                # 2026-11-26 (B4 根治): 自己改核心法案（如 limited_exports -> autarkic_economy）
+                # 后必须先移除 active_ideas 中的同槽旧法案，再登记新法案；否则 _extract_core_laws()
+                # 按 sorted() 字母序遍历时旧法案排在后面会把新法案覆写掉，导致下一帧地板必定
+                # 误报 external_law_or_regime_change！
+                cat_now = {}
                 try:
-                    pp_now = float((g.politics(ctx["tag"]) or {}).get("political_power", pp_now - cost))
+                    import advisors as _adv_pp
+                    cat_now = _adv_pp.load_ideas_catalog() or {}
+                except Exception:
+                    cat_now = {}
+                new_slot = (cat_now.get(key) or {}).get("slot") or item.get("slot")
+                if new_slot in CORE_LAW_SLOTS:
+                    for old_k in list(active_ideas):
+                        if old_k != key and (cat_now.get(old_k) or {}).get("slot") == new_slot:
+                            active_ideas.discard(old_k)
+                active_ideas.add(key)
+                pol_after = None
+                try:
+                    pol_after = g.politics(ctx["tag"]) or {}
+                    pp_now = float(pol_after.get("political_power", pp_now - cost))
                 except Exception:
                     pp_now = max(0.0, pp_now - cost)
+                # 若引擎实时 politics() 已回读出最新 active_ideas 且含新 key，优先以实时快照为准
+                live_ideas = None
+                if isinstance(pol_after, dict):
+                    li = pol_after.get("ideas") or pol_after.get("active_ideas")
+                    if isinstance(li, (list, set, tuple)) and key in li:
+                        live_ideas = set(li)
+                if live_ideas is not None:
+                    active_ideas = live_ideas
+                ctx["active_ideas"] = set(active_ideas)
+                known_laws = _extract_core_laws(active_ideas)
+                if new_slot in CORE_LAW_SLOTS:
+                    known_laws[new_slot] = key
+                st["known_core_laws"] = known_laws
                 st["last_pp"] = pp_now
             else:
                 if strat == "strict_agenda":
@@ -3477,7 +3608,7 @@ def _tick_xp_policy(g, st, st_cfg, ctx, dry_run=False):
                     st["weak_template_warned"] = True
                 out["wake"].append({
                     "floor": "interrupt_extra:weak_infantry_template",
-                    "detail": "main infantry '%s' is still %d-inf 0-art with army_xp=%.1f -- run upgrade_template_preset(preset='inf_9_3', auto_rebalance=true) or configure xp_policy.army_template_upgrades"
+                    "detail": "main infantry '%s' is still %d-inf 0-art with army_xp=%.1f -- run upgrade_template_preset(preset='inf_9_3', auto_rebalance=true), configure xp_policy.army_template_upgrades, or set xp_policy.wake_on_weak_template_xp=false / call ack_autopilot to defer"
                               % (tpl_nm, inf_n, float(xp_by_svc["army"])),
                 })
         except Exception:
@@ -3641,21 +3772,29 @@ def _tick_construction(g, st, st_cfg, ctx, dry_run=False):
 
     # 2) 按显式谓词树 rules 补齐至 target_len
     rules = c_cfg.get("rules") or []
+    rules_gated_by_pred = 0
+    rules_capped_in_queue = 0
     guard_steps = 0
     while cur_len < target_len and rules and guard_steps < target_len:
         guard_steps += 1
         chosen_bldg = None
+        gated_this_round = 0
+        capped_this_round = 0
         for rl in rules:
             w_ok = True if rl.get("when") is None else eval_predicate(rl["when"], ctx)
             u_ok = False if rl.get("until") is None else eval_predicate(rl["until"], ctx)
             if not (w_ok and not u_ok):
+                gated_this_round += 1
                 continue
             cap = rl.get("max_in_queue")
             if cap is not None and queued_by_bldg.get(rl["building"], 0) >= int(cap):
+                capped_this_round += 1
                 continue
             chosen_bldg = rl["building"]
             break
         if not chosen_bldg:
+            rules_gated_by_pred = gated_this_round
+            rules_capped_in_queue = capped_this_round
             break
         if not _add_one(chosen_bldg):
             break
@@ -3665,16 +3804,22 @@ def _tick_construction(g, st, st_cfg, ctx, dry_run=False):
         ie = st_cfg.get("interrupts_extra") or {}
         on_empty = ie.get("on_construction_queue_empty", True)
         below_n = ie.get("on_construction_queue_below")
+        why_parts = []
+        if rules_gated_by_pred:
+            why_parts.append("%d rule(s) gated by when/until predicate" % rules_gated_by_pred)
+        if rules_capped_in_queue:
+            why_parts.append("%d rule(s) at max_in_queue" % rules_capped_in_queue)
+        why_sfx = (" (%s)" % "; ".join(why_parts)) if why_parts else ""
         if on_empty and cur_len == 0:
             out["wake"].append({
                 "floor": "interrupt_extra:construction_queue_empty",
-                "detail": "construction queue is empty and no eligible queue/rules/state left to add",
+                "detail": "construction queue is empty and no eligible queue/rules/state left to add" + why_sfx,
             })
         elif below_n is not None and cur_len < int(below_n):
             out["wake"].append({
                 "floor": "interrupt_extra:construction_queue_empty",
-                "detail": "construction queue len %d < %d and no eligible queue/rules/state left to add"
-                          % (cur_len, int(below_n)),
+                "detail": "construction queue len %d < %d and no eligible queue/rules/state left to add%s"
+                          % (cur_len, int(below_n), why_sfx),
             })
 
     return out
@@ -3854,8 +3999,9 @@ def _tick_production(g, st, st_cfg, ctx, dry_run=False):
                 try:
                     import equipmeta as _em
                     for srow in _em.compute_surplus_lines(lines, stock_t, total_mil, divs_n) or ():
-                        if "line" in srow and srow.get("surplus_ratio") is not None:
-                            surplus_ratios[int(srow["line"])] = float(srow["surplus_ratio"])
+                        _sr_val = srow.get("ratio") if srow.get("ratio") is not None else srow.get("surplus_ratio")
+                        if "line" in srow and _sr_val is not None:
+                            surplus_ratios[int(srow["line"])] = float(_sr_val)
                 except Exception:
                     pass
                 # 兜底：若 equipmeta 未覆写（或离线 mock 仅提供 totals_by_equipment），对步枪做直接安全储备倍比评估
@@ -3971,21 +4117,41 @@ def _tick_production(g, st, st_cfg, ctx, dry_run=False):
                         if not dry_run and (reclaimed_actual > 0 or grew_any) and now_raw is not None:
                             st["last_prod_rebalance_date_raw"] = int(now_raw)
 
-    # 3) 空闲船坞自动分配（复用 HousekeepMixin._housekeep_dockyards）
+    # 3) 空闲船坞自动分配（复用 HousekeepMixin._housekeep_dockyards；
+    #    2026-11-26 N3 根治：dry_run 与实跑统一先校验是否存在有空位的造船线，0 船线/满上限时不谎报）
     if params.get("allocate_dockyards", True) and int(ctx.get("dock_idle") or 0) > 0:
-        if dry_run:
-            out["actions"].append({"domain": "production", "action": "allocate_dockyards:%d" % int(ctx["dock_idle"]), "ok": True, "dry_run": True})
-        elif hasattr(g, "_housekeep_dockyards"):
-            try:
-                dc = g._housekeep_dockyards(ctx["tag"]) or []
-                for ch in dc:
-                    out["actions"].append({
-                        "domain": "production",
-                        "action": "dockyard:#%s +%s" % (ch.get("line"), ch.get("granted")),
-                        "ok": bool(ch.get("ok")),
-                    })
-            except Exception as exc:
-                out["actions"].append({"domain": "production", "action": "allocate_dockyards", "ok": False, "detail": repr(exc)})
+        nav_lines = [l for l in (lines or ()) if l.get("class") == "CNavalProductionLine"]
+
+        def _nav_cap(eq_name):
+            eq_l = str(eq_name or "").lower()
+            if any(k in eq_l for k in ("heavy", "carrier", "battleship", "battlecruiser", "cruiser")):
+                return 5
+            return 10
+
+        allocatable_dock = sum(
+            max(0, _nav_cap(l.get("equipment")) - int(l.get("factories") or 0))
+            for l in nav_lines
+        )
+        plan_dock = min(int(ctx["dock_idle"]), allocatable_dock)
+        if plan_dock > 0:
+            if dry_run:
+                out["actions"].append({
+                    "domain": "production",
+                    "action": "allocate_dockyards:%d" % plan_dock,
+                    "ok": True,
+                    "dry_run": True,
+                })
+            elif hasattr(g, "_housekeep_dockyards"):
+                try:
+                    dc = g._housekeep_dockyards(ctx["tag"]) or []
+                    for ch in dc:
+                        out["actions"].append({
+                            "domain": "production",
+                            "action": "dockyard:#%s +%s" % (ch.get("line"), ch.get("granted")),
+                            "ok": bool(ch.get("ok")),
+                        })
+                except Exception as exc:
+                    out["actions"].append({"domain": "production", "action": "allocate_dockyards", "ok": False, "detail": repr(exc)})
 
     return out
 
@@ -4376,13 +4542,21 @@ def run_tick(g, tag=None, dry_run=False, prev_snap=None, cur_snap=None):
 
     # 4) 执行不可关闭的 Kernel Floor 终检
     floor_hits = check_kernel_floor(g, st, ctx=ctx_after, prev_snap=prev_snap, cur_snap=cur_snap)
-    # 合并去重
-    seen_trig = {(t.get("floor"), t.get("detail")) for t in wake_triggers}
-    for hit in floor_hits:
-        sig = (hit.get("floor"), hit.get("detail"))
+    # 合并去重（同一 decisive_event 的 event_id 只保留 1 条，避免 _tick_events 与 check_kernel_floor 重复写）
+    def _trig_sig(tr):
+        fl = tr.get("floor")
+        if fl == "decisive_event" and tr.get("event_id"):
+            return (fl, "event_id:" + str(tr.get("event_id")))
+        return (fl, tr.get("detail"))
+
+    deduped_wakes = []
+    seen_trig = set()
+    for tr in list(wake_triggers) + list(floor_hits):
+        sig = _trig_sig(tr)
         if sig not in seen_trig:
             seen_trig.add(sig)
-            wake_triggers.append(hit)
+            deduped_wakes.append(tr)
+    wake_triggers = deduped_wakes
 
     if not dry_run:
         st["last_pp"] = ctx_after.get("political_power")
@@ -4395,20 +4569,40 @@ def run_tick(g, tag=None, dry_run=False, prev_snap=None, cur_snap=None):
             )
         _save_persisted()
 
-    return {
+    # 2026-11-26 (N2 & A9): 无论 dry_run=True/False 均实时计算 days_elapsed（dry_run 不写盘），
+    # 并透明报告写命令执行期间因 post_drained 推进的游戏时钟小时数。
+    days_elapsed_now = st.get("days_elapsed", 0.0)
+    if ctx_after.get("date_raw") is not None and st.get("started_date_raw") is not None:
+        days_elapsed_now = round(
+            max(0.0, (int(ctx_after["date_raw"]) - int(st["started_date_raw"])) / 24.0), 2
+        )
+    h0_ap = ctx.get("date_raw")
+    h1_ap = ctx_after.get("date_raw")
+    adv_hours_ap = max(0, int(h1_ap) - int(h0_ap)) if (h0_ap is not None and h1_ap is not None) else 0
+
+    ret_tick = {
         "ok": True,
         "active": True,
         "dry_run": bool(dry_run),
         "phase": active_ph["name"],
         "phase_changed": phase_changed,
-        "days_elapsed": st.get("days_elapsed", 0.0),
+        "days_elapsed": days_elapsed_now,
         "ticks": st.get("ticks", 0),
         "attempted": attempted,
         "succeeded": succeeded,
+        "date_before": ctx.get("date"),
+        "date_after": ctx_after.get("date"),
+        "clock_advanced_hours": adv_hours_ap,
         "actions": all_actions,
         "wake_triggers": wake_triggers,
         "should_wake": bool(wake_triggers),
     }
+    if adv_hours_ap > 0:
+        ret_tick["clock_note"] = (
+            "game clock advanced by %d hour(s) during post_drained command execution "
+            "(HOI4 requires unpaused ticks to consume CCommandQueue)" % adv_hours_ap
+        )
+    return ret_tick
 
 
 def status(g, tag=None, journal_limit=15):

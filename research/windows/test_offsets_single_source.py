@@ -49,10 +49,12 @@ check("offsets.__all__ 完整覆盖 offsets_win 公开符号", ow_names == o_all
       {"missing_in_all": sorted(ow_names - o_all)[:10],
        "extra_in_all": sorted(o_all - ow_names)[:10]})
 
-# 2. PE tombstone 保护不退化
+# 2. PE tombstone 保护不退化（CO_CAPITAL_STATE 已于 2026-11-26 实测确认为 0x1018，绝不等于 Linux 0xFF0）
 for tomb in ("FP_CURRENT", "FP_COMPLETED", "FP_ROOT_FOCUSES",
-             "GS_PLAYER_TAG_ALT", "CO_CAPITAL_STATE", "FN_IDLER_SET_PAUSED"):
+             "GS_PLAYER_TAG_ALT", "FN_IDLER_SET_PAUSED"):
     check(f"offsets_win.{tomb} 保持显式 None", getattr(OW, tomb) is None)
+check("offsets_win.CO_CAPITAL_STATE 已实测定位为 0x1018 且不撞 Linux 0xFF0",
+      OW.CO_CAPITAL_STATE == 0x1018 and OW.CO_CAPITAL_STATE != 0xFF0)
 
 # 3. profile_1.19.5.0.json 全部 56 个 anchors 与 offsets_win 一一对应无冲突
 prof = json.loads(

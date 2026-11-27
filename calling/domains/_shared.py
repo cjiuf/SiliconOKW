@@ -245,8 +245,8 @@ def _wargoal_gate(target_tag, cb, justifying=None):
                 "it, then confirm with hoi4_wargoals."
                 % (tgt, left if left is not None else "?",
                    j.get("eta_date") or "?")), "justifying"
-    return ("no casus belli against %s: call hoi4_justify_wargoal(target=%s) "
-            "and wait for it to finish (hoi4_justifying shows days_left and "
+    return ("no casus belli against %s: call justify_wargoal / hoi4_justify_wargoal(target=%s) "
+            "and wait for it to finish (inspect war_readiness shows days_left and "
             "eta_date). Declaring without one is a de-facto cheat -- the "
             "Windows action channel bypasses the engine's own "
             "wargoal-availability gate." % (tgt, tgt)), "missing"

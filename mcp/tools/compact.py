@@ -117,7 +117,8 @@ def _turn_execute_plan(a):
     "When Standing Orders are active (set via hoi4_run_plan set_standing_orders), autopilot "
     "deterministically handles queued focus/research/construction/production/PP/divisions/trivial events "
     "while enforcing the non-disableable Kernel Floor (CB/war/peace/decisive events/PP reserve/heartbeat/max_days/no_progress). "
-    "timeout_seconds is clamped to min(requested, HOI4_WAIT_MAX_S) (default 26s; set HOI4_WAIT_MAX_S=38..90 for longer clients) "
+    "timeout_seconds is clamped to min(requested, HOI4_WAIT_MAX_S) (default 26s; set HOI4_WAIT_MAX_S <= client MCP timeout - 4s "
+    "to avoid client -32001 disconnect while the game keeps advancing) "
     "and echoed in wait.timeout_seconds. "
     "Pass respect_red_dots=false to bypass the red-dot gate for this wait only (wargoal/peace/Kernel Floor still force-pause).",
     dict(

@@ -141,6 +141,10 @@ COMMANDS = {
                 (0x38, "<i", "flag")]),
     "AddConveyorLine":    dict(vt=0x4462988, size=0x30, type=0x34AC,
         fields=[(0x24, "<Q", "conveyor_handle"), (0x2C, "<i", "count")]),
+    # 2026-11-26 (P1-3): 单条训练线移除命令（Windows PE 1.19.5.0 经反汇编实证：
+    # vt=0x2AC08D0, ctor=0x1C2F020, size=0x30, +0x28 接收单条 line 的 {type=63,id} 句柄）。
+    "RemoveConveyorLine": dict(vt=0x4462C00, size=0x30, type=0x3522,
+        fields=[(0x24, "<Q", "line_handle")]),
     "SetConveyorLocation": dict(vt=0x44625A0, size=0x30, type=0x34A9,
         fields=[(0x24, "<Q", "conveyor_handle"), (0x2C, "<i", "province_id")]),
     "SetConveyorPriority": dict(vt=0x44627F8, size=0x30, type=0x34AA,

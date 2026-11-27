@@ -216,9 +216,14 @@ def rebalance_production(
     except Exception:
         pass
 
-    # 若步枪明显超储，压低步枪目标权重并抬高火炮/装甲/空军权重
+    # 若步枪明显超储（绝对库存达标，或步兵装备线已命中 equipmeta.compute_surplus_lines），
+    # 压低步枪目标权重并抬高火炮/装甲/空军权重（2026-11-26 A8 统一口径）
     rifles_now = fam_stock.get("inf", 0.0)
-    rifle_surplus = rifles_now >= max(rifle_soft_cap, divs_eff * 150.0)
+    inf_line_surplus = any(
+        _prod_family(sr.get("equipment")) == "inf"
+        for sr in surplus_by_line.values()
+    )
+    rifle_surplus = (rifles_now >= max(rifle_soft_cap, divs_eff * 150.0)) or inf_line_surplus
     if target_ratios:
         ratios = {str(k).lower(): float(v) for k, v in target_ratios.items() if float(v) >= 0}
     elif rifle_surplus:
@@ -334,8 +339,10 @@ def rebalance_production(
             base_w = max(base_w, 0.28)
         share = line_subweight[m["line"]] / max(0.01, fam_subweight_sum.get(fam, 1.0))
         w = base_w * urgency.get(fam, 1.0) * share
-        # 若某条线本身被 equipmeta 标为严重超储，进一步压权重防回流
-        if m["surplus_info"] and float(m["surplus_info"].get("surplus_ratio") or 0) >= 2.0:
+        # 若某条线本身被 equipmeta 标为严重超储，进一步压权重防回流（2026-11-26 A8 兼容 ratio/surplus_ratio）
+        _sinfo = m["surplus_info"] or {}
+        _sratio = _sinfo.get("ratio") if _sinfo.get("ratio") is not None else _sinfo.get("surplus_ratio")
+        if _sinfo and float(_sratio or 0) >= 2.0:
             w *= 0.45
         weights.append((m["line"], max(0.01, w)))
 
@@ -366,7 +373,9 @@ def rebalance_production(
         if m["deprioritized"] and af < bf:
             reason_parts.append("压减低优先轰炸机")
         elif m["surplus_info"] and af < bf:
-            reason_parts.append("超储线挪厂(库存率%.1fx)" % float(m["surplus_info"].get("surplus_ratio") or 0))
+            _si = m["surplus_info"]
+            _sr_v = _si.get("ratio") if _si.get("ratio") is not None else _si.get("surplus_ratio")
+            reason_parts.append("超储线挪厂(库存率%.1fx)" % float(_sr_v or 0))
         elif m["family"] == "inf" and rifle_surplus and af < bf:
             reason_parts.append("步枪库存%.0f超储抽厂" % rifles_now)
         elif ext_dem.get(m["family"], 0) > 0 and af > bf:
@@ -803,7 +812,18 @@ def plan_front_allocation(
             total_enemy = 0
     force_ratio = round(my_divs / float(max(1, total_enemy)), 2) if total_enemy > 0 else None
 
-    blockers = list(diplo.get("diplomatic_blockers") or [])
+    raw_blockers = list(diplo.get("diplomatic_blockers") or [])
+    # 2026-11-26 (B2 根治): 已处于交战态（already at war）不是部署阻断，
+    # 不得把战中重新分配兵力一刀切判成 verdict="suicidal"！剥离为 info 标注。
+    already_at_war = False
+    blockers = []
+    notes = []
+    for _blk in raw_blockers:
+        if str(_blk or "").strip().lower().startswith("already at war"):
+            already_at_war = True
+            notes.append(str(_blk))
+        else:
+            blockers.append(_blk)
     warnings = list(diplo.get("diplomatic_warnings") or [])
 
     if primary_provs <= 0:
@@ -878,8 +898,10 @@ def plan_front_allocation(
         "fronts": fronts,
         "co_belligerents": diplo.get("co_belligerents") or [],
         "guaranteed_by": diplo.get("guaranteed_by") or [],
+        "already_at_war": already_at_war,
         "blockers": blockers,
         "warnings": warnings,
+        "notes": notes,
         "executed": False,
     }
 
@@ -893,15 +915,26 @@ def plan_front_allocation(
                 % (my_divs, total_enemy, shortfall)
             )
             return out
-        # 落地部署主攻方向，并自动保护所有次要参战国边境不被抽空
+        # 落地部署主攻方向，严格透传主攻补给预算 (primary_alloc) 与本土预备队配额 (total_reserve)，
+        # 并自动保护所有次要参战国边境不被抽空
         protect_tags = [sf["tag"] for sf in sec_fronts]
         try:
-            dep_res = g.deploy_to_border(
-                tgt,
-                tag=me,
-                protect_borders=protect_tags,
-                min_other_garrison=2 if any(sf["is_major"] for sf in sec_fronts) else 1,
-            )
+            try:
+                dep_res = g.deploy_to_border(
+                    tgt,
+                    tag=me,
+                    protect_borders=protect_tags,
+                    min_other_garrison=2 if any(sf["is_major"] for sf in sec_fronts) else 1,
+                    max_divisions=primary_alloc,
+                    reserve_divisions=total_reserve,
+                )
+            except TypeError:
+                dep_res = g.deploy_to_border(
+                    tgt,
+                    tag=me,
+                    protect_borders=protect_tags,
+                    min_other_garrison=2 if any(sf["is_major"] for sf in sec_fronts) else 1,
+                )
         except Exception as e:
             dep_res = {"ok": False, "error": repr(e)}
         out["executed"] = True

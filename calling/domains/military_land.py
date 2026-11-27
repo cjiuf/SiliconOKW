@@ -112,8 +112,16 @@ class MilitaryLandMixin:
                     if not _md or _md < 0x10000000000:
                         continue
                     _pr = p.u32(_md + 0x60) / 1e5
-                    _rows.append({"line_ptr": hex(_ln), "progress": round(_pr, 3),
-                                  "done": _pr >= 0.999})
+                    _lrow = {"line_ptr": hex(_ln), "progress": round(_pr, 3),
+                             "done": _pr >= 0.999}
+                    try:
+                        _lt, _li = struct.unpack("<ii", p.read(_ln + 0x08, 8))
+                        if _lt > 0 and _li >= 0:
+                            _lrow["handle"] = [_lt, _li]
+                            _lrow["packed_handle"] = (_li << 32) | (_lt & 0xFFFFFFFF)
+                    except Exception:
+                        pass
+                    _rows.append(_lrow)
                     _best = max(_best, _pr)
                     _done += 1 if _pr >= 0.999 else 0
                 row["lines_detail"] = _rows
@@ -318,6 +326,203 @@ class MilitaryLandMixin:
                 "deploy_province": int(prov),
                 "errors": errors,
                 "deploy_error": getattr(self, "_last_cmd_error", "")}
+
+    def cancel_training(self, lines=None, conveyor=None, template=None,
+                        cancel_all=False, tag=None, dry_run=False):
+        """缩减或取消训练传送带排线（P1-3 根治，解除 DEFICIT_OVER_TRAINING 死锁）。
+
+        2026-11-26 经 1.19.5.0 PE 反汇编实证：
+          * `CRemoveConveyorLineCommand` (vt 0x2AC08D0, ctor 0x1C2F020, size 0x30,
+            CanExecute 0x1C31940, Execute 0x1C30D30) 接收单条训练线（type 63）的 handle；
+          * `CRemoveConveyorCommand` (vt 0x2AC0690, ctor 0x1C2EF50, size 0x30,
+            CanExecute 0x1C316E0, Execute 0x1C30CB0) 接收整条传送带（type 64）的 handle。
+        优先从训练进度最低的排线开始削减，最大程度保留即将训完的部队；若某传送带全部
+        排线都要取消（或 `cancel_all=True`），直接整条删除传送带。
+        """
+        c = self._c(tag)
+        convs = self.conveyors(c.tag) or []
+        if not convs:
+            return {
+                "ok": False,
+                "blocked_by": "no_training_conveyors",
+                "error": "no active division-training conveyors to cancel",
+                "lines_before": 0,
+                "lines_after": 0,
+            }
+
+        # 过滤目标传送带
+        matched = list(convs)
+        if conveyor is not None and str(conveyor).strip():
+            want = str(conveyor).strip().lower()
+            matched = [
+                cv for cv in matched
+                if (str(cv.get("ptr") or "").lower() == want
+                    or str(cv.get("packed_handle") or "") == want
+                    or hex(int(cv.get("packed_handle") or 0)).lower() == want)
+            ]
+        if template is not None and str(template).strip():
+            tw = str(template).strip().lower()
+            matched = [
+                cv for cv in matched
+                if tw in str(cv.get("template") or "").lower()
+            ]
+        if not matched:
+            return {
+                "ok": False,
+                "blocked_by": "no_matching_conveyor",
+                "error": "no training conveyor matched filter (conveyor=%r, template=%r)" % (conveyor, template),
+                "conveyors": [
+                    {"ptr": cv.get("ptr"), "template": cv.get("template"), "lines": cv.get("lines")}
+                    for cv in convs
+                ],
+            }
+
+        total_before = sum(max(0, int(cv.get("lines") or 0)) for cv in convs)
+        matched_lines = sum(max(0, int(cv.get("lines") or 0)) for cv in matched)
+        if cancel_all:
+            want_remove = matched_lines
+        elif lines is None:
+            # 默认至少减 1 条（若只有 1 条则删整条传送带）
+            want_remove = 1
+        else:
+            want_remove = max(1, int(lines))
+        want_remove = min(want_remove, matched_lines)
+
+        # 生成削减计划：先按单条线进度升序选最不值钱的线；若某传送带所有线都被选中，合并为整带删除
+        flat_lines = []
+        for cv in matched:
+            details = list(cv.get("lines_detail") or ())
+            for idx_l, ld in enumerate(details):
+                flat_lines.append({
+                    "conveyor": cv.get("ptr"),
+                    "conveyor_packed_handle": cv.get("packed_handle"),
+                    "conveyor_lines": int(cv.get("lines") or len(details)),
+                    "template": cv.get("template"),
+                    "line_ptr": ld.get("line_ptr"),
+                    "line_handle": ld.get("handle"),
+                    "line_packed_handle": ld.get("packed_handle"),
+                    "progress": float(ld.get("progress") or 0.0),
+                    "idx_in_conveyor": idx_l,
+                })
+        # 优先删进度最低的线（相同进度按倒序从尾部删，最稳妥）
+        flat_lines.sort(key=lambda x: (x["progress"], -x["idx_in_conveyor"]))
+        chosen = flat_lines[:want_remove]
+
+        by_conv_chosen = {}
+        for item in chosen:
+            by_conv_chosen.setdefault(item["conveyor"], []).append(item)
+
+        plan_ops = []
+        for cv in matched:
+            cptr = cv.get("ptr")
+            picks = by_conv_chosen.get(cptr) or []
+            if not picks and not cancel_all:
+                continue
+            cv_total = int(cv.get("lines") or len(cv.get("lines_detail") or ()))
+            if cancel_all or len(picks) >= cv_total:
+                plan_ops.append({
+                    "kind": "remove_conveyor",
+                    "conveyor": cptr,
+                    "template": cv.get("template"),
+                    "packed_handle": cv.get("packed_handle"),
+                    "lines_removed": cv_total,
+                })
+            else:
+                for it in picks:
+                    plan_ops.append({
+                        "kind": "remove_line",
+                        "conveyor": cptr,
+                        "template": cv.get("template"),
+                        "line_ptr": it.get("line_ptr"),
+                        "packed_handle": it.get("line_packed_handle"),
+                        "progress": it.get("progress"),
+                        "lines_removed": 1,
+                    })
+
+        if dry_run:
+            return {
+                "ok": True,
+                "dry_run": True,
+                "lines_before": total_before,
+                "planned_remove": sum(x["lines_removed"] for x in plan_ops),
+                "projected_lines_after": max(0, total_before - sum(x["lines_removed"] for x in plan_ops)),
+                "operations": plan_ops,
+            }
+
+        op_results = []
+        for op_rec in plan_ops:
+            ph = op_rec.get("packed_handle")
+            if not ph:
+                op_results.append({**op_rec, "ok": False, "error": "missing handle for conveyor/line"})
+                continue
+            cmd_name = (
+                "CRemoveConveyorCommand" if op_rec["kind"] == "remove_conveyor"
+                else "CRemoveConveyorLineCommand"
+            )
+            field_key = "conveyor_handle" if op_rec["kind"] == "remove_conveyor" else "line_handle"
+            step_before = sum(max(0, int(cv.get("lines") or 0)) for cv in (self.conveyors(c.tag) or []))
+            if sys.platform == "win32":
+                import cmdwin
+                try:
+                    cmd_ptr = cmdwin.build_command(self, cmd_name, {field_key: int(ph)})
+                    can_rva = (
+                        cmdwin.CANEXEC_REMOVE_CONVEYOR if op_rec["kind"] == "remove_conveyor"
+                        else cmdwin.CANEXEC_REMOVE_CONVEYOR_LINE
+                    )
+                    can_ok = cmdwin.can_exec(self, cmd_ptr, can_rva)
+                    if not can_ok:
+                        op_results.append({
+                            **op_rec, "ok": False, "can_execute": False,
+                            "error": "%s::CanExecute refused" % cmd_name,
+                        })
+                        continue
+                    def _lines_dropped(_b=step_before):
+                        try:
+                            cur_n = sum(max(0, int(x.get("lines") or 0)) for x in (self.conveyors(c.tag) or []))
+                            return cur_n < _b
+                        except Exception:
+                            return False
+                    try:
+                        pr = cmdwin.post_drained(self, cmd_ptr, seconds=2.0, done_fn=_lines_dropped)
+                    except TypeError:
+                        pr = cmdwin.post_drained(self, cmd_ptr, seconds=2.0)
+                    self._settle(0.15)
+                    step_after = sum(max(0, int(cv.get("lines") or 0)) for cv in (self.conveyors(c.tag) or []))
+                    op_results.append({
+                        **op_rec,
+                        "ok": step_after < step_before,
+                        "can_execute": True,
+                        "posted": pr.get("posted"),
+                        "drained": pr.get("drained"),
+                        "lines_before": step_before,
+                        "lines_after": step_after,
+                    })
+                except Exception as exc:
+                    op_results.append({**op_rec, "ok": False, "error": "%s: %s" % (type(exc).__name__, exc)})
+            else:
+                short_cmd = "RemoveConveyor" if op_rec["kind"] == "remove_conveyor" else "RemoveConveyorLine"
+                with self:
+                    rv = self._run_cmd(self.cmd.make(short_cmd, **{field_key: int(ph)}))
+                self._settle(0.3)
+                step_after = sum(max(0, int(cv.get("lines") or 0)) for cv in (self.conveyors(c.tag) or []))
+                op_results.append({
+                    **op_rec,
+                    "ok": bool(step_after < step_before or (rv & 0xFF)),
+                    "lines_before": step_before,
+                    "lines_after": step_after,
+                })
+
+        total_after = sum(max(0, int(cv.get("lines") or 0)) for cv in (self.conveyors(c.tag) or []))
+        removed_actual = max(0, total_before - total_after)
+        return {
+            "ok": removed_actual > 0,
+            "lines_before": total_before,
+            "lines_after": total_after,
+            "removed": removed_actual,
+            "requested": want_remove,
+            "operations": op_results,
+            "error": (None if removed_actual > 0 else "no training lines were removed"),
+        }
 
     def deploy_ready_conveyors(self, tag=None, min_progress=0.0):
         """Push a conveyor's divisions onto the map (the in-game deploy button).
@@ -1135,11 +1340,13 @@ class MilitaryLandMixin:
                                         spread=spread, max_per_province=max_per_province)
 
     def deploy_to_border(self, target_tag, orders_group=None, include_unassigned=True, tag=None,
-                         protect_borders=None, min_other_garrison=0):
+                         protect_borders=None, min_other_garrison=0,
+                         max_divisions=None, reserve_divisions=0):
         import movemicro
         return movemicro.deploy_to_border(
             self, target_tag, orders_group, include_unassigned, tag,
             protect_borders=protect_borders, min_other_garrison=min_other_garrison,
+            max_divisions=max_divisions, reserve_divisions=reserve_divisions,
         )
 
     def attack_country(self, target_tag, mode="balanced", max_attacks=2, tag=None):

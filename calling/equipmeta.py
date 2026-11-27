@@ -18,6 +18,8 @@ import os
 import pickle
 import re
 
+import session_state as _SS
+
 _CACHE_VERSION = 1
 _MEM_CACHE = {}
 
@@ -45,6 +47,7 @@ _NUM_FIELDS = {k for k, _ in _STAT_LABELS} | {
 
 # 用于防噪音去重：key = (pid, tag) -> set of (line_index, archetype, cur_eq, upgrade_to)
 _SEEN_OBSOLETE = {}
+_SS.register_cache("equipmeta._SEEN_OBSOLETE", container=_SEEN_OBSOLETE)
 
 # 各类别单师安全备货基准（用于判定仓库盈余 SURPLUS，配合 div_count 与下限）
 _SURPLUS_PER_DIV = (
@@ -691,8 +694,15 @@ def analyze_production_lines(lines, available_variants, game_dir: str | None = N
     return result
 
 
-def check_tech_unlocks_obsolete(tech_keys, lines, available_variants, game_dir: str | None = None):
-    """时刻 ①：科技完成瞬间，检查新解锁装备是否令现有任意军工产线立刻过时。"""
+def check_tech_unlocks_obsolete(tech_keys, lines, available_variants, game_dir: str | None = None,
+                                require_active_variant: bool = True):
+    """时刻 ①：科技完成瞬间，检查新解锁装备是否令现有任意军工产线立刻过时。
+
+    2026-11-26 (长跑 §4 根治): 默认 `require_active_variant=True`，只对确实已经存在于
+    `available_variants`（即 `PS_VARIANTS_ACTIVE`，可被 `set_production_line_equipment`
+    实际切换）的新装备发出 OBSOLETE_LINE 告警，彻底杜绝因槽位切换/未完成或变体未生成而
+    伪造出不可执行的 `no active variant` 死循环提醒。
+    """
     data = load(game_dir)
     unlocked = []
     for tk in (tech_keys or []):
@@ -701,15 +711,19 @@ def check_tech_unlocks_obsolete(tech_keys, lines, available_variants, game_dir: 
                 unlocked.append(eq)
     if not unlocked:
         return []
-    # 把刚解锁的装备并入可用列表（防止科技刚完成的一帧内 PS_VARIANTS_ACTIVE 尚未刷新）
     merged_avail = list(available_variants or [])
     existing_names = {
         (v.get("equipment") if isinstance(v, dict) else v) for v in merged_avail
     }
-    for eq in unlocked:
-        if eq not in existing_names:
-            merged_avail.append({"equipment": eq})
-            existing_names.add(eq)
+    if not require_active_variant:
+        for eq in unlocked:
+            if eq not in existing_names:
+                merged_avail.append({"equipment": eq})
+                existing_names.add(eq)
+    else:
+        unlocked = [eq for eq in unlocked if eq in existing_names]
+        if not unlocked:
+            return []
     analysis = analyze_production_lines(lines, merged_avail, game_dir=game_dir)
     hits = []
     for item in analysis.values():
@@ -874,6 +888,7 @@ def compute_surplus_lines(lines, stockpile_totals, total_mil: int, div_count: in
             "stockpile": int(round(stock_qty)),
             "reserve_need": int(round(reserve_need)),
             "ratio": round(ratio, 2),
+            "surplus_ratio": round(ratio, 2),
             "factories": fac,
             "total_mil": total_mil,
             "factory_share_pct": round(share * 100.0, 1),

@@ -450,6 +450,14 @@ def make_unlock_doctrine(game, doctrine_ptr, tag_id=None):
 # briefly run the clock or its success read-back observes a frozen world.
 CANEXEC_ADD_ADVISOR = _OW.CMD_CANEXEC_ADD_ADVISOR           # CAddAdvisorCommand::CanExecute (vtable +0x48)
 CANEXEC_UNLOCK_DOCTRINE = _OW.CMD_CANEXEC_UNLOCK_DOCTRINE   # CUnlockGrandDoctrineCommand::CanExecute (+0x48)
+VT_REMOVE_CONVEYOR_LINE = _OW.CMD_VT_REMOVE_CONVEYOR_LINE
+CTOR_REMOVE_CONVEYOR_LINE = _OW.CMD_CTOR_REMOVE_CONVEYOR_LINE
+CANEXEC_REMOVE_CONVEYOR_LINE = _OW.CMD_CANEXEC_REMOVE_CONVEYOR_LINE
+SIZE_REMOVE_CONVEYOR_LINE = _OW.CMD_SIZE_REMOVE_CONVEYOR_LINE
+VT_REMOVE_CONVEYOR = _OW.CMD_VT_REMOVE_CONVEYOR
+CTOR_REMOVE_CONVEYOR = _OW.CMD_CTOR_REMOVE_CONVEYOR
+CANEXEC_REMOVE_CONVEYOR = _OW.CMD_CANEXEC_REMOVE_CONVEYOR
+SIZE_REMOVE_CONVEYOR = _OW.CMD_SIZE_REMOVE_CONVEYOR
 
 
 def can_unlock_doctrine(game, doctrine_ptr, tag_id=None):
@@ -487,7 +495,7 @@ def can_add_advisor(game, packed_handle, slot):
         return None
 
 
-def post_drained(game, cmd, seconds=2.0):
+def post_drained(game, cmd, seconds=2.0, done_fn=None):
     """enqueue + briefly run the clock, restoring the previous pause state.
 
     Returns {"posted", "was_paused", "drained", "date_before", "date_after"}.
@@ -495,9 +503,13 @@ def post_drained(game, cmd, seconds=2.0):
     is the PE-native resume path (session.pause does the same). A World-News
     popup can still hold the clock -- date_after == date_before reports that.
 
-    2026-11-22 (P1-2): 一旦检测到时钟推进（date_raw != d0，命令队列已被引擎消费），
-    多等 0.15s 收尾即提前恢复暂停，避免每条写命令无条件死睡 2.6s 导致 hoi4_housekeep
-    撞上 50s watchdog。若时钟未动（1 速或弹窗卡住）仍完整等待 `seconds`。
+    2026-11-26 (P0-1 / P2-3 根治):
+      1. 若游戏原本处于暂停态，**先在暂停态下完成 enqueue(game, cmd)** 再短暂解暂停！
+         旧实现先解暂停并死睡 0.15s，让主线程及 16 个 TBB 线程并发执行
+         `hourlyUpdateUnits (0x1EF640 -> 0x20D060 -> 0xDD7BC0 -> 0xC07CE7)` 时
+         再用远线程向队列塞命令，造成竞态崩溃；先入队后解暂停彻底消除入队竞态。
+      2. 轮询间隔压缩至 0.03s，并支持可选 `done_fn`（命令回读已生效即立刻恢复暂停），
+         不再无条件死睡 0.15s + 0.15s + 0.10s，显著减少 4 速下的多余时钟推进。
     """
     import time as _t
     import session as S
@@ -514,32 +526,53 @@ def post_drained(game, cmd, seconds=2.0):
     except Exception as _de:
         import diag as _diag
         _diag.warn("cmdwin.post_drained.date_before", _de)
+
+    # 关键修复：若游戏当前暂停，先在暂停态下安全入队，避免主循环/TBB 线程并发跑 tick 时竞态
+    posted = enqueue(game, cmd)
+    if not posted:
+        return {"posted": posted, "was_paused": was, "drained": False,
+                "date_before": d0, "date_after": d0}
+
+    unpaused = False
     if was:
         p.write(idler + S.IDLER_PAUSED, b"\x00")
-        _t.sleep(0.15)                      # let the loop notice the resume
+        unpaused = True
     d1 = None
+    done_hit = False
     try:
-        posted = enqueue(game, cmd)
-        wait_max = max(0.2, float(seconds or 2.0))
-        if d0 is not None:
-            deadline = _t.monotonic() + wait_max
-            while _t.monotonic() < deadline:
-                _t.sleep(0.12)
+        wait_max = max(0.15, float(seconds or 2.0))
+        deadline = _t.monotonic() + wait_max
+        while _t.monotonic() < deadline:
+            _t.sleep(0.03)
+            if done_fn is not None:
+                try:
+                    if done_fn():
+                        done_hit = True
+                        break
+                except Exception:
+                    pass
+            if d0 is not None:
                 try:
                     cur_d = game.date_raw()
                 except Exception:
                     cur_d = None
                 if cur_d is not None and cur_d != d0:
                     d1 = cur_d
-                    _t.sleep(0.15)          # 留一点余量让同 tick 命令体完全落地
-                    break
-        else:
-            _t.sleep(wait_max)
+                    if done_fn is None:
+                        _t.sleep(0.04)      # 极短收尾确保同 tick 命令体落地
+                        break
+                    # 若调用方给了 done_fn，时钟已跳但状态尚未就绪时再最多多等一小段
+                    try:
+                        if done_fn():
+                            done_hit = True
+                            break
+                    except Exception:
+                        pass
     finally:
-        if was:
+        if was and unpaused:
             try:
                 p.write(idler + S.IDLER_PAUSED, b"\x01")
-                _t.sleep(0.1)
+                _t.sleep(0.03)
             except Exception as _pe:
                 import diag as _diag
                 _diag.warn("cmdwin.post_drained.restore_pause", _pe)
@@ -548,8 +581,9 @@ def post_drained(game, cmd, seconds=2.0):
     except Exception as _de:
         import diag as _diag
         _diag.warn("cmdwin.post_drained.date_after", _de)
+    drained = True if done_hit else ((d1 != d0) if (d0 is not None and d1 is not None) else None)
     return {"posted": posted, "was_paused": was,
-            "drained": (d1 != d0) if (d0 is not None and d1 is not None) else None,
+            "drained": drained,
             "date_before": d0, "date_after": d1}
 
 
@@ -779,6 +813,7 @@ ARGSPEC = {
     "CSetConveyorPriorityCommand": {"conveyor_handle": 1, "priority": 2},
     "CSetConveyorSeriesCommand": {"conveyor_handle": 1, "series": 2},
     "CAddConveyorLineCommand": {"conveyor_handle": 1, "count": 2},
+    "CRemoveConveyorLineCommand": {"line_handle": 1},
     "CDeployConveyorCommand": {"conveyor_handle": 1},
     "CRemoveConveyorCommand": {"conveyor_handle": 1},
     "CSetProductionLineAmountToProduceCommand": {"line": 1, "amount": 2},
@@ -822,6 +857,7 @@ ARG_KIND = {
     "CSetConveyorPriorityCommand": {1: ARG_HANDLEPTR, 2: ARG_INT},
     "CSetConveyorSeriesCommand": {1: ARG_HANDLEPTR, 2: ARG_INT},
     "CAddConveyorLineCommand": {1: ARG_HANDLEPTR, 2: ARG_INT},
+    "CRemoveConveyorLineCommand": {1: ARG_HANDLEPTR},
     "CDeployConveyorCommand": {1: ARG_HANDLEPTR},
     "CRemoveConveyorCommand": {1: ARG_HANDLEPTR},
     "CSetProductionLineAmountToProduceCommand": {1: ARG_HANDLEPTR, 2: ARG_INT},
@@ -896,6 +932,23 @@ SPEC_PATCH = {
         size=SIZE_SET_GAME_SPEED,
         args=1,
         fields=[{"offset": 0x28, "size": 4, "arg": 1, "kind": "int"}]),
+    # 2026-11-26 (P1-3 PE 1.19.5.0 反汇编实证):
+    #   CRemoveConveyorLineCommand: vt 0x2AC08D0, ctor 0x1C2F020, size 0x30,
+    #     CanExecute 0x1C31940, Execute 0x1C30D30; +0x28 接收单条 line (type 63) handle
+    "CRemoveConveyorLineCommand": dict(
+        vt=VT_REMOVE_CONVEYOR_LINE,
+        ctor=CTOR_REMOVE_CONVEYOR_LINE,
+        size=SIZE_REMOVE_CONVEYOR_LINE,
+        args=1,
+        fields=[{"offset": 0x28, "size": 8, "arg": 1, "kind": "handle"}]),
+    #   CRemoveConveyorCommand: vt 0x2AC0690, ctor 0x1C2EF50, size 0x30,
+    #     CanExecute 0x1C316E0, Execute 0x1C30CB0; +0x28 接收整条 conveyor (type 64) handle
+    "CRemoveConveyorCommand": dict(
+        vt=VT_REMOVE_CONVEYOR,
+        ctor=CTOR_REMOVE_CONVEYOR,
+        size=SIZE_REMOVE_CONVEYOR,
+        args=1,
+        fields=[{"offset": 0x28, "size": 8, "arg": 1, "kind": "handle"}]),
 }
 
 
@@ -935,6 +988,7 @@ WIN_SAFE = {
     "CSetConveyorPriorityCommand",
     "CSetConveyorSeriesCommand",
     "CAddConveyorLineCommand",
+    "CRemoveConveyorLineCommand",
     "CDeployConveyorCommand",
     "CRemoveConveyorCommand",
     "CSetProductionLineAmountToProduceCommand",
@@ -997,6 +1051,13 @@ WIN_SAFE = {
     #     CStrategicAir objects; feeding it a CAirWing handle killed the game
     #     (crash #4). airops_win.make_enable_mission raises instead.
     "CStratAirSetMissionCommand",
+    # --- verified 2026-11-26 by full PE disassembly --------------------------
+    # CStratAirTransferCommand: vt 0x2A96CA8, ctor 0x19CCCF0, clone 0x19CF3F0,
+    #   size 0x48 (flat scalars, no heap arrays), CanExecute 0x19D4CC0, Execute 0x19D2090.
+    #   +0x28 u64 wing_handle (type 69), +0x30 u64 target_airbase_handle (type 65),
+    #   +0x38 u8 to_reserve (0=rebase, 1=reserve), +0x39 u8 keep_army (0=detach),
+    #   +0x3C i32 region_id (0=unchanged), +0x40 i32 mission_mask (0=unchanged).
+    "CStratAirTransferCommand",
     #   CUpdateDivisionTemplateCommand  vt 0x2A26E38 size 0x2B0,
     #     CanExecute 0x1C2DD90, Execute 0x1C2D040. +0x28 = shallow copy of the
     #     live CDivisionTemplateData, +0x270 template handle, +0x278 tag,

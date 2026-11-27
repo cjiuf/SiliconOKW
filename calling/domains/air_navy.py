@@ -109,6 +109,17 @@ class AirNavyMixin:
                 owned_rows = owned.get("wings") or []
                 cap = int(limit or 0)
                 ret_rows = owned_rows[:cap] if cap > 0 else owned_rows
+                airbases_list = []
+                try:
+                    for ab in (AW.all_airbases(self, me, only_controlled=True) or []):
+                        airbases_list.append({
+                            k: ab.get(k)
+                            for k in ("state_id", "state_name", "province", "level",
+                                      "capacity", "wing_count", "current_planes", "free_capacity")
+                            if ab.get(k) is not None
+                        })
+                except Exception:
+                    airbases_list = []
                 return {"tag": me,
                         "count": owned.get("count", 0),
                         "returned": len(ret_rows),
@@ -121,6 +132,7 @@ class AirNavyMixin:
                                  "CStrategicAir+0x90; pass all=true for the "
                                  "world census" % (me, owned.get("count", 0)),
                         "types": _count_by(owned_rows, "type"),
+                        "airbases": airbases_list,
                         "wings": ret_rows}
             except Exception as e:
                 return {"count": len(good), "raw_hits": len(raw),
@@ -367,3 +379,293 @@ class AirNavyMixin:
                 "refused": refused,
                 "total_attached": len(already),
                 "attached": attached[:40]}
+
+    def air_mission(self, wings="all", mission=0, flag1=None, flag2=None, tag=None):
+        """对指定空军联队设置或清除作战任务（mission=0/'none'/'stand_down' 即一键停飞省油）。
+
+        2026-11-26 (B5 根治): 供 Compact Plan DSL `air_mission` 动词与 FUEL_ZERO 应急处置直接调用。
+        """
+        if sys.platform != "win32":
+            return {"ok": False, "error": "air_mission is Windows-only"}
+        import airops_win as AW
+
+        _AIR_MISSION_ALIASES = {
+            "none": 0, "off": 0, "stand_down": 0, "ground": 0, "clear": 0,
+            "air_superiority": 1, "superiority": 1,
+            "cas": 2, "close_air_support": 2,
+            "interception": 4, "intercept": 4,
+            "strategic_bombing": 8, "strat_bombing": 8,
+            "naval_strike": 16,
+            "naval_patrol": 32,
+            "port_strike": 64,
+            "logistics_strike": 128,
+        }
+        if isinstance(mission, str):
+            ml = mission.strip().lower()
+            if ml in _AIR_MISSION_ALIASES:
+                mask = _AIR_MISSION_ALIASES[ml]
+            else:
+                try:
+                    mask = int(ml, 0)
+                except ValueError:
+                    return {
+                        "ok": False,
+                        "error": "unknown air mission %r (expected 0/none or %s)"
+                                 % (mission, ", ".join(sorted(AW.MISSION_NAMES.values()))),
+                    }
+        else:
+            mask = int(mission or 0)
+
+        try:
+            picked = AW.select_wings(self, wings or "all")
+        except Exception as e:
+            return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not picked:
+            return {"ok": False, "error": "no player air wings matched selector %r" % (wings,)}
+
+        handles = [h for _wid, h in picked]
+        ids = [wid for wid, _h in picked]
+        enable_bit = 1 if mask != 0 else 0
+        f1 = enable_bit if flag1 is None else int(bool(flag1))
+        f2 = enable_bit if flag2 is None else int(bool(flag2))
+        cmd = AW.make_set_mission(self, handles, mask, f1, f2)
+        can = AW.can_exec(self, cmd, AW.CANEXEC_SET_MISSION)
+        if not can:
+            # 2026-11-26: 战时联队已挂任务（如运输机被自动挂 port_strike=64）时，
+            # 引擎对 SetMission(mask=0) 的 CanExecute 会直接拒绝，导致运输机联队
+            # 永远回不到 mission==0 的 paradrop_ready 状态（伞降被死死卡住）。
+            # mask==0 的语义只是「清掉任务、回到空闲」，等价于把两个字段写 0，
+            # 因此这里退回纯字段写（无引擎调用、可回读校验）。
+            if mask == 0:
+                import offsets_win as _OW
+                try:
+                    _tag = self._c(tag).tag
+                except Exception:
+                    _tag = tag
+                cw = AW.country_wings(self, _tag) or {}
+                by_id = {int(w["id"]): w for w in (cw.get("wings") or [])
+                         if w.get("id") is not None}
+                written, errs = [], []
+                for wid in ids:
+                    row = by_id.get(int(wid))
+                    if not row or not row.get("ptr"):
+                        errs.append({"id": wid, "error": "wing ptr not found"})
+                        continue
+                    try:
+                        wptr = int(row["ptr"], 16)
+                        self.p.write(wptr + _OW.AIR_WING_MISSION, b"\x00\x00\x00\x00")
+                        self.p.write(wptr + _OW.AIR_WING_MISSION_ON, b"\x00\x00\x00\x00")
+                        written.append({
+                            "id": wid,
+                            "mission_after": int(self.p.u32(wptr + _OW.AIR_WING_MISSION)),
+                            "mission_on_after": int(self.p.u32(wptr + _OW.AIR_WING_MISSION_ON)),
+                        })
+                    except Exception as e:
+                        errs.append({"id": wid, "error": repr(e)})
+                ok_write = bool(written) and all(w["mission_after"] == 0 for w in written)
+                return {
+                    "ok": ok_write,
+                    "wings": ids,
+                    "mission": 0,
+                    "can_execute": False,
+                    "fallback": "direct_field_write",
+                    "written": written,
+                    "errors": errs,
+                    "error": "" if ok_write else "direct write did not clear the mission field",
+                }
+            return {
+                "ok": False,
+                "wings": ids,
+                "mission": mask,
+                "can_execute": False,
+                "error": "CStratAirSetMissionCommand::CanExecute refused",
+            }
+        posted = AW.post(self, cmd)
+        # 同步维护 +0xA4 持久化启用位：停飞时清 0，挂任务时置 1
+        try:
+            id_set = set(ids)
+            for wrow in (AW.country_wings(self, self._c(tag).tag).get("wings") or []):
+                if wrow.get("id") in id_set and wrow.get("ptr"):
+                    self.p.write(int(wrow["ptr"], 16) + AW.WING_MISSION_ON, struct.pack("<i", enable_bit))
+        except Exception:
+            pass
+        after = []
+        try:
+            id_set = set(ids)
+            for wrow in (AW.country_wings(self, self._c(tag).tag).get("wings") or []):
+                if wrow.get("id") in id_set:
+                    after.append({
+                        "id": wrow.get("id"),
+                        "type": wrow.get("type"),
+                        "mission": wrow.get("mission"),
+                        "mission_on": wrow.get("mission_on"),
+                    })
+        except Exception:
+            pass
+        return {
+            "ok": bool((posted or {}).get("posted", True)),
+            "wings_count": len(ids),
+            "wing_ids": ids,
+            "mission": mask,
+            "mission_name": AW.mission_name(mask) or "none",
+            "mission_on": bool(enable_bit),
+            "posted": posted,
+            "after": after,
+        }
+
+    def airbases(self, tag=None, only_controlled=True):
+        """纯只读列出可用空军基地（州 ID、省 ID、CAirBase 句柄、等级容量与当前停机数）。"""
+        if sys.platform != "win32":
+            return {"ok": False, "error": "airbases is Windows-only", "airbases": []}
+        import airops_win as AW
+        me = self._c(tag).tag
+        rows = AW.all_airbases(self, me, only_controlled=bool(only_controlled))
+        return {"ok": True, "tag": me, "count": len(rows), "airbases": rows}
+
+    def air_transfer(self, wings, target_state=None, target_province=None,
+                     to_reserve=False, keep_army=False, region_id=0, mission=0,
+                     tag=None, dry_run=False):
+        """将指定空军联队转场至目标州/省空军基地（或解散回后备机库）。
+
+        经 PE 1.19.5.0 `CStratAirTransferCommand`（vt 0x2A96CA8, size 0x48,
+        CanExecute 0x19D4CC0, Execute 0x19D2090）反汇编实证实现。
+        """
+        if sys.platform != "win32":
+            return {"ok": False, "error": "air_transfer is Windows-only"}
+        import airops_win as AW
+        return AW.transfer_wings(
+            self,
+            wings=wings,
+            target_state=target_state,
+            target_province=target_province,
+            to_reserve=bool(to_reserve),
+            keep_army=bool(keep_army),
+            region_id=int(region_id or 0),
+            mission=mission,
+            tag=tag,
+            dry_run=bool(dry_run),
+        )
+
+    def naval_mission(self, fleet=None, task_force=None, mission=0, regions=None,
+                      remove_regions=None, stand_down=False, tag=None):
+        """设置或撤销海军特遣舰队任务与海区（stand_down=True 一键停泊全部非预备舰队省油）。
+
+        2026-11-26 (B5 根治): 供 Compact Plan DSL `naval_mission` 动词与 FUEL_ZERO 应急处置直接调用；
+        严格跳过预备舰队（is_reserve / mission==8），绝不触发预备舰队转正污染。
+        """
+        if sys.platform != "win32":
+            return {"ok": False, "error": "naval_mission is Windows-only"}
+        import navalops_win as NW
+
+        _NAVAL_ALIASES = {
+            "none": 0, "off": 0, "stand_down": 0, "clear": 0, "port": 0,
+            "patrol": 1, "strike_force": 2, "strike": 2,
+            "convoy_raiding": 3, "raiding": 3,
+            "convoy_escort": 4, "escort": 4,
+            "minelaying": 7, "naval_invasion_support": 9, "invasion_support": 9,
+        }
+        if isinstance(mission, str):
+            ml = mission.strip().lower()
+            if ml in _NAVAL_ALIASES:
+                m_int = _NAVAL_ALIASES[ml]
+                if ml in ("stand_down", "port") and fleet is None and task_force is None:
+                    stand_down = True
+            else:
+                try:
+                    m_int = int(ml, 0)
+                except ValueError:
+                    return {
+                        "ok": False,
+                        "error": "unknown naval mission %r" % (mission,),
+                    }
+        else:
+            m_int = int(mission or 0)
+
+        fleets = NW.naval_fleets(self, tag) or []
+        if not fleets:
+            return {"ok": True, "fleets": [], "note": "country has no fleets"}
+
+        def _parse_ptr(v):
+            if v is None:
+                return None
+            if isinstance(v, int):
+                return v
+            s = str(v).strip()
+            return int(s, 16) if s.lower().startswith("0x") else int(s)
+
+        # 一键停泊模式：将全部非预备战斗舰队清回 mission=0，若有 remove_regions 一并移除
+        if stand_down or (m_int == 0 and fleet is None and task_force is None and not regions):
+            cleared_fleets = []
+            skipped_reserve = []
+            for f in fleets:
+                if f.get("is_reserve"):
+                    skipped_reserve.append(f.get("fleet_name") or f.get("fleet_ptr"))
+                    continue
+                fp = int(f["fleet_ptr"], 16)
+                fh = int(f["packed_handle"], 16)
+                rec = {"fleet": f.get("fleet_name"), "fleet_ptr": f.get("fleet_ptr")}
+                if remove_regions:
+                    rec["remove_regions"] = NW.remove_regions(
+                        self, fh, [int(r) for r in remove_regions],
+                        tag=tag, clear_mission_when_empty=True,
+                    )
+                mc = NW.clear_fleet_missions(self, fp)
+                rec["clear_missions"] = mc
+                rec["ok"] = bool(mc.get("ok"))
+                cleared_fleets.append(rec)
+            return {
+                "ok": all(x.get("ok") for x in cleared_fleets) if cleared_fleets else True,
+                "stand_down": True,
+                "fleets_processed": len(cleared_fleets),
+                "reserve_fleets_skipped": skipped_reserve,
+                "results": cleared_fleets,
+            }
+
+        # 定向模式：匹配目标舰队或单个特遣舰队
+        want_f = _parse_ptr(fleet) if fleet is not None else None
+        want_tf = _parse_ptr(task_force) if task_force is not None else None
+        out = {"ok": False, "mission": m_int, "mission_name": NW.MISSION_NAMES.get(m_int),
+               "regions_added": [], "regions_removed": [], "task_forces": []}
+
+        matched_fleets = []
+        for f in fleets:
+            if f.get("is_reserve"):
+                continue
+            fp = int(f["fleet_ptr"], 16)
+            if want_f is not None:
+                if fp == want_f or f.get("fleet_index") == want_f:
+                    matched_fleets.append(f)
+            elif want_tf is not None:
+                if any(int(tf["ptr"], 16) == want_tf or int(tf["packed_handle"], 16) == want_tf
+                       for tf in (f.get("task_forces") or [])):
+                    matched_fleets.append(f)
+            else:
+                matched_fleets.append(f)
+
+        if not matched_fleets:
+            return {"ok": False, "error": "no non-reserve fleet/task_force matched (fleet=%r, task_force=%r)" % (fleet, task_force)}
+
+        for f in matched_fleets:
+            fh = int(f["packed_handle"], 16)
+            for rid in (regions or ()):
+                out["regions_added"].append(NW.add_region(self, fh, int(rid), tag=tag))
+            if remove_regions:
+                out["regions_removed"].append(
+                    NW.remove_regions(self, fh, [int(r) for r in remove_regions],
+                                      tag=tag, clear_mission_when_empty=(m_int == 0))
+                )
+            for tf in (f.get("task_forces") or []):
+                if tf.get("is_reserve") or int(tf.get("mission") or 0) == NW.MISSION_RESERVE:
+                    continue
+                tf_ptr = int(tf["ptr"], 16)
+                tf_h = int(tf["packed_handle"], 16)
+                if want_tf is not None and tf_ptr != want_tf and tf_h != want_tf:
+                    continue
+                out["task_forces"].append(NW.set_mission(self, tf_h, m_int, tag=tag))
+
+        out["ok"] = bool(
+            any(x.get("ok") for x in out["task_forces"])
+            or any(x.get("ok") for x in out["regions_added"])
+            or any(x.get("ok") for x in out["regions_removed"])
+        )
+        return out

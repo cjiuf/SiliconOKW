@@ -132,7 +132,11 @@ CO_OCCUPATION_STATUS = 0xFD0
 CO_COLLABORATION_STATUS = 0xFD8
 CO_INTEL = 0xFE8
 CO_CHARACTERS = 0xFF0
-CO_CAPITAL_STATE = None          # UNVERIFIED on PE (Linux 0xFF0 collides with CO_CHARACTERS)
+# 2026-11-26 0 注入 14 国交叉实测证实（1.19.5.0 PE）：
+#   +0x1018 = 当前实时首都州 ID（GER=64 柏林, FRA=16, ENG=126, SOV=219, CHI=1037 重庆, HOL=309 苏里南）
+#   +0x101C = 原始开局首都州 ID（CHI=1035 南京, HOL=7 荷兰）
+CO_CAPITAL_STATE = 0x1018
+CO_ORIGINAL_CAPITAL_STATE = 0x101C
 CO_RESOURCES = 0x11F8            # CCountryResources*
 CO_NUKES = 0x1310                # CPdxArray<CNuke*> 2 / 2
 
@@ -353,9 +357,13 @@ ORDER_CARMY_VT = 0x29D6D98
 ORDER_CARMY_HANDLE = 0x18
 ORDER_CARMY_OG = 0xC0
 ORDER_CARMY_SECONDARY = 0xB8
+ORDER_CARMY_TEMPLATE = 0x138        # CArmy -> CDivisionTemplate* (0x10B3763 实证)
+ORDER_DT_CAN_PARADROP = 0x5B5       # CDivisionTemplate + 0x5B5 u8 (1=伞兵师, 42 师 6/36 活进程实证)
 ORDER_CARMY_PROVINCE = 0x1F0
 ORDER_CARMY_PATH = 0x200
 ORDER_CARMY_PATH_SIZE = 0x20C
+ORDER_OG_VT = 0x29CEDC0             # COrdersGroup 主虚表 RVA (活进程实证 0x29CEDC0)
+ORDER_OG_VT_SECONDARY = 0x29CEE58   # COrdersGroup 次虚表 RVA (含 0x29CEED0)
 ORDER_OG_HANDLE = 0x08
 ORDER_OG_IS_GROUP = 0x39
 ORDER_OG_THEATRE = 0x40
@@ -422,6 +430,24 @@ ORDER_MV_CTOR = 0x13F6C30
 ORDER_MV_SIZE = 0x88
 ORDER_ACT_OFF = 0x28
 ORDER_UNIT_MOVE_TOKEN = 0x3648
+# 2026-11-26 (PE 1.19.5.0 伞降双命令静态反汇编实证):
+#   COrderSetParadropSourceCommand (size 0x50): +0x28 og_handle, +0x30 order_id(0=新建type4),
+#     +0x34 src_prov_id, +0x38 CPdxArray<CArmy handle>
+#   COrderSetParadropTargetCommand (size 0x38): +0x28 og_handle, +0x30 order_id, +0x34 tgt_prov_id
+ORDER_VT_PARADROP_SOURCE = 0x2A86420
+ORDER_SIZE_PARADROP_SOURCE = 0x50
+ORDER_FN_PARADROP_SOURCE_FACTORY = 0x18D0880
+ORDER_FN_PARADROP_SOURCE_CTOR = 0x18CAB60
+ORDER_CANEXEC_PARADROP_SOURCE = 0x18DFA50
+ORDER_EXEC_PARADROP_SOURCE = 0x18DAC20
+ORDER_VT_PARADROP_TARGET = 0x2A864E0
+ORDER_SIZE_PARADROP_TARGET = 0x38
+ORDER_FN_PARADROP_TARGET_FACTORY = 0x18D08F0
+ORDER_FN_PARADROP_TARGET_CTOR = 0x18CAD40
+ORDER_CANEXEC_PARADROP_TARGET = 0x18DFCE0
+ORDER_EXEC_PARADROP_TARGET = 0x18DAF00
+ORDER_FN_PARADROP_SRC_VALID = 0x10BF1A0
+ORDER_FN_PARADROP_TGT_VALID = 0x10BE700
 
 # ------------------------------------------------------- EVENT_* (events_win)
 EVENT_EVT_VTS = (0x2A16008, 0x2A16060)
@@ -474,6 +500,8 @@ PEACE_GET_CONF = 0x1ED1EE0
 PEACE_GS_CONF = 0x4E0
 PEACE_PUPPET_CTOR = 0x15B4530
 PEACE_NAVY_CTOR = 0x15B4600
+PEACE_ACT_COST = 0x40               # CPeaceAction + 0x40 i32 分值 (0x1A86D10 TurnCost 实证)
+PEACE_ACT_TYPE_TAKE_STATE = 0x30CF  # CTakeStatePeaceAction type id (0xEA9F00 实证)
 
 # ------------------------------------------------------- TRADE_* (trade_win)
 TRADE_BOOK = 0x728
@@ -540,6 +568,15 @@ CMD_VT_SET_PROD_LINE = 0x2A0FF88
 CMD_CTOR_SET_PROD_LINE = 0x11D1550
 CMD_CANEXEC_SET_PROD_LINE = 0x11F2C30
 CMD_SIZE_SET_PROD_LINE = 0x38
+# 2026-11-26 (P1-3 PE 1.19.5.0 反汇编实证): 减训练线 / 删传送带命令
+CMD_VT_REMOVE_CONVEYOR_LINE = 0x2AC08D0
+CMD_CTOR_REMOVE_CONVEYOR_LINE = 0x1C2F020
+CMD_CANEXEC_REMOVE_CONVEYOR_LINE = 0x1C31940
+CMD_SIZE_REMOVE_CONVEYOR_LINE = 0x30
+CMD_VT_REMOVE_CONVEYOR = 0x2AC0690
+CMD_CTOR_REMOVE_CONVEYOR = 0x1C2EF50
+CMD_CANEXEC_REMOVE_CONVEYOR = 0x1C316E0
+CMD_SIZE_REMOVE_CONVEYOR = 0x30
 
 # ------------------------------------------------------- LEADER_* (armyops_win / legality / game)
 LEADER_AL_ATTACK = 0xF58
@@ -593,10 +630,33 @@ AIR_VT_WING = (0x29F7748, 0x29F7780)
 AIR_VT_WING_MAIN = 0x29F7748
 AIR_VT_WING_SECONDARY = 0x29F7780
 AIR_VT_WINGPOOL = 0x29F77D8
+AIR_GS_MGR = 0x690                  # CCurrentGameState + 0x690 -> CStrategicAirManager*
+AIR_SAM_STRAT_AIRS = 0x30           # CStrategicAirManager + 0x30 -> CPdxArray<CStrategicAir*>[tag_idx]
+AIR_SAM_LAND_AIRBASE_PROVS = 0x48   # CStrategicAirManager + 0x48 -> CPdxArray<i32>[state_id] 陆地机场省表 (0xCB0DA2)
+AIR_SA_AIRBASE_MGR = 0x88           # CStrategicAir + 0x88 -> CAirBaseManager*
+AIR_ABM_AIRBASES = 0x90             # CAirBaseManager + 0x90 -> CPdxArray<CAirBase*>[state_id]
+AIR_AB_COUNTRIES = 0x30             # CAirBase + 0x30 -> CPdxArray<CAirBaseCountry*>[tag_idx]
+AIR_ABC_POOLS = 0xB8                # CAirBaseCountry + 0xB8 -> CPdxArray<CAirWingPool*>
+AIR_AWP_DEF = 0x20                  # CAirWingPool + 0x20 -> CAirWingDefinition*
+AIR_AWP_WINGS = 0x28                # CAirWingPool + 0x28 -> CPdxArray<CAirWing*>
+AIR_AWDEF_MISSION_FLAGS = 0x5A8     # CAirWingDefinition + 0x5A8 u64 任务位掩码
+AIR_AWDEF_PARADROP_BIT = 0x100000   # bit 20: 支持伞降/运输机 (0xCA9F40 实证)
 AIR_SA_OWNER = 0x90
+AIR_WING_MIN_0x60 = 0x60            # CAirWing 可用下限 (0xFE2B90: [+0x64] >= [+0x60])
+AIR_WING_CUR_0x64 = 0x64            # CAirWing 当前可用计数
+AIR_WING_BUSY_0x79 = 0x79           # CAirWing 忙碌/转移标志 (0=就绪)
 AIR_WING_PLANES = 0x7C
 AIR_WING_MISSION = 0xA0
 AIR_WING_MISSION_ON = 0xA4
+AIR_WING_RANGE = 0x500              # CAirWing + 0x500 i64 航程固定点 (/100000.0 km, 0xCAA200 实证)
+# 2026-11-26 (PE 1.19.5.0 CStratAirTransferCommand 反汇编实证):
+#   vt=0x2A96CA8, ctor=0x19CCCF0, clone=0x19CF3F0 (size 0x48), CanExecute=0x19D4CC0, Execute=0x19D2090
+#   +0x28 u64 wing_handle (type 69), +0x30 u64 target_airbase_handle (type 65),
+#   +0x38 u8 to_reserve, +0x39 u8 keep_army_attachment (ctor=0), +0x3C i32 region_id, +0x40 i32 mission_mask
+#   Execute -> CAirWing::TransferTo (0xFEBFD0) 立即将目标 CAirBase 句柄写入 wing+0x48，region/mission 写入 +0x70/+0x74
+AIR_WING_TRANSFER_TARGET = 0x48
+AIR_WING_TRANSFER_REGION = 0x70
+AIR_WING_TRANSFER_MISSION = 0x74
 AIR_VT_ATTACH = 0x2A97728
 AIR_SIZE_ATTACH = 0x48
 AIR_CANEXEC_ATTACH = 0x19D3920
@@ -606,6 +666,10 @@ AIR_CANEXEC_SET_MISSION = 0x19D4B30
 AIR_VT_ENABLE_MISSION = 0x2A96B28
 AIR_SIZE_ENABLE_MISSION = 0x60
 AIR_CANEXEC_ENABLE_MISSION = 0x19D4740
+AIR_VT_TRANSFER = 0x2A96CA8
+AIR_SIZE_TRANSFER = 0x48
+AIR_CANEXEC_TRANSFER = 0x19D4CC0
+AIR_EXEC_TRANSFER = 0x19D2090
 
 # ------------------------------------------------------- NAVAL_* (navalops_win)
 NAVAL_VT_SET_TYPE = 0x2A2A808

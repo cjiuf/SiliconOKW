@@ -36,11 +36,13 @@ ALLOWED_ACTIONS = {
     # 科研与工业
     "fill_research",
     "start_research",
+    "unlock_doctrine",
     "add_construction",
     "remove_construction",
     "set_production",
     "upgrade_production",
     "rebalance_production",
+    "create_production_line",
     "trade",
     "housekeep",
     # 军队与战争
@@ -48,10 +50,16 @@ ALLOWED_ACTIONS = {
     "plan_front_allocation",
     "add_to_army",
     "train_divisions",
+    "cancel_training",
     "deploy_ready",
     "purge_orders",
     "reset_battleplans",
     "army_battleplan",
+    "offensive_line",
+    "paradrop",
+    "air_mission",
+    "air_transfer",
+    "naval_mission",
     "justify_wargoal",
     "declare_war",
     # 外交与和会
@@ -87,6 +95,8 @@ ALLOWED_INSPECT_TOPICS = {
     "peace",
     "air",
     "navy",
+    "paradrop_targets",
+    "garrison",
     "staff",
     "health",
     "autopilot",
@@ -99,7 +109,7 @@ ACTION_SPECS = {
     "select_event": {
         "required": (),
         "optional": ("index", "event_id", "lang"),
-        "aliases": {},
+        "aliases": {"option": "index", "option_index": "index"},
         "types": {"index": "pos_int", "event_id": "str", "lang": "str"},
     },
     "set_focus": {
@@ -138,6 +148,12 @@ ACTION_SPECS = {
         "aliases": {"tech": "technology"},
         "types": {"technology": "str", "slot": "nonneg_int"},
     },
+    "unlock_doctrine": {
+        "required": ("doctrine",),
+        "optional": (),
+        "aliases": {"key": "doctrine", "name": "doctrine"},
+        "types": {"doctrine": "str"},
+    },
     "add_construction": {
         "required": ("state", "building"),
         "optional": ("level", "province"),
@@ -173,6 +189,12 @@ ACTION_SPECS = {
         "aliases": {},
         "types": {"dry_run": "bool", "min_factories_per_line": "nonneg_int"},
     },
+    "create_production_line": {
+        "required": ("equipment",),
+        "optional": ("dry_run",),
+        "aliases": {"equipment_name": "equipment"},
+        "types": {"equipment": "str", "dry_run": "bool"},
+    },
     "upgrade_template_preset": {
         "required": (),
         "optional": ("preset", "template", "auto_rebalance", "dry_run"),
@@ -198,9 +220,9 @@ ACTION_SPECS = {
     },
     "housekeep": {
         "required": (),
-        "optional": ("target_construction", "technologies"),
-        "aliases": {},
-        "types": {"target_construction": "pos_int", "technologies": "list_str"},
+        "optional": ("target_construction", "technologies", "budget_s"),
+        "aliases": {"budget": "budget_s"},
+        "types": {"target_construction": "pos_int", "technologies": "list_str", "budget_s": "float"},
     },
     "trade": {
         "required": ("partner", "resource"),
@@ -219,6 +241,18 @@ ACTION_SPECS = {
         "optional": ("template", "lines", "state"),
         "aliases": {"template_name": "template", "state_id": "state"},
         "types": {"template": "str", "lines": "pos_int", "state": "pos_int"},
+    },
+    "cancel_training": {
+        "required": (),
+        "optional": ("lines", "conveyor", "template", "cancel_all", "dry_run"),
+        "aliases": {"count": "lines", "template_name": "template", "all": "cancel_all"},
+        "types": {
+            "lines": "pos_int",
+            "conveyor": "str",
+            "template": "str",
+            "cancel_all": "bool",
+            "dry_run": "bool",
+        },
     },
     "deploy_ready": {
         "required": (),
@@ -250,6 +284,85 @@ ACTION_SPECS = {
             "split": "bool",
         },
     },
+    "offensive_line": {
+        "required": ("orders_group", "parent_order_id"),
+        "optional": ("provinces", "enemy_tag", "divisions", "depth", "enabled"),
+        "aliases": {"army": "orders_group", "order_id": "parent_order_id", "target": "enemy_tag"},
+        "types": {
+            "orders_group": "str",
+            "parent_order_id": "pos_int",
+            "provinces": "list_int",
+            "enemy_tag": "str",
+            "divisions": "list_str",
+            "depth": "nonneg_int",
+            "enabled": "bool",
+        },
+    },
+    "paradrop": {
+        "required": ("orders_group", "target"),
+        "optional": ("source", "divisions", "order_id", "confirm", "dry_run", "replace_existing", "allow_duplicate"),
+        "aliases": {"army": "orders_group", "target_province": "target", "source_province": "source"},
+        "types": {
+            "orders_group": "str",
+            "target": "pos_int",
+            "source": "pos_int",
+            "divisions": "list_str",
+            "order_id": "nonneg_int",
+            "confirm": "bool",
+            "dry_run": "bool",
+            "replace_existing": "bool",
+            "allow_duplicate": "bool",
+        },
+    },
+    "air_mission": {
+        "required": (),
+        "optional": ("wings", "mission", "flag1", "flag2"),
+        "aliases": {"wing": "wings", "mask": "mission"},
+        "types": {
+            "wings": "str",
+            "mission": "int_or_str",
+            "flag1": "bool",
+            "flag2": "bool",
+        },
+    },
+    "air_transfer": {
+        "required": ("wings",),
+        "optional": ("target_state", "target_province", "to_reserve", "keep_army", "region_id", "mission", "dry_run"),
+        "aliases": {
+            "wing": "wings",
+            "state": "target_state",
+            "state_id": "target_state",
+            "dest": "target_state",
+            "province": "target_province",
+            "province_id": "target_province",
+            "reserve": "to_reserve",
+            "region": "region_id",
+            "mask": "mission",
+        },
+        "types": {
+            "wings": "int_or_str",
+            "target_state": "pos_int",
+            "target_province": "pos_int",
+            "to_reserve": "bool",
+            "keep_army": "bool",
+            "region_id": "nonneg_int",
+            "mission": "int_or_str",
+            "dry_run": "bool",
+        },
+    },
+    "naval_mission": {
+        "required": (),
+        "optional": ("fleet", "task_force", "mission", "regions", "remove_regions", "stand_down"),
+        "aliases": {"fleet_ptr": "fleet", "tf": "task_force"},
+        "types": {
+            "fleet": "int_or_str",
+            "task_force": "int_or_str",
+            "mission": "int_or_str",
+            "regions": "list_int",
+            "remove_regions": "list_int",
+            "stand_down": "bool",
+        },
+    },
     "justify_wargoal": {
         "required": ("target",),
         "optional": ("wargoal", "states", "force", "dry_run"),
@@ -264,15 +377,27 @@ ACTION_SPECS = {
     },
     "declare_war": {
         "required": ("target",),
-        "optional": ("dry_run",),
+        "optional": ("dry_run", "ack_co_belligerents", "override_checks"),
         "aliases": {"target_tag": "target"},
-        "types": {"target": "str", "dry_run": "bool"},
+        "types": {
+            "target": "str",
+            "dry_run": "bool",
+            "ack_co_belligerents": "bool",
+            "override_checks": "bool",
+        },
     },
     "peace_demands": {
         "required": ("loser",),
-        "optional": ("winner", "kinds", "states"),
+        "optional": ("winner", "kinds", "states", "replace", "append"),
         "aliases": {},
-        "types": {"loser": "str", "winner": "str", "kinds": "list_str", "states": "list_int"},
+        "types": {
+            "loser": "str",
+            "winner": "str",
+            "kinds": "list_str",
+            "states": "list_int",
+            "replace": "bool",
+            "append": "bool",
+        },
     },
     "peace_finish": {
         "required": (),
@@ -352,6 +477,14 @@ def _check_arg_type(kind, val):
         if not isinstance(val, str) or not val.strip():
             return False, val, "必须是非空字符串"
         return True, val.strip(), None
+    if kind == "int_or_str":
+        if isinstance(val, bool):
+            return False, val, "必须是整数或非空字符串"
+        if isinstance(val, int):
+            return True, int(val), None
+        if isinstance(val, str) and val.strip():
+            return True, val.strip(), None
+        return False, val, "必须是整数或非空字符串"
     if kind == "bool":
         if not isinstance(val, bool):
             return False, val, "必须是布尔值"
@@ -857,10 +990,18 @@ def _render_brief_markdown(data):
     prod_total = int(data.get("production_total") or len(prod))
     if prod:
         shown_p = prod[:12]
-        p_items = [
-            "#%s:%s(%s厂)" % (x.get("index"), x.get("equipment") or "?", x.get("factories", 0))
-            for x in shown_p
-        ]
+        p_items = []
+        for x in shown_p:
+            is_nav = str(x.get("class") or "") == "CNavalProductionLine"
+            cls_tag = "[坞]" if is_nav else ""
+            fac_s = (
+                "%s/%s厂" % (x.get("factories", 0), x["max_dockyards"])
+                if (is_nav and x.get("max_dockyards"))
+                else "%s厂" % x.get("factories", 0)
+            )
+            p_items.append(
+                "#%s%s:%s(%s)" % (x.get("index"), cls_tag, x.get("equipment") or "?", fac_s)
+            )
         extra_p = prod_total - len(shown_p)
         more_p = (" | … +%d 条" % extra_p) if extra_p > 0 else ""
         lines.append("- **生产线(%d)**: %s%s" % (prod_total, " | ".join(p_items), more_p))
@@ -1103,8 +1244,15 @@ def build_turn_brief(g, tag=None, memo=None, last_receipt=None, extra_inspect=No
 
     health_board = None
     try:
-        import macros as _mc
-        health_board = _mc.strategic_health_board(g, tag=my_tag)
+        # 2026-11-26 (A1): 若 g.overview() 刚刚已经计算过本国 health_board，直接复用避免单次简报双算
+        _cached_hb = getattr(g, "_last_overview_hb", None)
+        if (isinstance(_cached_hb, tuple) and len(_cached_hb) == 3
+                and _cached_hb[0] == my_tag and _cached_hb[2]
+                and (time.monotonic() - float(_cached_hb[1])) < 2.0):
+            health_board = _cached_hb[2]
+        else:
+            import macros as _mc
+            health_board = _mc.strategic_health_board(g, tag=my_tag)
     except Exception:
         health_board = None
 
@@ -1303,7 +1451,30 @@ def _run_inspect_one(g, topic, q, tag):
     if topic == "armies":
         arm = g.armies(tag)
         ogs = _safe_call(lambda: g.order_groups(tag), None)
-        return {"armies": arm, "order_groups": ogs}
+        para = None
+        try:
+            import armyops_win as _aw_p
+            para = _aw_p.paratrooper_divisions(g, tag=tag)
+            if isinstance(para, dict):
+                by_og = {x["orders_group"].lower(): x for x in (para.get("by_army") or ())}
+                og_rows = (
+                    ogs if isinstance(ogs, list)
+                    else (ogs.get("groups") or ogs.get("order_groups") or [])
+                    if isinstance(ogs, dict) else []
+                )
+                for row in og_rows:
+                    if isinstance(row, dict) and row.get("ptr"):
+                        pm = by_og.get(str(row["ptr"]).lower())
+                        if pm:
+                            row["paratrooper_count"] = pm["paratrooper_count"]
+                            row["paratroopers"] = pm["paratroopers"]
+        except Exception:
+            para = None
+        out_arm = {"armies": arm, "order_groups": ogs}
+        if isinstance(para, dict):
+            out_arm["paratrooper_count"] = para.get("paratrooper_count", 0)
+            out_arm["paratroopers"] = para.get("paratroopers") or []
+        return out_arm
     if topic == "war_readiness":
         target = q.get("target")
         if not target:
@@ -1343,6 +1514,52 @@ def _run_inspect_one(g, topic, q, tag):
         import navalops_win
         fleets = navalops_win.naval_fleets(g, tag)
         return {"count": len(fleets), "fleets": fleets[:20]}
+    if topic == "paradrop_targets":
+        og = q.get("orders_group") or q.get("army")
+        if isinstance(og, str) and og.strip():
+            og = int(og, 16) if og.strip().lower().startswith("0x") else int(og)
+        src = q.get("source") if q.get("source") is not None else q.get("source_province")
+        return g.paradrop_targets(
+            orders_group=og,
+            source_province=None if src is None else int(src),
+            limit=int(q.get("limit") or 2000),
+            target_tag=(q.get("target") or q.get("enemy_tag") or None),
+            tag=tag,
+        )
+    if topic == "garrison":
+        # 2026-11-26 新增：只读查询某国师级单位当前所在省（伞降前探城防必需）。
+        # q.target = 国家 tag（默认玩家本国）；q.filter = 逗号分隔的省 id 白名单（可选）。
+        import unitorders as _uo
+        tgt = str(q.get("target") or q.get("tag") or tag).upper()
+        pres = _uo.enemy_presence(g, [tgt]) or {}
+        want = q.get("filter")
+        pids = None
+        if want:
+            pids = set()
+            for tok in str(want).replace(";", ",").replace(" ", ",").split(","):
+                tok = tok.strip()
+                if tok.isdigit():
+                    pids.add(int(tok))
+        if pids:
+            pres = {k: v for k, v in pres.items() if int(k) in pids}
+        rows = sorted(pres.items(), key=lambda kv: (-int(kv[1].get("divisions") or 0), int(kv[0])))
+        return {
+            "ok": True,
+            "tag": tgt,
+            "provinces_with_divisions": len(rows),
+            "total_divisions_counted": sum(int(v.get("divisions") or 0) for _, v in rows),
+            "filter_provinces": sorted(pids) if pids else None,
+            "presence": [
+                {
+                    "province": int(k),
+                    "divisions": int(v.get("divisions") or 0),
+                    "org": round(float(v.get("org") or 0.0), 1),
+                    "hp": round(float(v.get("hp") or 0.0), 1),
+                }
+                for k, v in rows[:240]
+            ],
+            "note": "只读：CArmy+prov 指针 + fastmem 批量读；divisions=该省当前驻留师数，org/hp 为合计。",
+        }
     if topic == "staff":
         # 严格只读参谋建议（绝不写档）；默认返回紧凑摘要（~1 KB，避免 8.5 KB 胖包撑爆 compact 上下文），
         # 需要原始全量结构时传 compact=False 或 full=True。
@@ -1501,6 +1718,8 @@ def _dispatch_action(g, op, args, tag):
         )
     if op == "start_research":
         return g.start_research(args["technology"], slot=args.get("slot"), tag=t)
+    if op == "unlock_doctrine":
+        return g.unlock_doctrine(str(args["doctrine"]), tag=t)
     if op == "add_construction":
         return g.add_construction(
             int(args["state"]),
@@ -1528,6 +1747,12 @@ def _dispatch_action(g, op, args, tag):
             dry_run=bool(args.get("dry_run", False)),
             min_factories_per_line=int(args.get("min_factories_per_line", 1)),
         )
+    if op == "create_production_line":
+        return g.create_production_line(
+            str(args["equipment"]),
+            tag=t,
+            dry_run=bool(args.get("dry_run", False)),
+        )
     if op == "upgrade_template_preset":
         import macros as _mc
         return _mc.upgrade_template_preset(
@@ -1550,6 +1775,14 @@ def _dispatch_action(g, op, args, tag):
             allow_understrength=bool(args.get("allow_understrength", False)),
         )
     if op == "housekeep":
+        kw_hk = {}
+        if args.get("budget_s") is not None:
+            kw_hk["budget_s"] = max(5.0, min(120.0, float(args["budget_s"])))
+        if kw_hk:
+            try:
+                return g.housekeep(t, args.get("target_construction"), args.get("technologies") or [], **kw_hk)
+            except TypeError:
+                pass
         return g.housekeep(t, args.get("target_construction"), args.get("technologies") or [])
     if op == "trade":
         return g.create_trade(
@@ -1576,6 +1809,15 @@ def _dispatch_action(g, op, args, tag):
             state_id=args.get("state"),
             tag=t,
         )
+    if op == "cancel_training":
+        return g.cancel_training(
+            lines=args.get("lines"),
+            conveyor=args.get("conveyor"),
+            template=args.get("template"),
+            cancel_all=bool(args.get("cancel_all", False)),
+            tag=t,
+            dry_run=bool(args.get("dry_run", False)),
+        )
     if op == "deploy_ready":
         return g.deploy_ready_conveyors(t, float(args.get("min_progress") or 0.0))
     if op == "purge_orders":
@@ -1591,6 +1833,72 @@ def _dispatch_action(g, op, args, tag):
             armies=args.get("armies"),
             split=bool(args.get("split", True)),
         )
+    if op == "offensive_line":
+        og_raw = args["orders_group"]
+        og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
+        divs_raw = args.get("divisions")
+        divs_ptrs = (
+            [int(x, 16) if isinstance(x, str) and x.lower().startswith("0x") else int(x) for x in divs_raw]
+            if divs_raw else None
+        )
+        return g.offensive_line(
+            og_ptr,
+            int(args["parent_order_id"]),
+            provinces=args.get("provinces") or [],
+            divisions=divs_ptrs,
+            enemy_tag=args.get("enemy_tag"),
+            depth=int(args.get("depth", 1)),
+            enabled=args.get("enabled"),
+        )
+    if op == "paradrop":
+        og_raw = args["orders_group"]
+        og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
+        divs_raw = args.get("divisions")
+        divs_ptrs = (
+            [int(x, 16) if isinstance(x, str) and x.lower().startswith("0x") else int(x) for x in divs_raw]
+            if divs_raw else None
+        )
+        return g.paradrop(
+            og_ptr,
+            source_province=args.get("source"),
+            target_province=int(args["target"]),
+            divisions=divs_ptrs,
+            order_id=int(args.get("order_id") or 0),
+            confirm=bool(args.get("confirm", False)),
+            dry_run=bool(args.get("dry_run", False)),
+            replace_existing=bool(args.get("replace_existing", False)),
+            allow_duplicate=bool(args.get("allow_duplicate", False)),
+        )
+    if op == "air_mission":
+        return g.air_mission(
+            wings=args.get("wings") or "all",
+            mission=args.get("mission", 0),
+            flag1=args.get("flag1"),
+            flag2=args.get("flag2"),
+            tag=t,
+        )
+    if op == "air_transfer":
+        return g.air_transfer(
+            wings=args["wings"],
+            target_state=args.get("target_state"),
+            target_province=args.get("target_province"),
+            to_reserve=bool(args.get("to_reserve", False)),
+            keep_army=bool(args.get("keep_army", False)),
+            region_id=int(args.get("region_id") or 0),
+            mission=args.get("mission", 0),
+            tag=t,
+            dry_run=bool(args.get("dry_run", False)),
+        )
+    if op == "naval_mission":
+        return g.naval_mission(
+            fleet=args.get("fleet"),
+            task_force=args.get("task_force"),
+            mission=args.get("mission", 0),
+            regions=args.get("regions"),
+            remove_regions=args.get("remove_regions"),
+            stand_down=bool(args.get("stand_down", False)),
+            tag=t,
+        )
     if op == "justify_wargoal":
         return g.justify_wargoal(
             str(args["target"]).upper(),
@@ -1601,13 +1909,16 @@ def _dispatch_action(g, op, args, tag):
             tag=t,
         )
     if op == "declare_war":
-        # 硬规则：绝不通过 Plan DSL 开启 override_checks
+        # 2026-11-26：owner 明确要求保留一条显式强制宣战通道。
+        # 默认 override_checks=False（仍然不绕过引擎/前置校验）；只有调用方**显式**
+        # 传 override_checks=True 才放行，并且自动视同 ack_co_belligerents=True。
+        _oc = bool(args.get("override_checks", False))
         return g.declare_war(
             str(args["target"]).upper(),
             dry_run=bool(args.get("dry_run", False)),
-            force=False,
-            override_checks=False,
-            ack_co_belligerents=bool(args.get("ack_co_belligerents", False)),
+            force=_oc,
+            override_checks=_oc,
+            ack_co_belligerents=bool(args.get("ack_co_belligerents", False)) or _oc,
         )
     if op == "peace_demands":
         import peacewin
@@ -1616,6 +1927,8 @@ def _dispatch_action(g, op, args, tag):
         win_idx = g.country(str(win_tag).upper()).tag_id if win_tag else int(g.player_tag_id())
         kinds = args.get("kinds") or ["state"]
         states = args.get("states")
+        replace = bool(args.get("replace", False))
+        append = bool(args.get("append", not replace)) and (not replace)
         with g:
             conf = peacewin.live_conference(g)
             if not conf:
@@ -1623,12 +1936,28 @@ def _dispatch_action(g, op, args, tag):
             finfo = {}
             try:
                 turn, acts = peacewin.submit_demands(
-                    g, conf, win_idx, lose_idx, kinds, states=states, filter_info=finfo
+                    g, conf, win_idx, lose_idx, kinds, states=states, filter_info=finfo,
+                    append=append, replace=replace,
                 )
             except ValueError as e:
                 return {"ok": False, "error": str(e), **finfo}
-            out = {"ok": True, "turn": turn, "actions": len(acts),
-                   "loser": str(args["loser"]).upper(), "status": peacewin.summary(g)}
+            out = {
+                "ok": True,
+                "turn": turn,
+                "actions": len(acts),
+                "mode": finfo.get("mode"),
+                "added_actions": finfo.get("added_actions"),
+                "total_queued_actions": finfo.get("total_queued_actions"),
+                "queued_states_by_loser": finfo.get("queued_states_by_loser"),
+                "estimated_added_cost": finfo.get("estimated_added_cost"),
+                "estimated_total_cost": finfo.get("estimated_total_cost"),
+                "score_now": finfo.get("score_now"),
+                "over_budget": finfo.get("over_budget"),
+                "loser": str(args["loser"]).upper(),
+                "status": peacewin.summary(g),
+            }
+            if finfo.get("budget_warning"):
+                out["budget_warning"] = finfo["budget_warning"]
             if states is not None:
                 out["matched_states"] = finfo.get("matched_states")
                 if finfo.get("ignored_states"):
@@ -1722,7 +2051,11 @@ def _summarize_action_result(op, args, res):
         return "[OK] %s -> %s" % (op, str(res)[:80])
     ok = res.get("ok")
     blocked = res.get("blocked_by")
-    err = res.get("error") or res.get("reason")
+    # 仅在确实失败（ok is not True）时才把 reason 当作失败原因；
+    # ack_autopilot / clear_standing_orders 等成功返回体携带的 reason 属于正常回显说明，绝不误标 [FAIL]。
+    err = res.get("error")
+    if not err and ok is not True:
+        err = res.get("reason")
     arg_brief = ",".join(
         "%s=%s" % (k, v)
         for k, v in (args or {}).items()
@@ -1798,6 +2131,7 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
     receipt_lines = []
     aborted = False
     abort_reason = None
+    d_before = _safe_call(lambda: g.date(), {}) or {}
 
     for idx, act in enumerate(actions):
         op = act["op"]
@@ -1835,13 +2169,17 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
             break
 
     receipt_text = "\n".join(receipt_lines) if receipt_lines else "(本回合无写动作)"
+    d_after = _safe_call(lambda: g.date(), {}) or {}
+    h0 = d_before.get("raw")
+    h1 = d_after.get("raw")
+    adv_hours = max(0, int(h1) - int(h0)) if (h0 is not None and h1 is not None) else 0
 
     # 覆写式保存回合状态（绑定 pid + proc_start + tag + date_raw，防止换档/重启串味）
     if persist_state:
         cur_pid = getattr(getattr(g, "p", None), "pid", None)
         cur_start = _proc_start_ticks(cur_pid)
         cur_tag = tag or _safe_call(lambda: g.player_tag(), None)
-        cur_date_raw = (_safe_call(lambda: g.date(), {}) or {}).get("raw")
+        cur_date_raw = h1
         st = load_turn_state(
             pid=cur_pid, proc_start=cur_start, tag=cur_tag, date_raw=cur_date_raw
         )
@@ -1867,16 +2205,25 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
             pass
 
     ok_count = sum(1 for r in results if r["ok"])
-    return {
+    plan_out = {
         "ok": not aborted,
         "aborted": aborted,
         "abort_reason": abort_reason,
         "executed": len(results),
         "succeeded": ok_count,
         "failed": len(results) - ok_count,
+        "date_before": d_before.get("text"),
+        "date_after": d_after.get("text"),
+        "clock_advanced_hours": adv_hours,
         "receipt_text": receipt_text,
         "results": results,
     }
+    if adv_hours > 0:
+        plan_out["clock_note"] = (
+            "game clock advanced by %d hour(s) during post_drained command execution "
+            "(HOI4 requires unpaused ticks to consume CCommandQueue)" % adv_hours
+        )
+    return plan_out
 
 
 # ===================================================================== 等钟 + 简报合一

@@ -365,7 +365,80 @@ class DiplomacyWarMixin:
         p.write(a + 0x70, struct.pack("<i", 1))
         p.write(a + 0x74, struct.pack("<i", 1))
         return {"ok": True, "repaired": True, "size": p.i32(a + 0x74),
-                "capacity": p.i32(a + 0x70), "data": hex(buf), "state": int(state_id)}
+                "capacity": p.i32(a + 0x70), "data": hex(buf), "state": int(state_id),
+                "reason": ("PE engine creates CTimedWargoalActivity with an empty state array; "
+                           "populated target state_id to prevent completion AV at hoi4.exe+0xB2E62E")}
+
+    def _win_wargoal_types_map(self):
+        """Windows 1.19.5.0 纯只读构建 {wargoal_name: CWarGoalType*} 映射并按 (pid, base) 缓存。"""
+        p = getattr(self, "p", None)
+        key = (getattr(p, "pid", None), getattr(p, "base", None))
+        cached = getattr(self, "_win_wgt_cache", None)
+        if getattr(self, "_win_wgt_cache_key", None) == key and cached:
+            return cached
+        found = {}
+        try:
+            db = self.oi.singleton("CWarGoalDatabase") if hasattr(self, "oi") else None
+            if db:
+                for it in _arr(p, db, 0x40):
+                    nm = item_name(p, it + 0x18)
+                    if not nm or not (2 < len(nm) < 48):
+                        for o in range(0, 0x120, 8):
+                            v2 = item_name(p, it + o)
+                            if v2 and v2.isprintable() and 2 < len(v2) < 48 and not v2.startswith("/"):
+                                nm = v2
+                                break
+                    if nm and nm not in found:
+                        found[nm] = it
+        except Exception:
+            pass
+        if not found and hasattr(self, "win_scan_class"):
+            try:
+                for it in (self.win_scan_class("CWarGoalType") or ()):
+                    nm = item_name(p, it + 0x18)
+                    if not nm or not (2 < len(nm) < 48):
+                        for o in range(0, 0x120, 8):
+                            v2 = item_name(p, it + o)
+                            if v2 and v2.isprintable() and 2 < len(v2) < 48 and not v2.startswith("/"):
+                                nm = v2
+                                break
+                    if nm and nm not in found:
+                        found[nm] = it
+            except Exception:
+                pass
+        if found:
+            self._win_wgt_cache_key = key
+            self._win_wgt_cache = found
+        return found
+
+    def _resolve_wargoal_type(self, wargoal, target_tag=None):
+        """解析宣战理由类型指针，返回 (ptr, valid_names, explicit_missing)。
+
+        2026-11-26 (P0-1 根治):
+          绝不再用 `except: wgt = 0` 静默吞掉未解析的理由名（如 'annex'）。
+          实测 `wgt == 0` 会落回 CGenerateWarGoalAction 默认 ctor 的空理由，引擎返回
+          posted=1 但 200 天不生成 CTimedWargoalActivity。
+        """
+        wg = str(wargoal or "").strip()
+        if not wg:
+            return 0, [], True
+        wmap = self._win_wargoal_types_map() if sys.platform == "win32" else {}
+        if wg in wmap:
+            return int(wmap[wg]), sorted(wmap.keys()), False
+        try:
+            ptr = int(self.resolve("wargoal:" + wg, target_tag) or 0)
+            if ptr:
+                return ptr, sorted(wmap.keys()), False
+        except KeyError:
+            return 0, sorted(wmap.keys()), True
+        except Exception:
+            pass
+        if wmap:
+            return 0, sorted(wmap.keys()), True
+        # 离线极简 mock 无 CWarGoalDatabase：仅放行默认合法名 take_state，其余一律拒掉
+        if wg != "take_state":
+            return 0, ["take_state", "take_claimed_state", "take_core_state", "topple_government"], True
+        return 0, [], False
 
     def justify_wargoal(self, target_tag, wargoal="take_state", states=None,
                         dry_run=False, force=False, tag=None):
@@ -382,6 +455,27 @@ class DiplomacyWarMixin:
         import diplomacy
         _ = tag  # Windows 命令通道按当前玩家会话发起，保留形参兼容 Plan DSL 与多国调用方
         if sys.platform == "win32":
+            # 2026-11-26 (P0-1 根治): 前置 0 注入校验 wargoal 名称，绝不把未知理由名（如 'annex'）
+            # 静默吞成 wgt=0 后伪造 ok=True！dry_run 与真写共用同一套解析门禁。
+            wgt, valid_wgs, wg_missing = self._resolve_wargoal_type(wargoal, target_tag)
+            if wg_missing:
+                return {
+                    "ok": False,
+                    "dry_run": bool(dry_run),
+                    "posted": 0,
+                    "blocked_by": "unknown_wargoal",
+                    "target": target_tag,
+                    "wargoal": wargoal,
+                    "wargoal_type_ptr": None,
+                    "valid_wargoals": valid_wgs,
+                    "suggested_wargoal": "take_state",
+                    "error": (
+                        "unknown wargoal type %r (not found in CWarGoalDatabase). "
+                        "Use 'take_state' for standard diplomatic justification "
+                        "(available: %s). Nothing was posted."
+                        % (wargoal, ", ".join(valid_wgs) if valid_wgs else "take_state")
+                    ),
+                }
             # 2026-11-15: the old path called diplomacy._new_action_param ->
             # g.call(ctor, ...) on a PE backend whose setregs is not implemented;
             # winject then read a scratch flag it never wrote and hoi4.exe died
@@ -401,6 +495,8 @@ class DiplomacyWarMixin:
                 _need = _q.get("estimated_upfront_pp", _q.get("estimated_total_pp"))
                 return {"ok": True, "dry_run": True, "posted": 0,
                         "target": target_tag, "wargoal": wargoal,
+                        "wargoal_type_ptr": hex(wgt) if wgt else None,
+                        "wargoal_valid": True,
                         "political_power": _pp,
                         "estimated_upfront_pp": _need,
                         "estimated_total_pp": _q.get("estimated_total_pp"),
@@ -461,14 +557,6 @@ class DiplomacyWarMixin:
                          % (_pp, float(_need), float(_q.get("daily_pp_drain") or 0.2)))
             import cmdwin
             c = self._c(target_tag)
-            # Resolve the CWarGoalType* for the requested wargoal. take_state is
-            # the diplomacy dialog default; the default ctor already installs a
-            # valid type, so an unresolved name just leaves that one in place.
-            wgt = 0
-            try:
-                wgt = int(self.resolve("wargoal:" + str(wargoal), c.tag) or 0)
-            except Exception:
-                wgt = 0
             # 2026-11-19 (crash #7, 05:59): the activity's state array starts
             # EMPTY, and the engine formats the "war goal finished" message from
             # states[size-1] (+0x68/+0x70/+0x74) -- size 0 reads [-4] and the
@@ -511,16 +599,36 @@ class DiplomacyWarMixin:
                         pass
             if mine and mine.get("ptr"):
                 diplomacy.track_activity_ptr(self, mine["ptr"])
-            return {"ok": bool(r.get("ok")), "posted": r.get("posted"),
-                    "warning": _warn,
-                    "target": target_tag, "target_id": c.tag_id,
-                    "wargoal": wargoal, "wargoal_type_ptr": hex(wgt) if wgt else None,
-                    "action": hex(r.get("act") or 0), "cmd": hex(r.get("cmd") or 0),
-                    "started": mine, "verified": mine is not None,
-                    "wargoal_state_repaired": repaired,
-                    "note": (None if mine else
-                             "command posted; the timed activity appears on the next "
-                             "unpaused frame — call hoi4_justifying to confirm")}
+            # 2026-11-26 (P0-1 根治): 未读到 CTimedWargoalActivity 时绝不再返回 ok=True 假成功！
+            ok_final = bool(r.get("ok")) and (mine is not None)
+            out_j = {
+                "ok": ok_final,
+                "posted": r.get("posted"),
+                "warning": _warn,
+                "target": target_tag,
+                "target_id": c.tag_id,
+                "wargoal": wargoal,
+                "wargoal_type_ptr": hex(wgt) if wgt else None,
+                "action": hex(r.get("act") or 0),
+                "cmd": hex(r.get("cmd") or 0),
+                "started": mine,
+                "verified": mine is not None,
+                "wargoal_state_repaired": repaired,
+                "note": (
+                    None if mine else
+                    "command was posted but no CTimedWargoalActivity appeared; "
+                    "check hoi4_inspect(topic='war_readiness', target=%r) and ensure wargoal='take_state' "
+                    "and game clock can advance" % target_tag
+                ),
+            }
+            if not ok_final and mine is None:
+                out_j["blocked_by"] = "justification_not_started"
+                out_j["error"] = (
+                    "justify_wargoal(%s, wargoal=%r) posted command but engine did not create "
+                    "a CTimedWargoalActivity (check war_readiness, target legality, world tension, or wargoal type)"
+                    % (target_tag, wargoal)
+                )
+            return out_j
         readiness = None
         if not force:
             try:
@@ -711,7 +819,7 @@ class DiplomacyWarMixin:
                                    "a time — check hoi4_justifying)" % target_tag)),
                         "wargoal": wargoal,
                         "states": [self.p.i32(x + ST_ID) for x in sp],
-                        "active": diplomacy.justifying(self)}
+                        "active": diplomacy.justifying(self, include_queued=True)}
         return {"ok": ok, "error": err, "wargoal": wargoal, "dry_run": bool(dry_run),
                 "pp_spent": _pp_spent,
                 "states": [self.p.i32(x + ST_ID) for x in sp],
@@ -741,7 +849,8 @@ class DiplomacyWarMixin:
                 _c = self.country(src)
                 cur_pp = _c.political_power
                 tgt = self.country(target_tag)
-                acts = [x for x in _D.justifying(self)
+                # 2026-11-26: O(1) 直读当前发起国正当化，杜绝 0 正当化时触发 3.8 GB 全堆扫描
+                acts = [x for x in _D.justifying_fast(self, tag=src)
                         if x.get("from") == src and
                         x.get("source_class") == "CTimedWargoalActivity"]
                 concurrent = len(acts)
@@ -793,9 +902,9 @@ class DiplomacyWarMixin:
                     "estimated_days": days,
                     "estimated_completion_date": _D._add_game_days(self, days),
                     "estimated_total_pp": total_pp,
-                    "estimate_source": ("00_invasion.txt: 200 base + 30 production "
-                                        "+ 50/extra state, x1.5 per concurrent "
-                                        "justification; 0.2 PP/day"),
+                    "estimate_source": ("00_invasion.txt: 200 base + 50/extra state, "
+                                        "x1.5 per concurrent justification; 0.2 PP/day "
+                                        "(unmodified base; exact duration appears in CTimedWargoalActivity once started)"),
                     "note": "pure-read estimate; nothing was written or posted",
                 }
             except Exception as e:

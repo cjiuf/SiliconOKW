@@ -337,17 +337,21 @@ def _add_to_army(a):
        "target": {"type": "integer", "description": "target province id"},
        "divisions": {"type": "array", "items": _INT,
                      "description": "division pointers (from hoi4_divisions) to assign"},
-       "confirm": {"type": "boolean"}},
+       "confirm": {"type": "boolean"},
+       "dry_run": {"type": "boolean"}},
       ["orders_group", "target"])
 def _paradrop(a):
-    import armyops
     src = a.get("source")
     divs = [_ptr(x) for x in (a.get("divisions") or [])] or None
-    ok, err = armyops.paradrop(game(), _ptr(a["orders_group"]),
-                               None if src is None else int(src), int(a["target"]),
-                               divs,
-                               int(a.get("order_id") or 0), bool(a.get("confirm")))
-    return {"ok": bool(ok), "error": err}
+    return game().paradrop(
+        _ptr(a["orders_group"]),
+        source_province=None if src is None else int(src),
+        target_province=int(a["target"]),
+        divisions=divs,
+        order_id=int(a.get("order_id") or 0),
+        confirm=bool(a.get("confirm")),
+        dry_run=bool(a.get("dry_run")),
+    )
 
 
 @tool("hoi4_paradrop_reserved",
@@ -373,20 +377,26 @@ def _paradrop_reserved(a):
        "tag": {"type": "string", "description": "optional: only provinces this country controls"}},
       ["orders_group"])
 def _paradrop_targets(a):
-    import armyops
     src = a.get("source")
-    out = armyops.paradrop_targets(game(), _ptr(a["orders_group"]),
-                                   None if src is None else int(src),
-                                   int(a.get("limit") or 2000))
-    tag = (a.get("tag") or "").upper()
+    og = _ptr(a["orders_group"]) if a.get("orders_group") is not None else None
+    tag = (a.get("tag") or "").upper() or None
+    out = game().paradrop_targets(
+        orders_group=og,
+        source_province=None if src is None else int(src),
+        limit=int(a.get("limit") or 2000),
+        target_tag=tag,
+    )
+    if isinstance(out, dict):
+        return out
+    provs = list(out or [])
     if tag:
         try:
             import mapdata
             ctrl = mapdata.province_controller_map(game())
-            out = [p for p in out if ctrl.get(p) == tag]
+            provs = [p for p in provs if ctrl.get(p) == tag]
         except Exception:
             pass
-    return {"count": len(out), "provinces": out}
+    return {"ok": True, "count": len(provs), "provinces": provs}
 
 
 @tool("hoi4_combat_report",

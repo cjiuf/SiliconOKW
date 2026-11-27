@@ -434,12 +434,26 @@ class HousekeepMixin:
         # Runs even when there is no idle factory: the freed factories show up on
         # the NEXT allocation pass, so the cap must not be gated behind `idle`.
         capped_lines = self._cap_deprioritized_lines(tag, _rules0)
-        lines = self.production_lines(tag)      # re-read: a swap changes the variant
-        summary = self.player().summary() if tag in (None, "", "player") else self.country(tag).summary()
-        total_mil = int(summary.get("military_factories") or 0)
-        mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-        used = sum(int(l.get("factories") or 0) for l in mil)
-        idle = max(0, total_mil - used)
+        def _read_mil_budget():
+            """统一使用引擎 CProductionStatus 校准后的可用/空闲军工（A10 根治），离线/mock 平滑降级。"""
+            ls = self.production_lines(tag)
+            ms = [l for l in ls if l.get("class") == "CMilitaryProductionLine"]
+            used_l = sum(int(l.get("factories") or 0) for l in ms)
+            try:
+                if hasattr(self, "factory_allocation"):
+                    alloc = self.factory_allocation(tag)
+                    if isinstance(alloc, dict) and alloc.get("source") == "engine_production_status":
+                        avail_m = int(alloc.get("military_available") or 0)
+                        used_m = int(alloc.get("military_used") or used_l)
+                        idle_m = int(alloc.get("military_idle") or 0)
+                        return ls, ms, avail_m, used_m, idle_m
+            except Exception:
+                pass
+            summ = self.player().summary() if tag in (None, "", "player") else self.country(tag).summary()
+            tot_m = int(summ.get("military_factories") or 0)
+            return ls, ms, tot_m, used_l, max(0, tot_m - used_l)
+
+        lines, mil, total_mil, used, idle = _read_mil_budget()
 
         # 2026-11-22 (复测 5 §8.5 / §8.9 #6): 识别严重过剩产线（SURPLUS，如步兵装备库存
         # > 2 倍安全储备且占军工 > 20%），在回执中明确给出 surplus_lines / surplus_factories，
@@ -470,10 +484,7 @@ class HousekeepMixin:
                             "ok": bool(_rtrim.get("ok")),
                         })
                 if surplus_trimmed:
-                    lines = self.production_lines(tag)
-                    mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-                    used = sum(int(l.get("factories") or 0) for l in mil)
-                    idle = max(0, total_mil - used)
+                    lines, mil, total_mil, used, idle = _read_mil_budget()
         except Exception:
             pass
 
@@ -492,10 +503,7 @@ class HousekeepMixin:
                     res = self.create_production_line(air[-1], tag=tag)
                     created_line = {"equipment": air[-1], "ok": bool(res.get("ok")),
                                     "error": res.get("error")}
-                    lines = self.production_lines(tag)
-                    mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-                    used = sum(int(l.get("factories") or 0) for l in mil)
-                    idle = max(0, total_mil - used)
+                    lines, mil, total_mil, used, idle = _read_mil_budget()
             except Exception as e:
                 created_line = {"ok": False, "error": str(e)}
 
@@ -554,10 +562,7 @@ class HousekeepMixin:
             # Veteran rule: 25k rifles in the warehouse means the infantry line is
             # done — shift the next factories into fighters/CAS and armour.
             ratio_map = dict(rules.get("ratios_rifle_surplus") or ratio_map)
-        lines = self.production_lines(tag)
-        mil = [l for l in lines if l.get("class") == "CMilitaryProductionLine"]
-        used = sum(int(l.get("factories") or 0) for l in mil)
-        idle = max(0, total_mil - used)
+        lines, mil, total_mil, used, idle = _read_mil_budget()
         low = {}
         need = (("inf", ("infantry_equipment",), 3000),
                 ("art", ("artillery_equipment", "support_equipment"), 1200))
@@ -638,10 +643,15 @@ class HousekeepMixin:
                 continue
             res = self.set_production_amount(l["index"], want, tag)
             after = int(res.get("after", before))
-            changes.append({"line": l["index"], "group": self._prod_group(l.get("equipment")),
-                            "equipment": l.get("equipment"),
-                            "before": before, "after": after, "requested": want,
-                            "granted": after - before, "ok": bool(res.get("ok"))})
+            ch_row = {
+                "line": l["index"], "group": self._prod_group(l.get("equipment")),
+                "equipment": l.get("equipment"),
+                "before": before, "after": after, "requested": want,
+                "granted": after - before, "ok": bool(res.get("ok")),
+            }
+            if res.get("note") or res.get("error"):
+                ch_row["note"] = res.get("note") or res.get("error")
+            changes.append(ch_row)
         used_after = sum(int(l.get("factories") or 0) for l in self.production_lines(tag)
                          if l.get("class") == "CMilitaryProductionLine")
         return {"ok": used_after >= total_mil or used_after > used,
@@ -1338,12 +1348,69 @@ class HousekeepMixin:
         except Exception:
             return None
 
-    def housekeep_air(self, tag=None):
+    def _peacetime_fuel_conserve(self, tag=None):
+        """判断当前是否应遵守和平期节油策略（默认和平期 conserve，不主动升空/出海烧油）。
+
+        2026-11-26 (B9 根治): 1936 开局处于和平期时，housekeep 若自动把 14 个空军联队
+        置 +0xA4=1 并把海军挂北海巡逻，会在无任何战事时把油库烧穿并反复触发 FUEL_ZERO。
+        仅在已开战或 Standing Orders 显式设 fuel.peacetime_mode="normal" 时才自动升空出海；
+        若无法读取战争状态（如最小离线 mock 桩），不盲目拦截。
+        """
+        # 1) 可靠判定当前是否处于战争状态（明确读到才判定，不可读则返回 unknown 放行）
+        war_known = False
+        at_war = False
+        try:
+            import combat as _cb
+            if hasattr(_cb, "at_war"):
+                # 若未 monkey-patch combat.at_war，则需具备底层 p 才调用以免在空桩上误返 False
+                _is_patched = getattr(_cb.at_war, "__name__", "") != "at_war"
+                if _is_patched or getattr(self, "p", None) is not None:
+                    at_war = bool(_cb.at_war(self, tag))
+                    war_known = True
+        except Exception:
+            pass
+        if not war_known or not at_war:
+            try:
+                if hasattr(self, "wars"):
+                    _w_fn = getattr(self, "wars")
+                    if getattr(self, "p", None) is not None or not hasattr(_w_fn, "__func__"):
+                        w = _w_fn(tag)
+                        if isinstance(w, dict):
+                            war_known = True
+                            if w.get("enemies") or w.get("at_war"):
+                                at_war = True
+            except Exception:
+                pass
+        if not war_known:
+            return False, "unknown"
+        if at_war:
+            return False, "at_war"
+        # 2) 读取 Standing Orders 当前阶段的 fuel.peacetime_mode（默认 conserve）
+        mode = "conserve"
+        try:
+            import autopilot as _ap
+            st = _ap.get_active_state(self, tag=tag) if hasattr(_ap, "get_active_state") else None
+            if isinstance(st, dict) and st.get("active"):
+                prof = st.get("profile") or {}
+                cur_ph = st.get("current_phase")
+                stages = prof.get("stages") or {}
+                st_cfg = stages.get(cur_ph) if isinstance(stages, dict) and cur_ph in stages else prof
+                fl = (st_cfg or {}).get("fuel") or {}
+                if isinstance(fl, dict) and fl.get("peacetime_mode"):
+                    mode = str(fl["peacetime_mode"]).strip().lower()
+        except Exception:
+            mode = "conserve"
+        return (mode != "normal"), mode
+
+    def housekeep_air(self, tag=None, force=False):
         """Air force: give the wings a mission AND attach them to the armies.
 
         2026-11-17: neither had ever been done in any campaign (the 1940 run ended
         with 15 wings at mission 0 and 0 attached).
         2026-11-23 (复测 9 D-4): 燃油枯竭（<= 10）时跳过挂空军任务，避免与 FUEL_ZERO 互相打架。
+        2026-11-26 (B9 根治): 和平期默认遵循节油策略（fuel.peacetime_mode="conserve"），
+        仅执行 0 油耗的附着陆军集团军（attach_air_wings_to_armies），不给联队挂作战升空任务；
+        开战后或传 force=True 自动正常挂满任务。
         """
         fuel = self._current_fuel(tag)
         try:
@@ -1358,11 +1425,22 @@ class HousekeepMixin:
                 }
         except Exception:
             pass
+        conserve, pmode = (False, "forced") if force else self._peacetime_fuel_conserve(tag)
         out = {}
-        try:
-            out["missions"] = self.set_air_missions(tag)
-        except Exception as e:
-            out["missions"] = {"ok": False, "error": str(e)}
+        if conserve:
+            out["missions"] = {
+                "ok": True,
+                "skipped": True,
+                "skipped_reason": "peacetime_fuel_conservation",
+                "peacetime_mode": pmode,
+                "note": "当前处于和平期（peacetime_mode=%s），已跳过升空作战任务以节约燃油；仅执行 0 油耗空军附着陆军。" % pmode,
+            }
+            out["skipped_reason"] = "peacetime_fuel_conservation"
+        else:
+            try:
+                out["missions"] = self.set_air_missions(tag)
+            except Exception as e:
+                out["missions"] = {"ok": False, "error": str(e)}
         try:
             out["attach"] = self.attach_air_wings_to_armies(tag)
         except Exception as e:
@@ -1371,7 +1449,7 @@ class HousekeepMixin:
                          or (out.get("attach") or {}).get("ok"))
         return out
 
-    def housekeep_navy(self, tag=None):
+    def housekeep_navy(self, tag=None, force=False):
         """Navy: give every idle combat task force a Patrol mission.
 
         2026-11-22 (复测 5 P1 §3.1): 严禁触碰预备舰队（is_reserve / mission==8）。
@@ -1382,10 +1460,12 @@ class HousekeepMixin:
         并保证 fleets[] 与 still_idle 口径完全一致。
         2026-11-23 (复测 9 D-4): 燃油枯竭（<= 10）时严禁自动给舰队补海域与挂巡逻，
         避免覆盖玩家手动停船省油的操作并重新触发 FUEL_ZERO 红点。
+        2026-11-26 (B9 根治): 和平期默认遵循节油策略（fuel.peacetime_mode="conserve"），
+        不主动派作战舰队出海巡逻，避免开局即烧空德国油库；开战后或传 force=True 照常出击。
         """
         import sys
         out = {"ok": True, "fleets": [], "assigned": 0, "posted": 0, "skipped": [],
-               "reserve_fleets_skipped": [], "regions_added": []}
+               "reserve_fleets_skipped": [], "regions_added": [], "still_idle": []}
         fuel = self._current_fuel(tag)
         try:
             import equipmeta as _em
@@ -1400,6 +1480,15 @@ class HousekeepMixin:
                 return out
         except Exception:
             pass
+        conserve, pmode = (False, "forced") if force else self._peacetime_fuel_conserve(tag)
+        if conserve:
+            out.update({
+                "ok": True,
+                "skipped_reason": "peacetime_fuel_conservation",
+                "peacetime_mode": pmode,
+                "note": "当前处于和平期（peacetime_mode=%s），已跳过派舰队出海巡逻以节约燃油（开战后或传 force=True 自动恢复）。" % pmode,
+            })
+            return out
         if sys.platform != "win32":
             out["ok"] = False
             out["error"] = "navy housekeep is the Windows path"
@@ -1571,6 +1660,12 @@ class HousekeepMixin:
         import time as _time
         t0 = _time.monotonic()
         budget = float(budget_s or 40.0)
+        try:
+            _d0 = self.date() if hasattr(self, "date") else {}
+        except Exception:
+            _d0 = {}
+        if not isinstance(_d0, dict):
+            _d0 = {}
         out = {"ok": True, "timings": {}}
         budget_exceeded = False
         # 2026-11-22 (复测 5 §3.3 / §3.4):
@@ -1668,6 +1763,22 @@ class HousekeepMixin:
             + ("; skipped: %s" % ", ".join(skipped_steps) if skipped_steps else "")
         )
         out["elapsed_s"] = round(_time.monotonic() - t0, 2)
+        try:
+            _d1 = self.date() if hasattr(self, "date") else {}
+        except Exception:
+            _d1 = {}
+        if not isinstance(_d1, dict):
+            _d1 = {}
+        _h0, _h1 = _d0.get("raw"), _d1.get("raw")
+        _adv_h = max(0, int(_h1) - int(_h0)) if (_h0 is not None and _h1 is not None) else 0
+        out["date_before"] = _d0.get("text")
+        out["date_after"] = _d1.get("text")
+        out["clock_advanced_hours"] = _adv_h
+        if _adv_h > 0:
+            out["clock_note"] = (
+                "game clock advanced by %d hour(s) during post_drained command execution "
+                "(HOI4 requires unpaused ticks to consume CCommandQueue)" % _adv_h
+            )
         if budget_exceeded:
             out["budget_exceeded"] = True
             out["note"] = ("hit %.0fs soft budget (kept safely under the 50s MCP watchdog); "
@@ -1768,11 +1879,18 @@ class HousekeepMixin:
             pass
         try:
             lines = self.production_lines(tag)
-            total = self._c(tag).summary().get("military_factories") or 0
-            used = sum(int(l.get("factories") or 0) for l in lines
-                       if l.get("class") == "CMilitaryProductionLine")
-            if total - used >= 2:
-                out.append("MIL_FACTORY_IDLE: %d 座军工厂闲置未分配" % (total - used))
+            idle_mil = None
+            if hasattr(self, "factory_allocation"):
+                _fa = self.factory_allocation(tag)
+                if isinstance(_fa, dict) and _fa.get("source") == "engine_production_status":
+                    idle_mil = int(_fa.get("military_idle") or 0)
+            if idle_mil is None:
+                total = self._c(tag).summary().get("military_factories") or 0
+                used = sum(int(l.get("factories") or 0) for l in lines
+                           if l.get("class") == "CMilitaryProductionLine")
+                idle_mil = max(0, total - used)
+            if idle_mil >= 2:
+                out.append("MIL_FACTORY_IDLE: %d 座军工厂闲置未分配" % idle_mil)
         except Exception:
             pass
         return out

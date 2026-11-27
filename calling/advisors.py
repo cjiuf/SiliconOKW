@@ -27,20 +27,32 @@ def _blocks(text):
         yield key, text[m.end():i - 1]
 
 
+_TRAITS_CACHE = {}
+_ADVISORS_CACHE = {}
+
+
 def load_traits(game_dir=None):
     game_dir = game_dir if game_dir is not None else config.game_dir(required=False)
     if not game_dir:
         return {}
+    cache_key = os.path.normcase(os.path.abspath(str(game_dir)))
+    cached = _TRAITS_CACHE.get(cache_key)
+    if cached is not None:
+        return {k: dict(v) for k, v in cached.items()}
     variables = {}
-    for p in glob.glob(os.path.join(game_dir, "common", "country_leader", "*.txt")):
-        with open(p, encoding="utf-8", errors="replace") as _fh:
-            raw = _fh.read()
+    file_texts = []
+    for p in sorted(glob.glob(os.path.join(game_dir, "common", "country_leader", "*.txt"))):
+        try:
+            with open(p, encoding="utf-8", errors="replace") as _fh:
+                raw = _fh.read()
+        except OSError:
+            continue
+        file_texts.append(raw)
         for vm in re.finditer(r"^\s*@([A-Za-z0-9_]+)\s*=\s*([+-]?\d+(?:\.\d+)?)", raw, re.M):
             variables[vm.group(1)] = float(vm.group(2))
     mods = {}
-    for p in glob.glob(os.path.join(game_dir, "common", "country_leader", "*.txt")):
-        with open(p, encoding="utf-8", errors="replace") as _fh:
-            t = _strip(_fh.read())
+    for raw in file_texts:
+        t = _strip(raw)
         for key, body in _blocks(t):
             kv = {}
             for m in re.finditer(r"^\s*([A-Za-z0-9_]+)\s*=\s*([+-]?\d+(?:\.\d+)?|@[A-Za-z0-9_]+)\s*$", body, re.M):
@@ -54,7 +66,8 @@ def load_traits(game_dir=None):
                 kv[k] = float(v)
             if kv:
                 mods.setdefault(key, {}).update(kv)
-    return mods
+    _TRAITS_CACHE[cache_key] = mods
+    return {k: dict(v) for k, v in mods.items()}
 
 
 def _subblock(text, keyword):
@@ -73,11 +86,22 @@ def load_advisors(tag="GER", game_dir=None):
     game_dir = game_dir if game_dir is not None else config.game_dir(required=False)
     if not game_dir:
         return []
+    t_up = str(tag or "GER").upper()
+    cache_key = (os.path.normcase(os.path.abspath(str(game_dir))), t_up)
+    cached = _ADVISORS_CACHE.get(cache_key)
+    if cached is not None:
+        return [
+            dict(r, traits=list(r["traits"]), modifiers=dict(r["modifiers"]))
+            for r in cached
+        ]
     traits = load_traits(game_dir)
     out = []
-    for p in glob.glob(os.path.join(game_dir, "common", "characters", "*%s*.txt" % tag)):
-        with open(p, encoding="utf-8", errors="replace") as _fh:
-            t = _strip(_fh.read())
+    for p in sorted(glob.glob(os.path.join(game_dir, "common", "characters", "*%s*.txt" % t_up))):
+        try:
+            with open(p, encoding="utf-8", errors="replace") as _fh:
+                t = _strip(_fh.read())
+        except OSError:
+            continue
         for ckey, body in _blocks(t):
             for am in re.finditer(r"\badvisor\s*=\s*\{", body):
                 j = am.end()
@@ -110,7 +134,11 @@ def load_advisors(tag="GER", game_dir=None):
                     "visible_block": _subblock(ab, "visible"),
                 })
     out.sort(key=lambda a: (-a["army_xp_per_day"], a["slot"], a["character"]))
-    return out
+    _ADVISORS_CACHE[cache_key] = out
+    return [
+        dict(r, traits=list(r["traits"]), modifiers=dict(r["modifiers"]))
+        for r in out
+    ]
 
 
 def advisor_table(tag="GER", slot=None, game_dir=None):

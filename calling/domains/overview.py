@@ -91,7 +91,51 @@ class OverviewMixin:
             return []
         return fleets or []
 
-    def _light_alerts(self, tag, summary, lines, cur):
+    def _factory_counts(self, tag, summary, lines):
+        """统一权威工厂口径（N1 根治）：优先使用引擎 CProductionStatus 校准后的可用/空闲数，
+        避免占领区合规折算（如 73 建 - 3 折损 = 70 可用）与 reddots 口径打架；离线/mock 平滑降级。"""
+        raw_mil = int((summary or {}).get("military_factories") or 0)
+        raw_dock = int((summary or {}).get("naval_dockyards") or 0)
+        used_mil_l = sum(int(l.get("factories") or 0) for l in (lines or ())
+                         if l.get("class") == "CMilitaryProductionLine")
+        used_dock_l = sum(int(l.get("factories") or 0) for l in (lines or ())
+                          if l.get("class") == "CNavalProductionLine")
+        try:
+            if hasattr(self, "factory_allocation"):
+                alloc = self.factory_allocation(tag)
+                if isinstance(alloc, dict) and alloc.get("source") == "engine_production_status":
+                    mil_avail = int(alloc.get("military_available") or 0)
+                    mil_used = int(alloc.get("military_used") or 0)
+                    mil_idle = int(alloc.get("military_idle") or 0)
+                    dock_avail = int(alloc.get("naval_available") or 0)
+                    dock_used = int(alloc.get("naval_used") or 0)
+                    dock_idle = int(alloc.get("naval_idle") or 0)
+                    return {
+                        "source": "engine_production_status",
+                        "mil_total": mil_avail,
+                        "mil_raw": int(alloc.get("military_raw_buildings") or raw_mil),
+                        "mil_used": mil_used,
+                        "mil_free": mil_idle,
+                        "dock_total": dock_avail,
+                        "dock_raw": int(alloc.get("naval_raw_buildings") or raw_dock),
+                        "dock_used": dock_used,
+                        "dock_free": dock_idle,
+                    }
+        except Exception:
+            pass
+        return {
+            "source": "summary_fallback",
+            "mil_total": raw_mil,
+            "mil_raw": raw_mil,
+            "mil_used": used_mil_l,
+            "mil_free": max(0, raw_mil - used_mil_l),
+            "dock_total": raw_dock,
+            "dock_raw": raw_dock,
+            "dock_used": used_dock_l,
+            "dock_free": max(0, raw_dock - used_dock_l),
+        }
+
+    def _light_alerts(self, tag, summary, lines, cur, _cons=None, _slots=None, _fcounts=None, _hb_out=None):
         """Alerts for hoi4_overview, without the 15 s focus ranking.
 
         `alerts()` calls selectable_focuses() and available_research(); together
@@ -106,7 +150,7 @@ class OverviewMixin:
         except Exception:
             pass
         try:
-            slots = self.research_slots(tag)
+            slots = _slots if _slots is not None else self.research_slots(tag)
             empty = [s["slot"] for s in slots if not s.get("slot_busy")]
             if empty:
                 out.append("RESEARCH_IDLE: %d 个科研槽空置 (slot %s)"
@@ -143,7 +187,8 @@ class OverviewMixin:
         except Exception:
             pass
         try:
-            q = len(self.construction_queue(tag))
+            cons_rows = _cons if _cons is not None else self.construction_queue(tag)
+            q = len(cons_rows)
             civ = summary.get("civilian_factories") or 0
             if q == 0:
                 # 2026-11-17 (third pass): a 1939 save came back with 66 civilian
@@ -160,8 +205,7 @@ class OverviewMixin:
                 # (line 0 stayed at 141.75 IC / 1.3% for 110 game days during
                 # which a factory actually finished), so the factory ledger is
                 # the only trustworthy signal here.
-                _assigned = sum(int(l.get("factories") or 0)
-                                for l in self.construction_queue(tag))
+                _assigned = sum(int(l.get("factories") or 0) for l in cons_rows)
                 _idle = int(civ) - _assigned
                 # 2026-11-21 (续测 P2-9): `civ` is the RAW built level, which
                 # includes the factories permanently locked to consumer goods --
@@ -183,14 +227,13 @@ class OverviewMixin:
                 out.append("UNASSIGNED_DIVS: %d 个师未编入集团军" % n)
         except Exception:
             pass
+        fc = _fcounts if isinstance(_fcounts, dict) else self._factory_counts(tag, summary, lines)
         try:
-            total = summary.get("military_factories") or 0
-            used = sum(int(l.get("factories") or 0) for l in lines
-                       if l.get("class") == "CMilitaryProductionLine")
-            if total - used >= 2:
+            mil_free = int(fc.get("mil_free") or 0)
+            if mil_free >= 2:
                 out.append("MIL_FACTORY_IDLE: %d 座军工厂闲置未分配"
                            " -> hoi4_set_production_amount / hoi4_add_production_line"
-                           % (total - used))
+                           % mil_free)
         except Exception:
             pass
         # --- 2026-11-17 (third pass): the last two blind spots -----------------
@@ -199,13 +242,12 @@ class OverviewMixin:
         # codebase: the line is drawn, the UI shows it, and not one division ever
         # marches.  Both are cheap reads on data already in hand.
         try:
-            dock = summary.get("naval_dockyards") or 0
-            used = sum(int(l.get("factories") or 0) for l in lines
-                       if l.get("class") == "CNavalProductionLine")
-            if dock and dock - used >= 2:
+            dock = int(fc.get("dock_total") or 0)
+            dock_free = int(fc.get("dock_free") or 0)
+            if dock and dock_free >= 2:
                 out.append("DOCKYARD_IDLE: %d/%d 座船坞闲置未分配"
                            " -> hoi4_set_production_amount(line=..., amount=...)"
-                           % (dock - used, dock))
+                           % (dock_free, dock))
         except Exception:
             pass
         try:
@@ -359,6 +401,8 @@ class OverviewMixin:
         try:
             import macros as _mc
             _hb = _mc.strategic_health_board(self, tag=tag) or {}
+            if isinstance(_hb_out, dict):
+                _hb_out["value"] = _hb
             for _hal in (_hb.get("alerts") or []):
                 if _hal.get("severity") == "high":
                     out.append("%s: %s (%s)" % (_hal.get("code"), _hal.get("title"), _hal.get("action") or ""))
@@ -446,14 +490,24 @@ class OverviewMixin:
         return out
 
     def overview(self, tag=None):
+        import time as _t_ov
         c = self._c(tag)
         cur = self.current_focus(c.tag)
         summary = c.summary()
         lines = self.production_lines(c.tag)
-        used_mil = sum(int(l.get("factories") or 0) for l in lines
-                       if l.get("class") == "CMilitaryProductionLine")
-        alerts = self._light_alerts(c.tag, summary, lines, cur)
         cons = self.construction_queue(c.tag)
+        research = self.research_slots(c.tag)
+        fcounts = self._factory_counts(c.tag, summary, lines)
+        hb_box = {}
+        alerts = self._light_alerts(
+            c.tag, summary, lines, cur,
+            _cons=cons, _slots=research, _fcounts=fcounts, _hb_out=hb_box,
+        )
+        if hb_box.get("value"):
+            try:
+                self._last_overview_hb = (c.tag, _t_ov.monotonic(), hb_box["value"])
+            except Exception:
+                pass
         armies_n = len(_arr(self.p, c.ptr, CO_ARMIES))
         unassigned = len(self.unassigned_divisions(c.tag))
         dec = self.decisions(c.tag, "visible", rich=True)
@@ -465,7 +519,6 @@ class OverviewMixin:
         dec_mine = [d for d in dec if d.get("mine", True)]
         cand = self._light_candidates(c.tag, lines, dec_rows=dec)
         tree = self.focus_tree(c.tag)
-        research = self.research_slots(c.tag)
         politics = self.politics(c.tag)
         prod = lines
         states = self.states(c.tag)
@@ -482,9 +535,15 @@ class OverviewMixin:
             "date": self.date()["text"],
             "alerts": alerts,
             "factories": {"civ_total": summary.get("civilian_factories"),
-                          "mil_total": summary.get("military_factories"),
-                          "mil_free": max(0, (summary.get("military_factories") or 0) - used_mil),
-                          "dock_total": summary.get("naval_dockyards"),
+                          "mil_total": fcounts["mil_total"],
+                          "mil_raw_buildings": fcounts["mil_raw"],
+                          "mil_used": fcounts["mil_used"],
+                          "mil_free": fcounts["mil_free"],
+                          "dock_total": fcounts["dock_total"],
+                          "dock_raw_buildings": fcounts["dock_raw"],
+                          "dock_used": fcounts["dock_used"],
+                          "dock_free": fcounts["dock_free"],
+                          "factory_source": fcounts["source"],
                           "construction_queue_len": len(cons)},
             "army_summary": {"total_divisions": armies_n,
                              "unassigned_divisions": unassigned},

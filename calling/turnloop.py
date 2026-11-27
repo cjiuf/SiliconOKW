@@ -514,6 +514,29 @@ class TurnLoop:
                     },
                 }
 
+        # 2026-11-26 (A11 根治): 若开跑前和平会议已处于打开状态，HOI4 引擎会锁死游戏时钟
+        # 直到玩家/模型处理完和会；旧代码只做了边沿触发 (`cur and not prev`) 导致
+        # autopilot=false 时白白空转 25s 撞安全制动。入口直检 O(1) 并立即停表返回。
+        if "peace" in signals or "war" in signals:
+            try:
+                import peacewin as _pw0
+                if bool(_pw0.live_conference_readonly(g)):
+                    paused_pc = self._force_pause_safe(g)
+                    return {
+                        "ok": True,
+                        "woke_because": [
+                            "peace conference already open (game clock locked until peace conference is resolved)"
+                        ],
+                        "waited_game_days": 0.0,
+                        "waited_real_seconds": 0.0,
+                        "timed_out": False,
+                        "paused": paused_pc,
+                        "peace_open": True,
+                        "date": (g.date().get("text") if isinstance(getattr(g, "date", None) and g.date(), dict) else None),
+                    }
+            except Exception:
+                pass
+
         # 2026-11-23: 闸门 A/B 开跑前硬拦截 —— 若当前已有未解决且未签收的阻塞红点
         # （待决事件/空国策/空科研/PP>=500/XP>=100/空闲工厂/新决议/限时任务等），
         # 直接强制停表并返回红点清单，严禁带病偷跑。
@@ -702,6 +725,17 @@ class TurnLoop:
                     if ap_res.get("wake_triggers"):
                         ap_floor_woke = True
                         ap_wake_triggers = list(ap_res["wake_triggers"])
+                        # 2026-11-26 (长跑 §11): 若 autopilot 已回报同语义的 war_or_peace / wargoal_or_cb，
+                        # 剔除 hard_reasons 中重复的底层字符串（如 "WAR: INS" 与 "autopilot[war_or_peace]: WAR declared: INS"）。
+                        _ap_floors = {str(_t.get("floor") or "") for _t in ap_wake_triggers}
+                        _dup_prefixes = []
+                        if "war_or_peace" in _ap_floors:
+                            _dup_prefixes.extend(("WAR:", "war ended:", "peace conference opened"))
+                        if "wargoal_or_cb" in _ap_floors:
+                            _dup_prefixes.extend(("wargoal ready (CB available):", "justification completed -> CB ready:"))
+                        if _dup_prefixes:
+                            _dp = tuple(_dup_prefixes)
+                            hard_reasons = [r for r in hard_reasons if not r.startswith(_dp)]
                         for _t in ap_wake_triggers[:5]:
                             hard_reasons.append("autopilot[%s]: %s" % (_t.get("floor"), _t.get("detail")))
                     # 常规运营原因若已被自动驾驶平稳接管，则不再唤醒模型；只保留硬原因
@@ -713,6 +747,15 @@ class TurnLoop:
                     if fl_hits:
                         ap_floor_woke = True
                         ap_wake_triggers = list(fl_hits)
+                        _ap_floors = {str(_t.get("floor") or "") for _t in ap_wake_triggers}
+                        _dup_prefixes = []
+                        if "war_or_peace" in _ap_floors:
+                            _dup_prefixes.extend(("WAR:", "war ended:", "peace conference opened"))
+                        if "wargoal_or_cb" in _ap_floors:
+                            _dup_prefixes.extend(("wargoal ready (CB available):", "justification completed -> CB ready:"))
+                        if _dup_prefixes:
+                            _dp = tuple(_dup_prefixes)
+                            reasons = [r for r in reasons if not r.startswith(_dp)]
                         for _t in ap_wake_triggers[:5]:
                             reasons.append("autopilot[%s]: %s" % (_t.get("floor"), _t.get("detail")))
 
@@ -720,11 +763,16 @@ class TurnLoop:
             # 2026-11-25: 尊重全局开关 reddots.CONFIG['enabled']，使 hoi4_red_dot_guard(enabled=false)
             # 与闸门 B/C 语义完全统一。
             red_dot_blocking = []
+            _obs_acked_in_rd = False
             if respect_red_dots:
                 try:
                     import reddots as _rd
                     if _rd.CONFIG.get("enabled", True):
                         _rd_ev = _rd.evaluate(g, fast=True)
+                        _obs_acked_in_rd = any(
+                            isinstance(x, dict) and x.get("code") == "OBSOLETE_LINE"
+                            for x in (_rd_ev.get("acked") or ())
+                        )
                         if _rd_ev.get("has_blocking"):
                             red_dot_blocking = _rd_ev.get("blocking") or []
                             for _it in red_dot_blocking[:5]:
@@ -733,16 +781,27 @@ class TurnLoop:
                     pass
             # 2026-11-22 (复测 5 §8.4 时刻 ①): 科研完成的瞬间立刻比对新解锁装备是否
             # 导致现有产线过时，把 OBSOLETE_LINE 提醒直接附进唤醒原因和返回体。
+            # 2026-11-26 (长跑 §4 根治):
+            #   1) 仅当从槽位离开的科技确实已进入 g.researched() 才视为完成（过滤中途换槽/取消）；
+            #   2) 仅对真实存在于 _avail (PS_VARIANTS_ACTIVE) 的可切换装备提醒；
+            #   3) 尊重 reddots 中对 OBSOLETE_LINE 的有效签收，避免反复唤醒已签收项。
             obsolete_unlocked = []
-            if "research" in prev and "research" in cur:
+            if "research" in prev and "research" in cur and not _obs_acked_in_rd:
                 done_techs = [t for t in prev["research"] if t and t not in cur["research"]]
+                if done_techs and hasattr(g, "researched"):
+                    try:
+                        _rset = set(g.researched() or ())
+                        if _rset:
+                            done_techs = [t for t in done_techs if t in _rset]
+                    except Exception:
+                        pass
                 if done_techs:
                     try:
                         import equipmeta as _em
                         _lines = g.production_lines(include_obsolete=False)
                         _avail = g._active_variant_names()
                         obsolete_unlocked = _em.check_tech_unlocks_obsolete(
-                            done_techs, _lines, _avail
+                            done_techs, _lines, _avail, require_active_variant=True
                         )
                         for _it in obsolete_unlocked[:3]:
                             reasons.append(_em.format_obsolete_alert(_it))
@@ -821,8 +880,20 @@ class TurnLoop:
             timed_out = (time.time() - t_start >= timeout_seconds)
             cancelled = bool(stop_event is not None and stop_event.is_set())
             if timed_out:
-                reasons.append("real-time safety brake (%ds), paused to prevent background drift"
-                               % int(timeout_seconds))
+                _waited_d0 = round(((now_h or start_hours or 0) - (start_hours or 0)) / 24.0, 2)
+                _diag = []
+                if _waited_d0 == 0.0:
+                    if cur.get("peace_open"):
+                        _diag.append("peace_open=True")
+                    try:
+                        import session as _ss_br
+                        if _ss_br.is_paused(g):
+                            _diag.append("paused=True")
+                    except Exception:
+                        pass
+                _diag_s = (" (clock did not advance: %s)" % ", ".join(_diag)) if _diag else ""
+                reasons.append("real-time safety brake (%ds)%s, paused to prevent background drift"
+                               % (int(timeout_seconds), _diag_s))
             if cancelled:
                 reasons.append("cancelled by server watchdog, paused to prevent background drift")
             if reasons:
@@ -909,17 +980,29 @@ class TurnLoop:
             sp_end = g.game_speed() or {}
         except Exception:
             sp_end = {}
+        waited_d_end = round(((now_h or start_hours or 0) - (start_hours or 0)) / 24.0, 2)
+        _diag_end = []
+        if not cancelled and waited_d_end == 0.0:
+            if cur.get("peace_open"):
+                _diag_end.append("peace_open=True")
+            try:
+                import session as _ss_end
+                if _ss_end.is_paused(g):
+                    _diag_end.append("paused=True")
+            except Exception:
+                pass
+        _diag_end_s = (" (clock did not advance: %s)" % ", ".join(_diag_end)) if _diag_end else ""
         reason_txt = (
             "cancelled by server watchdog, paused to prevent background drift"
             if cancelled else
-            "real-time safety brake (%ds), paused to prevent background drift" % int(timeout_seconds)
+            "real-time safety brake (%ds)%s, paused to prevent background drift"
+            % (int(timeout_seconds), _diag_end_s)
         )
         out_to = {
             "woke_because": [reason_txt],
             "timed_out": True,
             "effective_timeout_seconds": timeout_seconds,
-            "waited_game_days": round(((now_h or start_hours or 0)
-                                       - (start_hours or 0)) / 24.0, 2),
+            "waited_game_days": waited_d_end,
             "waited_real_seconds": round(time.time() - t_start, 1),
             "date": (g.date().get("text") if isinstance(getattr(g, "date", None) and g.date(), dict) else None),
             "paused": paused,

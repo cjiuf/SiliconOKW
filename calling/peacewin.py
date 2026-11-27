@@ -60,6 +60,7 @@ CANEXEC_PASS = _OW.PEACE_CANEXEC_PASS
 
 CONF_TURN_MAP = _OW.PEACE_CONF_TURN_MAP
 CONF_BID_MAP = _OW.PEACE_CONF_BID_MAP
+CONF_SUBMIT_MAP = _OW.PEACE_CONF_SUBMIT_MAP
 VT_TURN = _OW.PEACE_VT_TURN
 TURN_SIZE = _OW.PEACE_TURN_SIZE
 FN_INSTALL_TURN = _OW.PEACE_FN_INSTALL_TURN
@@ -105,10 +106,169 @@ import session_state as _SS
 
 _LAST_CONFERENCE = {}
 _SS.register_cache("peacewin._LAST_CONFERENCE", container=_LAST_CONFERENCE)
+_SUBMITTED_DEMANDS = {}
+_SS.register_cache("peacewin._SUBMITTED_DEMANDS", container=_SUBMITTED_DEMANDS)
+
+ACT_COST = _OW.PEACE_ACT_COST
+ACT_TYPE_TAKE_STATE = _OW.PEACE_ACT_TYPE_TAKE_STATE
 
 
-def live_conference_readonly(g):
-    """0 注入纯只读 O(1) 读取当前进行中的 CPeaceConference*，无和会返回 None。"""
+def _tag_by_idx(g):
+    """纯只读构建 {country_idx: TAG} 映射（兼容离线 mock）。"""
+    out = {}
+    try:
+        for t in (g.tags() or ()):
+            try:
+                out[int(g._c(t).tag_id)] = str(t).upper()
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _action_key(p, act):
+    """每条 CPeaceAction 的去重键 `(type, loser_idx, state_id)`。"""
+    try:
+        atype = int(p.i32(act + 8))
+    except Exception:
+        atype = ACT_TYPE_TAKE_STATE
+    try:
+        lidx = int(p.i32(act + 0x34))
+    except Exception:
+        lidx = 0
+    try:
+        sid = int(p.i32(act + 0x48))
+    except Exception:
+        sid = 0
+    return (atype, lidx, sid)
+
+
+def _action_cost(p, act):
+    """读取 CPeaceAction + 0x40 (i32) 结算分值（0x1A86D10 TurnCost 实证）。"""
+    try:
+        return int(p.i32(act + ACT_COST))
+    except Exception:
+        return 0
+
+
+def _read_existing_turn_actions(p, conf, winner_idx, map_off=CONF_SUBMIT_MAP):
+    """纯只读收集 conf+map_off 中该战胜国当前已排队的全部 CPeaceAction*。"""
+    try:
+        node = _map_find(p, conf, map_off, int(winner_idx))
+    except Exception:
+        return []
+    if not node:
+        return []
+    try:
+        tdata = p.u64(node + 0x28)
+        tsize = p.i32(node + 0x34)
+    except Exception:
+        return []
+    if not (0x10000 < tdata < 0x7F0000000000) or not (0 < tsize <= 16):
+        return []
+    acts = []
+    for i in range(tsize):
+        try:
+            t = p.u64(tdata + 8 * i)
+            if not (0x10000 < t < 0x7F0000000000):
+                continue
+            adata = p.u64(t + 0x10)
+            asize = p.i32(t + 0x1C)
+            if not (0x10000 < adata < 0x7F0000000000) or not (0 < asize <= 4096):
+                continue
+            for j in range(asize):
+                a = p.u64(adata + 8 * j)
+                if 0x10000 < a < 0x7F0000000000 and (a & 7) == 0:
+                    acts.append(a)
+        except Exception:
+            continue
+    return acts
+
+
+def _winner_score_info(g, winner_idx):
+    """从当前和会参与者表中读取 winner_idx 的 `(score_now, score_total)`。"""
+    try:
+        s = summary(g)
+        for pt in (s.get("participants") or ()):
+            if int(pt.get("country") or -1) == int(winner_idx):
+                return pt.get("score_now"), pt.get("score")
+    except Exception:
+        pass
+    return None, None
+
+
+def _owned_state_ids(g, tag=None):
+    """纯只读收集指定国家当前法理拥有（owned）的州 ID 集合；不可读时返回 None。
+
+    2026-11-26 (P3-10 根治):
+      实证 SPR/D03 战时差异证明 `CCountry+0x460 (CO_STATES)` 是战时**控制州**（controlled），
+      `CCountry+0x478 (CO_STATES_B)` 才是**法理拥有州**（owned）！
+      旧实现调用 `g.states(tag)`（读 +0x460），导致和会前已战时占领的敌国本土州（如 7/35/36）
+      被提前算进 `states_before`，造成 `net_states_gained` 缺少已占领诉求州、与 `acquired_states` 不一致。
+      现优先在 Windows 上直读 `CO_STATES_B`（法理拥有州），离线 mock 再回退 `g.states(tag)`。
+    """
+    p = getattr(g, "p", None)
+    if p is not None and hasattr(p, "u64") and hasattr(p, "i32") and hasattr(g, "_c"):
+        try:
+            co = g._c(tag)
+            cptr = getattr(co, "ptr", 0)
+            b_off = getattr(_OW, "CO_STATES_B", None)
+            st_id_off = getattr(_OW, "ST_ID", None)
+            if cptr and cptr > 0x10000 and b_off is not None and st_id_off is not None:
+                data = p.u64(cptr + b_off)
+                size = p.i32(cptr + b_off + 0x0C)
+                if 0x10000 < data < 0x7F0000000000 and 0 <= size <= 2048:
+                    out = set()
+                    for i in range(size):
+                        sp = p.u64(data + 8 * i)
+                        if 0x10000 < sp < 0x7F0000000000:
+                            sid = int(p.i32(sp + st_id_off))
+                            if sid > 0:
+                                out.add(sid)
+                    return out
+                if size == 0:
+                    return set()
+        except Exception:
+            pass
+    try:
+        rows = g.states(tag)
+    except Exception:
+        return None
+    if rows is None:
+        return None
+    out = set()
+    for st in rows:
+        try:
+            sid = int(st.get("id") if isinstance(st, dict) else st)
+            if sid > 0:
+                out.add(sid)
+        except Exception:
+            continue
+    return out
+
+
+def _is_finalized_conference(p, conf):
+    """纯只读判定 CPeaceConference 是否已执行完毕收尾（条约已应用、仅剩界面/对象待释放）。
+
+    实证（WINDOWS_1.19.5.md §62.3 & 1936->1940 长跑 §5）：
+      - 会议打开未提交时：+0xDD == 0, +0x1C8 == 0, +0x1F8 == 0
+      - 提交要求后：+0xDD == 0, +0x1F8 >= 1
+      - 执行 Done 且条约已应用、州易主后：+0xDD == 1, +0x1C8 >= 1, +0x1F8 == 0
+    """
+    try:
+        done_flag = bool(p.read(conf + 0xDD, 1)[0])
+        if not done_flag:
+            return False
+        c8 = int(p.u64(conf + 0x1C8 + 8))
+        f8 = int(p.u64(conf + 0x1F8 + 8))
+        return c8 > 0 and f8 == 0
+    except Exception:
+        return False
+
+
+def live_conference_readonly(g, include_finalized=False):
+    """0 注入纯只读 O(1) 读取当前进行中的 CPeaceConference*，无和会（或条约已结算收尾）返回 None。"""
     p = getattr(g, "p", None)
     if p is None:
         return None
@@ -130,18 +290,20 @@ def live_conference_readonly(g):
             return None
         conf = p.u64(arr)
         if 0x10000 < conf < 0x7F0000000000:
+            if not include_finalized and _is_finalized_conference(p, conf):
+                return None
             return conf
     except Exception:
         return None
     return None
 
 
-def live_conference(g):
+def live_conference(g, include_finalized=False):
     """The open conference in O(1). 优先走 0 注入纯只读直读，失败时回退引擎 getter。"""
-    v = live_conference_readonly(g)
+    v = live_conference_readonly(g, include_finalized=include_finalized)
     if v:
         return v
-    # 若纯只读确认 G_GAMESTATE 有效且计数为 0，直接返回 None，绝不无谓注入暂停游戏线程
+    # 若纯只读确认 G_GAMESTATE 有效且无未结算和会（计数为 0 或仅剩已结算残留对象），直接返回 None
     p = getattr(g, "p", None)
     if p is not None:
         try:
@@ -151,6 +313,8 @@ def live_conference(g):
                 cnt = p.i32(gs + GS_PEACE_CONF + 0x14)
                 if cnt == 0:
                     return None
+                if not include_finalized and live_conference_readonly(g, include_finalized=True):
+                    return None
         except Exception:
             pass
     try:
@@ -158,6 +322,8 @@ def live_conference(g):
     except Exception:
         v = 0
     if v and 0x10000 < v < 0x7F0000000000:
+        if not include_finalized and p is not None and _is_finalized_conference(p, v):
+            return None
         return v
     return None
 
@@ -166,7 +332,7 @@ def summary(g):
     """Small dict describing the live conference (for MCP tools / logging)."""
     p = g.p
     pid = getattr(p, "pid", None)
-    conf = live_conference(g)
+    conf = live_conference(g, include_finalized=True)
     if not conf:
         out = {"open": False}
         last = _LAST_CONFERENCE.get(pid)
@@ -191,10 +357,27 @@ def summary(g):
             parts.append({"country": p.i32(o + 0x08),
                           "score": p.i32(o + 0x4C),
                           "score_now": p.i32(o + 0x48)})
-    cur = {"open": True, "conf": conf, "maps": maps,
-           "participants": parts,
-           "started": bool(p.read(conf + 0xDD, 1)[0]),
-           "no_bid": bool(p.read(conf + 0xDC, 1)[0])}
+    started_flag = bool(p.read(conf + 0xDD, 1)[0])
+    no_bid_flag = bool(p.read(conf + 0xDC, 1)[0])
+    finalized = bool(started_flag and maps.get("0x1c8", 0) > 0 and maps.get("0x1f8", 0) == 0)
+    cur = {
+        "open": not finalized,
+        "conf": conf,
+        "maps": maps,
+        "participants": parts,
+        "started": started_flag,
+        "no_bid": no_bid_flag,
+        "finalized": finalized,
+        "treaty_applied": finalized,
+    }
+    if finalized:
+        cur["conference_closing"] = True
+        cur["note"] = (
+            "peace treaty has already been applied (+0xDD=1, +0x1C8>0, +0x1F8=0); "
+            "the residual conference object clears on the next unpaused game tick "
+            "(if the clock stays paused on the treaty summary popup, call resume / "
+            "dismiss_popups_and_unpause or wait_and_brief(fast_forward=true))."
+        )
     try:
         cur_date = g.date().get("text")
     except Exception:
@@ -204,6 +387,7 @@ def summary(g):
         "seen_date": cur_date,
         "participants": parts,
         "started": cur["started"],
+        "finalized": finalized,
     }
     return cur
 
@@ -268,12 +452,46 @@ def finish(g, winner_idx, do_pass=False, wait=20.0):
     -- and sometimes hangs while applying the treaty (2026-11-15: 2 of 5 runs).
     The submitted turn is already sitting in +0x1F8, so Done on its own is enough
     and keeps the count at 1.
+
+    2026-11-26 (P0-3 增强):
+      在执行 `done` 前后纯只读回读玩家实有州集合与每一块已提交诉求州的最终归属，
+      透明汇报 `states_before` / `states_after` / `net_states_gained` / `acquired_states` /
+      `not_acquired_states`，彻底杜绝静默丢州却毫无感知。
     """
     import time
     p = g.p
+    pid = getattr(p, "pid", None)
     conf = live_conference(g)
     if not conf:
         raise RuntimeError("no peace conference is open")
+
+    idx_map = _tag_by_idx(g)
+    winner_tag = idx_map.get(int(winner_idx))
+    if not winner_tag:
+        try:
+            winner_tag = str(g.player_tag() or "").upper() or None
+        except Exception:
+            winner_tag = None
+
+    states_before = _owned_state_ids(g, winner_tag)
+
+    # 汇总提交到 +0x1F8（及本会话缓存）的全部州诉求，用于结算后逐州核对归属
+    demanded_states = []
+    seen_dem = set()
+    for a in _read_existing_turn_actions(p, conf, int(winner_idx), CONF_SUBMIT_MAP):
+        try:
+            atype, _lidx, sid = _action_key(p, a)
+            if atype == ACT_TYPE_TAKE_STATE and sid > 0 and sid not in seen_dem:
+                seen_dem.add(sid)
+                demanded_states.append(sid)
+        except Exception:
+            continue
+    cached_rec = _SUBMITTED_DEMANDS.get((pid, int(conf))) or {}
+    for sid in (cached_rec.get("states") or ()):
+        if sid > 0 and sid not in seen_dem:
+            seen_dem.add(sid)
+            demanded_states.append(int(sid))
+
     out = {"before": maps(g, conf)}
     n = out["before"].get("0x1f8")
     out["submitted_turns"] = n
@@ -290,8 +508,76 @@ def finish(g, winner_idx, do_pass=False, wait=20.0):
             time.sleep(0.25)
         out["waited_after_pass"] = round(time.time() - t0, 2)
     out["done"] = execute(g, "done", winner_idx)
-    out["after_done"] = maps(g)
+    out["after_done"] = maps(g, conf)
     out["started"] = bool(p.read(conf + 0xDD, 1)[0])
+    out["finalized"] = _is_finalized_conference(p, conf)
+    out["treaty_applied"] = out["finalized"]
+
+    # 结算后纯只读回读法理拥有州（owned）归属变化（P0-3 / P3-10）
+    states_after = _owned_state_ids(g, winner_tag)
+    gained = []
+    if states_before is not None:
+        out["states_before_count"] = len(states_before)
+    if states_after is not None:
+        out["states_after_count"] = len(states_after)
+    if states_before is not None and states_after is not None:
+        gained = sorted(states_after - states_before)
+        out["net_states_gained_count"] = len(gained)
+        out["net_states_gained"] = gained
+
+    if demanded_states:
+        acquired = []
+        not_acquired = []
+        for sid in demanded_states:
+            cur_owner = None
+            sname = None
+            if states_after is not None and sid in states_after:
+                acquired.append(sid)
+                continue
+            try:
+                det = g.state_detail(int(sid)) or {}
+                cur_owner = det.get("owner")
+                sname = det.get("name")
+            except Exception:
+                cur_owner = None
+            if winner_tag and cur_owner and str(cur_owner).upper() == str(winner_tag).upper():
+                acquired.append(sid)
+            else:
+                row = {"state": sid, "owner": cur_owner}
+                if sname:
+                    row["name"] = sname
+                not_acquired.append(row)
+        out["demanded_states"] = demanded_states
+        out["demanded_count"] = len(demanded_states)
+        out["acquired_states"] = acquired
+        out["acquired_count"] = len(acquired)
+        out["not_acquired_states"] = not_acquired
+        out["not_acquired_count"] = len(not_acquired)
+        out["partial_acquisition"] = bool(not_acquired)
+        if gained:
+            unreq = [s for s in gained if s not in set(demanded_states)]
+            if unreq:
+                out["unrequested_states_gained"] = unreq
+        if not_acquired:
+            out["acquisition_warning"] = (
+                "requested %d state(s) but only acquired %d (%d not acquired: %s); "
+                "remaining demands may have exceeded warscore budget or been contested by other victors"
+                % (
+                    len(demanded_states),
+                    len(acquired),
+                    len(not_acquired),
+                    ", ".join("%d(owner=%s)" % (x["state"], x.get("owner")) for x in not_acquired[:8]),
+                )
+            )
+
+    if out["finalized"]:
+        _SUBMITTED_DEMANDS.pop((pid, int(conf)), None)
+        # 2026-11-26 (P3-11): 暂停帧下和会条约虽已立刻改变州 owner，但 CCountryResources 与
+        # 工厂缓存要推进 >= 1 游戏小时后才由引擎日/时刷新重算，明确提示调用方避免误读为 0。
+        out["resources_refresh_note"] = (
+            "peace treaty applied on the current frame; CCountryResources (e.g. rubber/oil) "
+            "and factory totals refresh after the game clock advances >= 1 hour."
+        )
     return out
 
 
@@ -523,6 +809,7 @@ def describe(g, act):
         name = "<unreadable>" 
     return {"act": act, "type": p.i32(act + 8), "name": name,
             "a": p.i32(act + 0x30), "b": p.i32(act + 0x34), "a2": p.i32(act + 0x38),
+            "cost": _action_cost(p, act),
             "state": p.i32(act + 0x48), "extra": p.i32(act + 0x50)}
 
 
@@ -690,6 +977,7 @@ def options(g, loser_idx, winner_idx=None, kind="state", refresh=False):
             "state": sid,
             "name": sname,
             "type": d.get("type"),
+            "cost": d.get("cost"),
             "act": hex(int(d["act"])),
             "extra": d.get("extra"),
         })
@@ -707,58 +995,166 @@ def options(g, loser_idx, winner_idx=None, kind="state", refresh=False):
 
 
 def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
-                   map_off=CONF_SUBMIT_MAP, states=None, filter_info=None):
-    """Build one turn from the engine's builders and submit it like the button.
+                   map_off=CONF_SUBMIT_MAP, states=None, filter_info=None,
+                   append=True, replace=False):
+    """Build demands from the engine's builders and install them in conf+map_off.
 
-    `states` (optional iterable of int state ids): when given, only `state`
-    demands whose state id is in `states` are included in the submitted turn.
+    2026-11-26 (P0-3 根治):
+      1. **保序**：传入 `states=[...]` 时严格按调用方给定优先级顺序构造动作列表（去重保序），
+         不再按 `build_actions` 的州 ID 升序重排，避免高价值资源州排在后面被分数截断；
+      2. **默认追加合并（`append=True, replace=False`）**：同一场和会多次调用 `peace_demands`
+         （例如先后向 HOL 与 INS 提诉求）时，先读取 `conf+map_off` 里该战胜国已排队的动作，
+         与本次新动作按 `(type, loser_idx, state_id)` 保序合并去重后写入**单个**
+         `CPeaceBiddingTurn`（保持 +0x1F8 为 1 turn 规避 2-turn 卡死，同时彻底消除后次覆写前次）；
+         如需清空重填可显式传 `replace=True`（或 `append=False`）；
+      3. **预算透出**：汇总每条动作的 `act+0x40` 分值与 `score_now`，在 `filter_info` 返回
+         `mode`/`added_actions`/`total_queued_actions`/`queued_states_by_loser`/`estimated_total_cost`/`score_now`/`over_budget`。
     """
     p = g.p
+    pid = getattr(p, "pid", None)
     winner_idx = int(winner_idx)
+    loser_idx = int(loser_idx)
     if winner_idx <= 0:
         raise ValueError("winner_idx must be > 0 (got %d)" % winner_idx)
+    effective_append = bool(append) and (not bool(replace))
+
     wanted_states = None
     if states is not None:
-        wanted_states = [int(s) for s in states]
+        # 去重并严格保留调用方输入顺序
+        wanted_states = []
+        seen_w = set()
+        for s in states:
+            si = int(s)
+            if si not in seen_w:
+                seen_w.add(si)
+                wanted_states.append(si)
         if not wanted_states:
             raise ValueError("states subset cannot be an empty list; omit `states` to demand all")
-    wanted_set = set(wanted_states) if wanted_states is not None else None
 
-    acts = []
+    new_acts = []
     available_states = []
     matched_states = []
     for kind in kinds:
-        for act in build_actions(g, loser_idx, kind, winner_idx=winner_idx):
-            if not (0x10000 < act < 0x7F0000000000) or (act & 7):
-                continue
-            if kind == "state":
+        built = [
+            act for act in build_actions(g, loser_idx, kind, winner_idx=winner_idx)
+            if (0x10000 < act < 0x7F0000000000) and (act & 7) == 0
+        ]
+        if kind == "state":
+            state_to_act = {}
+            for act in built:
                 sid = int(p.i32(act + 0x48))
-                available_states.append(sid)
-                if wanted_set is not None and sid not in wanted_set:
-                    continue
-                matched_states.append(sid)
-            acts.append(act)
+                if sid not in state_to_act:
+                    state_to_act[sid] = act
+                    available_states.append(sid)
+            if wanted_states is not None:
+                # 严格按调用方传入 states 的顺序装配，绝不升序重排
+                for sid in wanted_states:
+                    act = state_to_act.get(sid)
+                    if act is not None:
+                        matched_states.append(sid)
+                        new_acts.append(act)
+            else:
+                for sid in available_states:
+                    matched_states.append(sid)
+                    new_acts.append(state_to_act[sid])
+        else:
+            new_acts.extend(built)
+
+    if wanted_states is not None and not new_acts:
+        if filter_info is not None:
+            filter_info["available_states"] = available_states
+            filter_info["requested_states"] = wanted_states
+            filter_info["matched_states"] = []
+            filter_info["ignored_states"] = list(wanted_states)
+        raise ValueError(
+            "none of the requested states %s are available for loser %d (available: %s)"
+            % (wanted_states, loser_idx, available_states)
+        )
+
+    prev_acts = _read_existing_turn_actions(p, conf, winner_idx, map_off) if effective_append else []
+    merged_acts = []
+    added_acts = []
+    seen_keys = set()
+    skipped_dup = 0
+    for a in prev_acts:
+        try:
+            k = _action_key(p, a)
+        except Exception:
+            continue
+        if k not in seen_keys:
+            seen_keys.add(k)
+            merged_acts.append(a)
+    for a in new_acts:
+        try:
+            k = _action_key(p, a)
+        except Exception:
+            continue
+        if k in seen_keys:
+            skipped_dup += 1
+            continue
+        seen_keys.add(k)
+        merged_acts.append(a)
+        added_acts.append(a)
+
+    turn = new_turn(g)
+    if merged_acts:
+        data = cmdwin.alloc(g, 8 * len(merged_acts))
+        p.write(data, b"".join(struct.pack("<Q", a) for a in merged_acts))
+        p.write(turn + 0x10, struct.pack("<QiiQ", data, len(merged_acts), len(merged_acts), _allocator(g)))
+    install_turns(g, conf, winner_idx, [turn], map_off)
+
+    # 汇总队列全貌与预算估算，并缓存给 peace_finish 做结算回读
+    idx_map = _tag_by_idx(g)
+    queued_by_loser = {}
+    queued_states = []
+    est_total_cost = 0
+    for a in merged_acts:
+        atype, lidx, sid = _action_key(p, a)
+        est_total_cost += _action_cost(p, a)
+        if atype == ACT_TYPE_TAKE_STATE and sid > 0:
+            lkey = idx_map.get(lidx, "#%d" % lidx)
+            queued_by_loser.setdefault(lkey, []).append(sid)
+            queued_states.append(sid)
+    est_added_cost = sum(_action_cost(p, a) for a in added_acts)
+    score_now, score_total = _winner_score_info(g, winner_idx)
+    over_budget = (
+        bool(est_total_cost > int(score_now))
+        if (score_now is not None and est_total_cost > 0)
+        else False
+    )
+
+    _SUBMITTED_DEMANDS[(pid, int(conf))] = {
+        "winner_idx": winner_idx,
+        "states": list(queued_states),
+        "queued_states_by_loser": {k: list(v) for k, v in queued_by_loser.items()},
+        "estimated_total_cost": est_total_cost,
+    }
 
     if filter_info is not None:
+        filter_info["mode"] = "append" if effective_append else "replace"
+        filter_info["previous_actions"] = len(prev_acts)
+        filter_info["added_actions"] = len(added_acts)
+        filter_info["skipped_duplicate_actions"] = skipped_dup
+        filter_info["total_queued_actions"] = len(merged_acts)
+        filter_info["queued_states_by_loser"] = queued_by_loser
+        filter_info["estimated_added_cost"] = est_added_cost
+        filter_info["estimated_total_cost"] = est_total_cost
+        filter_info["score_now"] = score_now
+        filter_info["score_total"] = score_total
+        filter_info["over_budget"] = over_budget
+        if over_budget:
+            filter_info["budget_warning"] = (
+                "queued demands estimated cost (%d) exceeds current warscore (%s); "
+                "later states in the queue may be truncated at peace_finish"
+                % (est_total_cost, score_now)
+            )
         filter_info["available_states"] = available_states
         if wanted_states is not None:
             filter_info["requested_states"] = wanted_states
             filter_info["matched_states"] = matched_states
             filter_info["ignored_states"] = [s for s in wanted_states if s not in set(matched_states)]
 
-    if wanted_set is not None and not acts:
-        raise ValueError(
-            "none of the requested states %s are available for loser %d (available: %s)"
-            % (wanted_states, int(loser_idx), available_states)
-        )
-
-    turn = new_turn(g)
-    if acts:
-        data = cmdwin.alloc(g, 8 * len(acts))
-        p.write(data, b"".join(struct.pack("<Q", a) for a in acts))
-        p.write(turn + 0x10, struct.pack("<QiiQ", data, len(acts), len(acts), _allocator(g)))
-    install_turns(g, conf, winner_idx, [turn], map_off)
-    return turn, acts
+    return turn, merged_acts
 
 
 def show_submitted(g, conf, country_idx, map_off=CONF_SUBMIT_MAP):

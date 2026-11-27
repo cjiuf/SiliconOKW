@@ -238,9 +238,17 @@ class WinCommandPipeline:
         import cmdwin
         return cmdwin.enqueue(self.game, int(cmd), tick=tick, seq=seq)
 
-    def post_drained(self, cmd: int, *, seconds: float = 2.0) -> Dict[str, Any]:
+    def post_drained(
+        self,
+        cmd: int,
+        *,
+        seconds: float = 2.0,
+        done_fn: Optional[Callable[[], bool]] = None,
+    ) -> Dict[str, Any]:
         self.verify()
         import cmdwin
+        if done_fn is not None:
+            return cmdwin.post_drained(self.game, int(cmd), seconds=seconds, done_fn=done_fn)
         return cmdwin.post_drained(self.game, int(cmd), seconds=seconds)
 
     def run(
@@ -255,6 +263,7 @@ class WinCommandPipeline:
         post_cleanup_hook: Optional[Callable[[Any, int, Any], None]] = None,
         drain: bool = True,
         seconds: float = 2.0,
+        done_fn: Optional[Callable[[], bool]] = None,
         dry_run: bool = False,
         readback_fn: Optional[Callable[[Any, int, Any], Dict[str, Any]]] = None,
     ) -> CommandResult:
@@ -302,7 +311,7 @@ class WinCommandPipeline:
                     hook_ctx = pre_post_hook(g, cmd)
                     hook_ran = True
                 if drain:
-                    post_res = self.post_drained(cmd, seconds=seconds)
+                    post_res = self.post_drained(cmd, seconds=seconds, done_fn=done_fn)
                     posted = int(bool(post_res.get("posted") if isinstance(post_res, dict) else post_res))
                     drained = post_res.get("drained") if isinstance(post_res, dict) else None
                 else:

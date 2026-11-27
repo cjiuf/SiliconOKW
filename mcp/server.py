@@ -54,6 +54,7 @@ from tools.runtime import (  # noqa: E402
     _stderr,
     _win_hwnd,
     _win_screenshot,
+    _world_epoch_check,
     command_docs,
     screenshot,
 )
@@ -113,6 +114,7 @@ def game() -> Game:
             _created_fresh = True
     try:
         _selfheal_check(_g)
+        _world_epoch_check(_g)
         _date_backjump(_g)
     except Exception as e:
         _stderr("[self-heal] error: %r" % e)
@@ -207,6 +209,9 @@ def _run_with_timeout(fn, args, name):
             box["out"] = fn(args)
         except BaseException as e:            # noqa: BLE001 - reported to the caller
             box["err"] = e
+        finally:
+            if _CALL.get("thread") is threading.current_thread():
+                _CALL.update(thread=None, name=None, started=0.0, cancel=None)
 
     th = threading.Thread(target=_work, daemon=True, name="call:%s" % name)
     _CALL.update(thread=th, name=name, started=_t.time(), cancel=cancel_ev)
@@ -231,6 +236,8 @@ def _run_with_timeout(fn, args, name):
                           "server-side (game paused=%s to prevent clock drift). Do not "
                           "retry until it ends -- the next call will be refused while it "
                           "holds the game." % (name, CALL_TIMEOUT_S, paused_now))}
+    if _CALL.get("thread") is th:
+        _CALL.update(thread=None, name=None, started=0.0, cancel=None)
     if "err" in box:
         raise box["err"]
     return box.get("out")
@@ -242,7 +249,16 @@ def handle(msg):
     if method == "initialize":
         return rpc_result(req_id, {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
                                    "serverInfo": {"name": "hoi4", "version": "2.0.0"}})
-    if method in ("notifications/initialized", "notifications/cancelled"):
+    if method == "notifications/initialized":
+        return None
+    if method == "notifications/cancelled":
+        # 2026-11-26 (长跑 §10 止损): 若客户端主动发取消通知且存在进行中的长等待，
+        # 立即置位取消事件并执行 0 注入 1 字节紧急停表，避免后台白烧游戏日。
+        ev = _CALL.get("cancel")
+        th = _CALL.get("thread")
+        if ev is not None and th is not None and th.is_alive():
+            ev.set()
+            _emergency_pause_game()
         return None
     if method == "ping":
         return rpc_result(req_id, {})
@@ -440,7 +456,10 @@ def main():
     try:
         import reddots as _rd
         if _rd.CONFIG.get("guard_enabled", True):
-            _rd.start_guard(lambda: _g, busy_check=lambda: bool(_CALL.get("name")))
+            def _is_call_busy():
+                th = _CALL.get("thread")
+                return bool(th is not None and th.is_alive())
+            _rd.start_guard(lambda: _g, busy_check=_is_call_busy)
             _stderr("[reddots] guard started (poll=%.1fs)" % _rd.CONFIG.get("guard_poll_seconds", 1.5))
     except Exception as _e:
         _stderr("[reddots] guard start failed: %r" % (_e,))

@@ -501,13 +501,26 @@ class EconomyBuildMixin:
                 "state %s is owned/controlled by %s, not %s (resolved via global fallback)"
                 % (state_id, _owner_tag, req_tag)
             )
-        # 2026-11-21 (P3-6): null is not "the reader failed" -- a CORE state has
-        # no resistance/compliance at all.  Say so instead of leaving two nulls.
+        # 2026-11-21 (P3-6) & 2026-11-26 (P2-8 根治): 严格按 is_core_of_owner 区分核心州与
+        # 非核心占领州；在 Windows 1.19.5.0 上 ST_RESISTANCE/ST_COMPLIANCE 尚未验证，绝不再把
+        # 非核心占领州（is_core_of_owner=False）谎报成 "this is a CORE state"！
         if res.get("resistance") is None and res.get("compliance") is None:
-            res["occupation_note"] = (
-                "null = no occupation data: this is a CORE state of the country "
-                "that owns it. resistance/compliance only exist for non-core "
-                "occupied territory.")
+            is_core = res.get("is_core_of_owner")
+            if is_core is True:
+                res["occupation_note"] = (
+                    "null = no occupation data: this is a CORE state of the country "
+                    "that owns it. resistance/compliance only exist for non-core "
+                    "occupied territory.")
+            elif is_core is False:
+                res["occupation_note"] = (
+                    "null = resistance/compliance memory offsets are not verified on this build "
+                    "(ST_RESISTANCE/ST_COMPLIANCE=None); this is a NON-CORE occupied state "
+                    "(owner=%s, cores=%s), NOT a core state."
+                    % (_owner_tag, cores))
+            else:
+                res["occupation_note"] = (
+                    "null = occupation data unavailable (resistance/compliance offsets are not "
+                    "verified on this build or core list could not be read).")
         # 2026-11-21 (P1-6): id + building map alone cannot answer "which
         # state is 42" or "can I still build here".  Both come from the
         # game's own data files (history/states, common/state_category,

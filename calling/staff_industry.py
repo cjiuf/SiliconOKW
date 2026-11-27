@@ -16,6 +16,8 @@ Shadow mode (default) reports the decision and changes nothing.
 import json
 import os
 
+import session_state as _SS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG_PATH = os.path.join(HERE, "staff_config.json")
 
@@ -261,6 +263,7 @@ def construction_plan(g, tag=None, snap=None, max_items=3):
 
 
 _CACHE = {}
+_SS.register_cache("staff_industry._CACHE", container=_CACHE)
 
 
 def plan(g, tag=None):
@@ -272,7 +275,8 @@ def plan(g, tag=None):
         day = g.date().get("text", "")[:10]
     except Exception:
         day = ""
-    key = (tag, day)
+    pid = getattr(getattr(g, "p", None), "pid", None)
+    key = (pid, _SS.SESSION.save_epoch, tag, day)
     if day and key in _CACHE:
         return _CACHE[key]
     snap = snapshot(g, tag)

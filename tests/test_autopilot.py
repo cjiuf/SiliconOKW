@@ -1542,6 +1542,1427 @@ class TestStandingOrdersAutopilot(unittest.TestCase):
         tk2 = AP.run_tick(self.g)
         self.assertFalse(any("rebalance_" in a["action"] for a in tk2["actions"]))
 
+    # 25. 2026-11-26 长跑 §1/§2/§13: ack_autopilot 吸收核心法案/政体基线、不再误渲染 [FAIL]、消除 auto_fallback_ideas 矛盾 warning
+    def test_soak20261126_s1_s2_s13_ack_absorbs_law_receipt_ok_and_pp_warning(self):
+        # §13: auto_fallback_ideas=True 且 agenda=[] 时不应再警告"不会消费政治点数"
+        cp = AP.compile_profile(self.g, {
+            "pp_policy": {"enabled": True, "reserve_pp": 40, "agenda": [], "auto_fallback_ideas": True},
+        })
+        self.assertTrue(cp["ok"], cp)
+        self.assertFalse(any("不会消费政治点数" in w for w in cp["warnings"]), cp["warnings"])
+
+        # §1: 外部法案变化触发 external_law_or_regime_change 后，通过 Plan DSL ack_autopilot 签收
+        self.g.active_ideas = {"limited_exports", "partial_economic_mobilisation", "limited_conscription"}
+        AP.set_standing_orders(self.g, {"name": "law_ack_test"})
+        self.g.active_ideas.discard("limited_exports")
+        self.g.active_ideas.add("autarkic_economy")
+        tk_before = AP.run_tick(self.g, dry_run=True)
+        self.assertTrue(any(w["floor"] == "external_law_or_regime_change" for w in tk_before["wake_triggers"]))
+
+        plan_ack = TE.execute_plan(self.g, {
+            "actions": [{
+                "op": "ack_autopilot",
+                "args": {"reason": "trade_laws -> autarkic_economy 已知晓，继续跑", "extend_max_days": False},
+            }],
+        })
+        self.assertTrue(plan_ack["ok"], plan_ack)
+        self.assertTrue(plan_ack["results"][0]["raw"]["acked"])
+        # §2: 成功返回带 reason 字段必须渲染为 [OK]，严禁误标 [FAIL]
+        self.assertTrue(plan_ack["results"][0]["summary"].startswith("[OK] "), plan_ack["results"][0]["summary"])
+        self.assertNotIn("[FAIL]", plan_ack["receipt_text"])
+        # §1: 签收后基线已同步，再次 run_tick(dry_run=True) 不再反复报 external_law_or_regime_change
+        tk_after = AP.run_tick(self.g, dry_run=True)
+        self.assertFalse(any(w["floor"] == "external_law_or_regime_change" for w in tk_after["wake_triggers"]), tk_after)
+
+    # 26. 2026-11-26 长跑 §3: declare_war Plan DSL 支持 ack_co_belligerents
+    def test_soak20261126_s3_declare_war_accepts_ack_co_belligerents(self):
+        ok, errs = TE.validate_plan({
+            "actions": [{"op": "declare_war", "args": {"target": "HOL", "ack_co_belligerents": True}}],
+        })
+        self.assertTrue(ok, errs)
+        self.assertEqual(errs, [])
+
+    # 27. 2026-11-26 长跑 §4: 杜绝未完成科技误判 slot_done 与幽灵 OBSOLETE_LINE 死循环
+    def test_soak20261126_s4_obsolete_requires_active_variant_and_researched_slot_done(self):
+        import equipmeta as _em
+
+        lines = [
+            {"index": 2, "equipment": "artillery_equipment_1", "factories": 14,
+             "output_per_day": 45.0, "output_units_per_day": 12.8, "unit_cost": 3.5,
+             "class": "CMilitaryProductionLine"},
+        ]
+        avail_no_art2 = ["infantry_equipment_1", "artillery_equipment_1"]
+        # artillery_equipment_2 不在 PS_VARIANTS_ACTIVE 时，默认绝不可伪造幽灵 OBSOLETE_LINE！
+        self.assertEqual(_em.check_tech_unlocks_obsolete(["artillery1"], lines, avail_no_art2), [])
+        # 当 artillery_equipment_2 真正进入 PS_VARIANTS_ACTIVE 时才正常报警
+        hits_real = _em.check_tech_unlocks_obsolete(
+            ["artillery1"], lines, avail_no_art2 + ["artillery_equipment_2"]
+        )
+        self.assertEqual(len(hits_real), 1)
+        self.assertEqual(hits_real[0]["upgrade_to"], "artillery_equipment_2")
+
+        # TurnLoop: artillery1 从槽中离开但不在 g.researched()（中途换槽/取消）绝不触发 OBSOLETE_LINE
+        self.g.prod_lines = list(lines)
+        self.g._active_variant_names = lambda tag=None: avail_no_art2 + ["artillery_equipment_2"]
+        self.g.slots = [{"slot": 0, "researching": "artillery1", "slot_busy": True, "slot_done": False}]
+        self.g.researched_set = {"gw_artillery"}  # artillery1 尚未真正完成
+        step_i = [0]
+
+        def _fake_sleep(_s):
+            step_i[0] += 1
+            self.g.advance_days(2)
+            if step_i[0] == 1:
+                # 模拟槽内科技被切换，但 artillery1 并未进入 researched_set
+                self.g.slots = [{"slot": 0, "researching": "radio", "slot_busy": True, "slot_done": False}]
+
+        with mock.patch("time.sleep", side_effect=_fake_sleep), \
+             mock.patch.object(RD, "check_unpause_gate", return_value=None), \
+             mock.patch.object(RD, "evaluate", return_value={"has_blocking": False, "blocking": [], "acked": []}):
+            tl = TL.TurnLoop(self.g, poll=0.01)
+            w = tl.wait(max_days=2, timeout_seconds=5, signals=("research",),
+                        pause_on_wake=False, respect_red_dots=True, autopilot=False)
+        self.assertFalse(any("OBSOLETE_LINE" in str(r) for r in w.get("woke_because") or ()), w)
+
+    # 28. 2026-11-26 长跑 §5: 和平会议已执行 done 且条约已应用 (+0xDD=1, +0x1C8>0, +0x1F8=0) 时不再报 open=True
+    def test_soak20261126_s5_peace_conference_finalized_not_reported_open(self):
+        import struct
+        import peacewin as PW
+
+        class _BufProc:
+            def __init__(self, mem):
+                self.base = 0x140000000
+                self.pid = 34324
+                self._mem = mem
+
+            def read(self, addr, n):
+                out = bytearray(n)
+                for i in range(n):
+                    out[i] = self._mem.get(addr + i, 0)
+                return bytes(out)
+
+            def u64(self, addr):
+                return struct.unpack("<Q", self.read(addr, 8))[0]
+
+            def i32(self, addr):
+                return struct.unpack("<i", self.read(addr, 4))[0]
+
+        def _put(mem, addr, fmt, *vals):
+            for i, b in enumerate(struct.pack(fmt, *vals)):
+                mem[addr + i] = b
+
+        gs = 0x20000000
+        arr = 0x21000000
+        conf = 0x22000000
+        mem = {}
+        _put(mem, 0x140000000 + 0x33DD6B0, "<Q", gs)
+        _put(mem, gs + PW.GS_PEACE_CONF + 0x08, "<Q", arr)
+        _put(mem, gs + PW.GS_PEACE_CONF + 0x14, "<i", 1)
+        _put(mem, arr, "<Q", conf)
+
+        class _G:
+            p = _BufProc(mem)
+
+            def date(self):
+                return {"text": "1936.09.27.00"}
+
+        g_p = _G()
+        # 临时停用 setUp 中对 peacewin.live_conference_readonly 的桩，直接验证真实纯只读实现
+        stopped = []
+        for pt in list(self._patches):
+            if getattr(pt, "attribute", None) == "live_conference_readonly":
+                pt.stop()
+                stopped.append(pt)
+        try:
+            # 开会中（+0xDD=0, +0x1F8=1）-> open=True, finalized=False
+            _put(mem, conf + 0xDD, "<B", 0)
+            _put(mem, conf + 0xDC, "<B", 1)
+            _put(mem, conf + 0x1F8 + 8, "<Q", 1)
+            self.assertEqual(PW.live_conference_readonly(g_p), conf)
+            s_open = PW.summary(g_p)
+            self.assertTrue(s_open["open"])
+            self.assertFalse(s_open["finalized"])
+
+            # 执行 done 后条约已应用（+0xDD=1, +0x1C8=1, +0x1F8=0）-> live_conference_readonly=None, summary open=False & treaty_applied=True
+            _put(mem, conf + 0xDD, "<B", 1)
+            _put(mem, conf + 0xDC, "<B", 0)
+            _put(mem, conf + 0x1C8 + 8, "<Q", 1)
+            _put(mem, conf + 0x1F8 + 8, "<Q", 0)
+            self.assertIsNone(PW.live_conference_readonly(g_p))
+            s_done = PW.summary(g_p)
+            self.assertFalse(s_done["open"])
+            self.assertTrue(s_done["finalized"])
+            self.assertTrue(s_done["treaty_applied"])
+        finally:
+            for pt in stopped:
+                pt.start()
+
+    # 29. 2026-11-26 长跑 §6 & §12: 亡国僵尸 CB 自动过滤；war_readiness 走 justifying_fast 不触发全堆慢扫
+    def test_soak20261126_s6_s12_annexed_wargoal_filtered_and_war_readiness_uses_fast_justifying(self):
+        import struct
+        import diplomacy as _dip
+        from domains.battleplan_orders import BattleplanOrdersMixin
+
+        # (a) _decode_wargoal_obj 对已吞并国 (exists=False) 标记 target_exists=False & valid=False
+        class _WgProc:
+            def __init__(self, mem):
+                self._mem = mem
+
+            def u64(self, a):
+                return struct.unpack("<Q", bytes(self._mem.get(a + i, 0) for i in range(8)))[0]
+
+            def i32(self, a):
+                return struct.unpack("<i", bytes(self._mem.get(a + i, 0) for i in range(4)))[0]
+
+        mem = {}
+        w_addr = 0x30000000
+        for off, fmt, val in (
+            (_dip.WG_ID, "<Q", 12345),
+            (_dip.WG_OWNER, "<i", 1),
+            (_dip.WG_TARGET, "<i", 8),
+            (_dip.WG_TYPE, "<Q", 0x99999),
+        ):
+            for i, b in enumerate(struct.pack(fmt, val)):
+                mem[w_addr + off + i] = b
+        rec_dead = _dip._decode_wargoal_obj(
+            _WgProc(mem), w_addr, {0x99999: "take_state"},
+            lambda idx: {1: "GER", 8: "HOL"}.get(idx),
+            exists_fn=lambda t: t != "HOL",
+        )
+        self.assertFalse(rec_dead["target_exists"])
+        self.assertFalse(rec_dead["valid"])
+        self.assertEqual(rec_dead["invalid_reason"], "target_annexed")
+
+        # (b) war_readiness_check 在未 monkey-patch justifying 时应优先走 justifying_fast
+        class _MiniWR(BattleplanOrdersMixin):
+            GER_SNOWBALL = ("GER_anschluss", "GER_demand_sudetenland")
+
+            def _c(self, tag=None):
+                return type("C", (), {"tag": (tag or "GER").upper(), "ptr": 0x100})()
+
+            def divisions(self, tag=None, limit=1, deep=False):
+                return {"count": 40, "source": "mock", "verified": True}
+
+            def equipment_stockpile(self, tag=None):
+                return {"stockpile": [{"equipment": "infantry_equipment_1", "count": 5000}]}
+
+            def completed_focuses(self, tag=None):
+                return ["GER_anschluss", "GER_demand_sudetenland"]
+
+            def date(self):
+                return {"year": 1939}
+
+            def _border_divisions(self, tgt, tag=None):
+                return {"border_provinces": 4, "divisions_count": 40, "divisions_on_border": 16}
+
+            def _front_plan_check(self, tgt, tag=None):
+                return {"ok": True, "enemy_tag": tgt, "armies": [{"assigned_divisions": 16, "offensive_lines": 1}]}
+
+            def _front_directive_check(self, tgt):
+                return {"ok": True}
+
+        called = {"fast": 0, "slow": 0}
+
+        def _fast_stub(g, tag=None):
+            called["fast"] += 1
+            return []
+
+        def _orig_just_guard(g):
+            called["slow"] += 1
+            return []
+
+        _orig_just_guard.__name__ = "justifying"
+        with mock.patch.object(_dip, "war_escalation_forecast", return_value={}), \
+             mock.patch.object(_dip, "country_wargoals_direct", return_value=([], True)), \
+             mock.patch.object(_dip, "justifying_fast", side_effect=_fast_stub), \
+             mock.patch.object(_dip, "justifying", new=_orig_just_guard):
+            _MiniWR().war_readiness_check("POL")
+        self.assertEqual(called["fast"], 1)
+        self.assertEqual(called["slow"], 0)
+
+    # 30. 2026-11-26 长跑 §7/§8/§11: focus/construction 提醒与 decisive_event/WAR 唤醒去重
+    def test_soak20261126_s7_s8_s11_warnings_and_wake_dedup(self):
+        # §7 & §8 编译期清晰提示
+        cp = AP.compile_profile(self.g, {
+            "focus": {"enabled": True, "on_blocked": "skip", "queue": ["GER_anschluss"]},
+            "construction": {
+                "enabled": True,
+                "rules": [{"building": "arms_factory", "when": {"mil_ge": 40}, "max_in_queue": 4}],
+            },
+        })
+        self.assertTrue(cp["ok"], cp)
+        wtxt = "\n".join(cp["warnings"])
+        self.assertIn("fallback='none'", wtxt)
+        self.assertIn("when/until", wtxt)
+
+        # §8 唤醒文案带 gated 规则说明；§7 唤醒文案带 selectable_focuses 数量与 fallback 提示
+        self.g.mil = 39
+        self.g.const_queue = []
+        self.g.sel_focuses = [
+            {"key": "GER_demand_sudetenland", "tier": "S0_snowball", "score": 90},
+        ]
+        AP.set_standing_orders(self.g, {
+            "focus": {"enabled": True, "on_blocked": "skip", "queue": ["GER_anschluss"]},
+            "construction": {
+                "enabled": True,
+                "rules": [{"building": "arms_factory", "when": {"mil_ge": 40}, "max_in_queue": 4}],
+            },
+        })
+        tk = AP.run_tick(self.g)
+        dets = " | ".join(str(x.get("detail") or "") for x in tk["wake_triggers"])
+        self.assertIn("fallback='tier_score'", dets)
+        self.assertIn("gated by when/until", dets)
+
+        # §11: 同一分歧事件 lar_news.11 在 wake_triggers 中只出现 1 次（不再 event + decisive event 重复）
+        self.g.events_pending = [{
+            "event_id": "lar_news.11",
+            "title": "Test News",
+            "kind": "news_event",
+            "options": [
+                {"index": 1, "name": "A", "applicable": True, "effects": ["add_political_power = 10"]},
+                {"index": 2, "name": "B", "applicable": True, "effects": ["add_stability = 0.05"]},
+            ],
+        }]
+        tk_ev = AP.run_tick(self.g, dry_run=True)
+        ev_wakes = [w for w in tk_ev["wake_triggers"] if w.get("floor") == "decisive_event"]
+        self.assertEqual(len(ev_wakes), 1, ev_wakes)
+
+    # 31. 2026-11-26 长跑 §9 & §10: deploy_to_border 遵守 max_divisions/floor 补给上限；notifications/cancelled 立即停表
+    def test_soak20261126_s9_s10_deploy_supply_budget_and_cancel_notification(self):
+        import micro.pathing as mm_path
+        import micro.directives as mm_dir
+        import micro.front_state as mm_fs
+        import mapdata as md
+        import unitorders as uo
+        import divreserve as dr
+        import staff_supply as ss
+        import diplomacy as dip
+
+        # 构造 8 个 HOL 边境省（每省浮点补给 1.97，总计 15.76）+ 26 个内陆师，传 max_divisions=15, reserve_divisions=11
+        border_ids = list(range(1, 9))
+        owners = {p: "GER" for p in range(1, 20)}
+        adj = {p: {10} for p in border_ids}
+        adj[10] = set(border_ids)
+        ptype = {p: "land" for p in owners}
+        div_pos = {0x1000 + i: 10 for i in range(26)}
+
+        class _DepG:
+            _inj = object()
+
+            def player_tag(self):
+                return "GER"
+
+            def order_groups(self, tag=None):
+                return {"groups": []}
+
+        with mock.patch.object(md, "province_owner_map", return_value=(owners, {})), \
+             mock.patch.object(md, "build_adjacency", return_value=adj), \
+             mock.patch.object(md, "load_definitions", return_value=({}, ptype)), \
+             mock.patch.object(uo, "province_of", side_effect=lambda g, d: div_pos[d]), \
+             mock.patch.object(dr, "filter_out", side_effect=lambda g, ds: (ds, [])), \
+             mock.patch.object(ss, "front_budget", return_value={"per_province": {p: 1.97 for p in border_ids}}), \
+             mock.patch.object(ss, "load", return_value={}), \
+             mock.patch.object(mm_path, "_resolve", return_value=list(div_pos.keys())), \
+             mock.patch.object(mm_path, "_border_provinces", return_value=border_ids), \
+             mock.patch.object(mm_path, "_allowed_tags", return_value={"GER"}), \
+             mock.patch.object(mm_dir, "_load_front_state", return_value={}), \
+             mock.patch.object(mm_fs, "_front_state", return_value={}), \
+             mock.patch.object(mm_path, "_alloc_errbuf", return_value=0), \
+             mock.patch.object(mm_path, "_run_move", return_value=(True, 0x999, [1], None, None)), \
+             mock.patch.object(dip, "country_relations", return_value={"tag": "GER", "faction": None, "subjects": [], "overlord": None, "at_war_with": []}), \
+             mock.patch.object(dip, "war_escalation_forecast", return_value={"co_belligerents": []}):
+            res = mm_path.deploy_to_border(
+                _DepG(), "HOL", include_unassigned=False, max_divisions=15, reserve_divisions=11
+            )
+        # 每省 floor(1.97)=1，8 省最多派 8 师（<= 15 预算），绝不把 26 师全砸上去，且不触发假 supply overload！
+        self.assertLessEqual(res["divisions_deployed"], 15)
+        self.assertGreater(res["held_in_reserve"], 0)
+        self.assertFalse(any("supply overload" in w for w in res.get("warnings") or ()), res.get("warnings"))
+
+        # §10: mcp/server.py 收到 notifications/cancelled 时应置位 cancel 事件并触发零注入停表
+        import threading
+        mcp_dir = os.path.join(ROOT, "mcp")
+        if mcp_dir not in sys.path:
+            sys.path.insert(0, mcp_dir)
+        import server as _srv
+        ev = threading.Event()
+        alive_th = type("_FakeTh", (), {"is_alive": lambda self: True})()
+        paused_called = [0]
+        orig_call = dict(_srv._CALL)
+        try:
+            _srv._CALL.update(thread=alive_th, cancel=ev, name="hoi4_wait_and_brief")
+            with mock.patch.object(_srv, "_emergency_pause_game", side_effect=lambda: paused_called.__setitem__(0, paused_called[0] + 1)):
+                r = _srv.handle({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}})
+            self.assertIsNone(r)
+            self.assertTrue(ev.is_set())
+            self.assertEqual(paused_called[0], 1)
+        finally:
+            _srv._CALL.clear()
+            _srv._CALL.update(orig_call)
+
+    # 32. 2026-11-26 A1 & A7: justifying_fast O(1) 直读零堆扫描、health_board 复用与工期模型校正
+    def test_fix20261126_a1_a7_justifying_o1_and_estimate_days(self):
+        import diplomacy as _dip
+        import time as _t
+
+        # A7: 不再误加 30 天（WARGOAL_JUSTIFY_TENSION_FROM_PRODUCTION 是紧张度系数）
+        self.assertEqual(_dip._estimate_days(1, 0), 200.0)
+        self.assertEqual(_dip._estimate_days(2, 0), 250.0)
+        self.assertEqual(_dip._estimate_days(1, 1), 300.0)
+
+        # A1: Windows PE 下 _win_direct_timed_activities 返回空且 direct_ok=True 时绝不调 oi.live_instances
+        oi_calls = {"instances": 0, "live_instances": 0}
+
+        class _BoomOI:
+            def instances(self, cls):
+                oi_calls["instances"] += 1
+                raise AssertionError("should not fall back to oi.instances when direct_ok=True and 0 justifications")
+
+            def live_instances(self, cls):
+                oi_calls["live_instances"] += 1
+                raise AssertionError("should not fall back to 3.8GB oi.live_instances scan")
+
+        class _FakeG:
+            p = type("_P", (), {"pid": 99991})()
+            _oi = _BoomOI()
+
+            def tags(self):
+                return ["GER"]
+
+        orig_just_fast = self._patches[4].temp_original
+        with mock.patch.object(_dip, "_win_direct_timed_activities", return_value=([], False, True)):
+            rows = orig_just_fast(_FakeG(), tag="GER")
+        self.assertEqual(rows, [])
+        self.assertEqual(oi_calls["live_instances"], 0)
+        self.assertEqual(oi_calls["instances"], 0)
+
+        # A1 冗余消除: build_turn_brief 复用 overview() 刚刚算完的 _last_overview_hb
+        import macros as _mc
+        hb_sentinel = {"ok": True, "score": 88, "alerts": []}
+        self.g._last_overview_hb = ("GER", _t.monotonic(), hb_sentinel)
+        hb_calls = [0]
+
+        def _count_hb(*a, **kw):
+            hb_calls[0] += 1
+            return {"ok": True, "score": 50, "alerts": []}
+
+        with mock.patch.object(_mc, "strategic_health_board", side_effect=_count_hb), \
+             mock.patch("turnengine._window_guard", return_value=(True, None, {"focused": True})), \
+             mock.patch("reddots.evaluate", return_value={"has_blocking": False, "blocking": [], "acked": [], "advisory": []}):
+            res = TE.build_turn_brief(self.g, include_data=True)
+        self.assertEqual(hb_calls[0], 0)
+        self.assertIs(res["brief"]["health_board"], hb_sentinel)
+
+    # 33. 2026-11-26 A3 & N4: advisors 缓存、idea_catalog 循环提外 + returned/limit/truncated
+    def test_fix20261126_a3_n4_advisors_cache_and_idea_catalog(self):
+        import advisors as _adv
+        import tempfile
+        from domains.politics import PoliticsMixin
+
+        with tempfile.TemporaryDirectory() as td:
+            cl_dir = os.path.join(td, "common", "country_leader")
+            ch_dir = os.path.join(td, "common", "characters")
+            os.makedirs(cl_dir, exist_ok=True)
+            os.makedirs(ch_dir, exist_ok=True)
+            with open(os.path.join(cl_dir, "00_traits.txt"), "w", encoding="utf-8") as fh:
+                fh.write("@xp_med = 0.09\nleader_traits = {\n\tarmy_chief_test = {\n\t\texperience_gain_army = @xp_med\n\t}\n}\n")
+            with open(os.path.join(ch_dir, "GER.txt"), "w", encoding="utf-8") as fh:
+                fh.write("characters = {\n\tGER_test_adv = {\n\t\tadvisor = {\n\t\t\tslot = army_chief\n\t\t\tidea_token = GER_test_adv_tok\n\t\t\tcost = 100\n\t\t\ttraits = { army_chief_test }\n\t\t}\n\t}\n}\n")
+            tr1 = _adv.load_traits(td)
+            self.assertAlmostEqual(tr1["army_chief_test"]["experience_gain_army"], 0.09)
+            tr1["army_chief_test"]["experience_gain_army"] = 99.0
+            # 第二次命中缓存且隔离副本
+            tr2 = _adv.load_traits(td)
+            self.assertAlmostEqual(tr2["army_chief_test"]["experience_gain_army"], 0.09)
+            adv1 = _adv.load_advisors("GER", td)
+            self.assertEqual(len(adv1), 1)
+            adv1[0]["traits"].append("mutated")
+            adv2 = _adv.load_advisors("GER", td)
+            self.assertEqual(adv2[0]["traits"], ["army_chief_test"])
+
+        # PoliticsMixin.idea_catalog: c.summary() 只调 1 次、不调 wars()、legality._state() 只调 1 次，带 returned/limit/truncated
+        counts = {"summary": 0, "wars": 0, "leg_state": 0}
+
+        class _FakeCo:
+            tag = "GER"
+            political_power = 200
+
+            def summary(self):
+                counts["summary"] += 1
+                return {"political_power": 200, "war_support": 0.4}
+
+        class _MiniPol(PoliticsMixin):
+            _LAW_GATE = {
+                "war_economy": (0.50, True),
+                "tot_economic_mobilisation": (0.80, True),
+                "extensive_conscription": (0.0, False),
+                "service_by_requirement": (0.0, True),
+                "all_adults_serve": (0.0, True),
+                "scraping_the_barrel": (0.0, True),
+            }
+
+            def _c(self, tag=None):
+                return _FakeCo()
+
+            def politics(self, tag=None):
+                return {"political_power": 200, "active_ideas": ["partial_economic_mobilisation"]}
+
+            def _idea_entries(self, tag=None, which="all"):
+                return [{"key": k} for k in self._LAW_GATE]
+
+            def wars(self, tag=None):
+                counts["wars"] += 1
+                return {"at_war": False}
+
+        fake_advs = [
+            {"character": "GER_adv_%02d" % i, "idea_token": "tok_%02d" % i,
+             "slot": "political_advisor", "cost": 150, "traits": [],
+             "visible_block": "has_government = fascism", "available_block": None}
+            for i in range(15)
+        ]
+
+        import combat as _cb
+        import legality as _leg
+        with mock.patch.object(_adv, "load_ideas_catalog", return_value={k: {"slot": "economy", "is_law": True, "cost": 150} for k in _MiniPol._LAW_GATE}), \
+             mock.patch.object(_adv, "load_advisors", return_value=fake_advs), \
+             mock.patch.object(_cb, "at_war", return_value=False), \
+             mock.patch.object(_leg, "_state", side_effect=lambda g, t: (counts.__setitem__("leg_state", counts["leg_state"] + 1) or {"ideology": "fascism", "focuses": set()})), \
+             mock.patch.object(_leg, "_eval", return_value=True):
+            cat = _MiniPol().idea_catalog("GER", limit=5)
+
+        self.assertEqual(counts["summary"], 1)
+        self.assertEqual(counts["wars"], 0)
+        self.assertEqual(counts["leg_state"], 1)
+        self.assertGreater(cat["total"], 5)
+        self.assertEqual(cat["returned"], 5)
+        self.assertEqual(cat["limit"], 5)
+        self.assertTrue(cat["truncated"])
+        self.assertEqual(len(cat["items"]), 5)
+
+    # 34. 2026-11-26 N1 & A10 & A8: 工厂口径统一 + surplus_ratio/ratio 对齐
+    def test_fix20261126_n1_a10_a8_factories_and_surplus_ratio(self):
+        from domains.overview import OverviewMixin
+        from housekeep import HousekeepMixin
+        import equipmeta as _em
+        import macros as _mc
+
+        # N1 & A10: raw=73, available=70, used=70, idle=0 时 overview 与 housekeep_production 均报 0 闲置
+        set_calls = []
+
+        class _FakeFGame(OverviewMixin, HousekeepMixin):
+            p = type("_P", (), {"pid": 12345})()
+
+            def _c(self, tag=None):
+                return type("_C", (), {
+                    "tag": "GER", "ptr": 0,
+                    "summary": lambda s: {"military_factories": 73, "naval_dockyards": 20, "civilian_factories": 40, "political_power": 50},
+                })()
+
+            def player(self):
+                return self._c()
+
+            def factory_allocation(self, tag=None):
+                return {
+                    "source": "engine_production_status",
+                    "military_raw_buildings": 73, "military_available": 70, "military_used": 70, "military_idle": 0,
+                    "naval_raw_buildings": 20, "naval_available": 18, "naval_used": 0, "naval_idle": 18,
+                }
+
+            def production_lines(self, tag=None, include_obsolete=True):
+                return [{"index": 0, "class": "CMilitaryProductionLine", "equipment": "infantry_equipment_1", "factories": 70}]
+
+            def _upgrade_production_lines(self, tag=None):
+                return []
+
+            def _cap_deprioritized_lines(self, tag=None, rules=None):
+                return []
+
+            def _housekeep_dockyards(self, tag=None):
+                return []
+
+            def equipment_stockpile(self, tag=None):
+                return {"totals_by_equipment": {}}
+
+            def divisions(self, tag=None, limit=1):
+                return {"count": 40}
+
+            def set_production_amount(self, idx, amt, tag=None, auto_reclaim=True):
+                set_calls.append((idx, amt))
+                return {"ok": True, "after": amt}
+
+        fg = _FakeFGame()
+        fc = fg._factory_counts("GER", fg.player().summary(), fg.production_lines())
+        self.assertEqual(fc["mil_total"], 70)
+        self.assertEqual(fc["mil_raw"], 73)
+        self.assertEqual(fc["mil_free"], 0)
+        self.assertEqual(fc["dock_total"], 18)
+        self.assertEqual(fc["dock_free"], 18)
+
+        hp = fg.housekeep_production("GER")
+        self.assertEqual(hp["idle"], 0)
+        self.assertEqual(hp["total"], 70)
+        self.assertEqual(set_calls, [])
+
+        # A8: compute_surplus_lines 同时含 ratio 与 surplus_ratio；rebalance_production 不再打印 0.0x 且 rifle_surplus_detected=True
+        lines = [
+            {"index": 0, "class": "CMilitaryProductionLine", "equipment": "infantry_equipment_1", "factories": 25},
+            {"index": 1, "class": "CMilitaryProductionLine", "equipment": "artillery_equipment_1", "factories": 5},
+            {"index": 2, "class": "CMilitaryProductionLine", "equipment": "small_plane_airframe_1", "factories": 5},
+        ]
+        st_tot = {"infantry_equipment_1": 17061, "artillery_equipment_1": 100}
+        srows = _em.compute_surplus_lines(lines, st_tot, total_mil=35, div_count=30)
+        self.assertEqual(len(srows), 1)
+        self.assertEqual(srows[0]["ratio"], srows[0]["surplus_ratio"])
+        self.assertGreater(srows[0]["surplus_ratio"], 2.5)
+
+        class _RebG:
+            def player_tag(self):
+                return "GER"
+
+            def production_lines(self, tag=None, include_obsolete=False):
+                return list(lines)
+
+            def factory_allocation(self, tag=None):
+                return {"source": "engine_production_status", "military_available": 35, "military_idle": 0}
+
+            def equipment_stockpile(self, tag=None):
+                return {"totals_by_equipment": dict(st_tot)}
+
+            def divisions(self, tag=None, limit=1):
+                return {"count": 30}
+
+        reb = _mc.rebalance_production(_RebG(), dry_run=True)
+        self.assertTrue(reb["rifle_surplus_detected"])
+        inf_ch = [c for c in reb["plan"] if c["line"] == 0]
+        self.assertTrue(inf_ch, reb["plan"])
+        self.assertNotIn("0.0x", inf_ch[0]["reason"])
+        self.assertIn("2.8x", inf_ch[0]["reason"])
+
+    # 35. 2026-11-26 A11 & N2 & N3 & A9: 和会入口直停、dry_run days_elapsed、0 船线不谎报、时钟推进提示
+    def test_fix20261126_a11_n2_n3_a9_peace_days_dockyards_clock(self):
+        # A11: 和会已开启时 autopilot=False 立即返回 peace_open=True（0 秒不空转）
+        self.g.peace_open = True
+        tl = TL.TurnLoop(self.g, poll=0.05)
+        with mock.patch("peacewin.live_conference_readonly", return_value=0x123456), \
+             mock.patch.object(TL.TurnLoop, "_force_pause_safe", return_value=True):
+            wres = tl.wait(max_days=7, timeout_seconds=5, autopilot=False, respect_red_dots=False)
+        self.assertTrue(wres.get("peace_open"))
+        self.assertFalse(wres.get("timed_out"))
+        self.assertEqual(wres.get("waited_game_days"), 0.0)
+        self.assertIn("peace conference already open", wres["woke_because"][0])
+        self.g.peace_open = False
+
+        # N2: dry_run=True 实时计算 days_elapsed（不滞后、不写盘）
+        self.g.ymd = (1936, 1, 1)
+        set_r = AP.set_standing_orders(self.g, {
+            "production": {
+                "enabled": True,
+                "strategy": {"strategy": "ratio_hysteresis", "params": {"allocate_dockyards": True}},
+            }
+        })
+        self.assertTrue(set_r.get("ok"), set_r)
+        st0 = AP.get_active_state(self.g)
+        self.assertIsNotNone(st0)
+        st0["days_elapsed"] = 91.08
+        self.g.advance_days(134)
+        # N3: 0 造船线 + dock=18 时 dry_run=True 不谎报 allocate_dockyards:18
+        self.g.dock = 18
+        self.g.mil = 10
+        self.g.prod_lines = [
+            {"index": 0, "class": "CMilitaryProductionLine", "equipment": "infantry_equipment_1", "factories": 10},
+        ]
+        tk_dry = AP.run_tick(self.g, dry_run=True)
+        self.assertEqual(tk_dry["days_elapsed"], 134.0)
+        self.assertEqual(AP.get_active_state(self.g)["days_elapsed"], 91.08)
+        self.assertFalse(any("allocate_dockyards" in a.get("action", "") for a in tk_dry["actions"]), tk_dry["actions"])
+
+        # N3 正例: 有 1 条 0 厂驱逐舰线（上限 10）时 dry_run 精确预报 allocate_dockyards:10
+        self.g.prod_lines.append(
+            {"index": 1, "class": "CNavalProductionLine", "equipment": "ship_hull_light_1", "factories": 0}
+        )
+        tk_dry2 = AP.run_tick(self.g, dry_run=True)
+        self.assertTrue(any(a.get("action") == "allocate_dockyards:10" for a in tk_dry2["actions"]), tk_dry2["actions"])
+
+        # A9: execute_plan 上报 date_before/date_after/clock_advanced_hours/clock_note
+        def _adv_dispatch(g, op, args, tag):
+            g.advance_days(1)
+            return {"ok": True}
+
+        with mock.patch("turnengine._process_alive", return_value=True), \
+             mock.patch("turnengine._window_guard", return_value=(True, None, {"focused": True})), \
+             mock.patch("turnengine._dispatch_action", side_effect=_adv_dispatch):
+            ep = TE.execute_plan(self.g, {"actions": [{"op": "housekeep", "args": {}}]}, persist_state=False)
+        self.assertEqual(ep["clock_advanced_hours"], 24)
+        self.assertIn("post_drained", ep.get("clock_note") or "")
+
+    # 36. 2026-11-26 顺带修复: mcp/server.py _run_with_timeout 结束后清空 _CALL，RedDotGuard 不再永久 busy
+    def test_fix20261126_reddot_guard_busy_check_clears_after_call(self):
+        mcp_dir = os.path.join(ROOT, "mcp")
+        if mcp_dir not in sys.path:
+            sys.path.insert(0, mcp_dir)
+        import server as _srv
+        orig_call = dict(_srv._CALL)
+        try:
+            out = _srv._run_with_timeout(lambda a: {"ok": True, "v": a["x"]}, {"x": 42}, "test_tool")
+            self.assertEqual(out, {"ok": True, "v": 42})
+            self.assertIsNone(_srv._CALL.get("name"))
+            self.assertIsNone(_srv._CALL.get("thread"))
+        finally:
+            _srv._CALL.clear()
+            _srv._CALL.update(orig_call)
+
+    # 37. 2026-11-26 重构审计 #1: justifying() 0 正当化不穿透 3.8 GB 全堆扫描 + wargoal_quote 走 justifying_fast
+    def test_perf20261126_p1_justifying_and_wargoal_quote_no_heap_scan(self):
+        import diplomacy as _dip
+        from domains.diplomacy_war import DiplomacyWarMixin
+
+        scan_hits = []
+
+        class _BombOI:
+            def live_instances(self, cls):
+                scan_hits.append(("live", cls))
+                return []
+
+            def deep_instances(self, cls):
+                scan_hits.append(("deep", cls))
+                return []
+
+        cptr, dip_ptr, pol_ptr = 0x200000, 0x210000, 0x220000
+
+        class _MemP:
+            pid = 77701
+            base = 0x140000000
+
+            def u64(self, addr):
+                if addr == cptr + _dip.WIN_CO_DIPLO_STATUS:
+                    return dip_ptr
+                if addr == cptr + _dip.WIN_CO_POL_STATUS:
+                    return pol_ptr
+                return 0
+
+            def i32(self, addr):
+                if addr in (
+                    dip_ptr + _dip.WIN_DS_JUSTIFYING_TAGS + 0x0C,
+                    dip_ptr + _dip.WIN_DS_JUSTIFYING_TAGS + 0x08,
+                    pol_ptr + _dip.WIN_PS_TIMED_ACTIVITIES + 0x0C,
+                    pol_ptr + _dip.WIN_PS_TIMED_ACTIVITIES + 0x08,
+                ):
+                    return 0
+                if addr == cptr + 8:
+                    return 1
+                return 0
+
+        class _G:
+            p = _MemP()
+            oi = _BombOI()
+
+            def tags(self):
+                return ["GER"]
+
+            def country(self, t):
+                return type("_C", (), {"ptr": cptr, "tag": t, "political_power": 100.0})()
+
+        # Windows 权威空: justifying() 直接短路返回 [], 绝不触碰 live_instances / deep_instances
+        with mock.patch("sys.platform", "win32"):
+            self.assertEqual(_dip.justifying(_G()), [])
+        self.assertEqual(scan_hits, [])
+
+        # include_queued=True 时允许显式诊断队列残留
+        with mock.patch("sys.platform", "win32"):
+            self.assertEqual(_dip.justifying(_G(), include_queued=True), [])
+        self.assertEqual(scan_hits, [("deep", "CGenerateWarGoalAction")])
+
+        # wargoal_quote 在 Windows 下调用 justifying_fast(self, tag=src)，绝不调 justifying(self)
+        called = []
+
+        class _QuoteG(DiplomacyWarMixin):
+            def player(self):
+                return type("_C", (), {"tag": "GER"})()
+
+            def country(self, t):
+                return type("_C", (), {"tag": t, "political_power": 80.0})()
+
+            def states(self, t):
+                return [{"id": 7}]
+
+        with mock.patch("sys.platform", "win32"), \
+             mock.patch.object(_dip, "justifying", side_effect=AssertionError("must not call full justifying")), \
+             mock.patch.object(_dip, "justifying_fast", side_effect=lambda g, tag=None: (called.append(tag) or [])):
+            q = _QuoteG().wargoal_quote("HOL")
+        self.assertTrue(q["ok"])
+        self.assertEqual(called, ["GER"])
+        self.assertEqual(q["estimated_days"], 200.0)
+        self.assertEqual(q["estimated_upfront_pp"], 40.0)
+
+    # 38. 2026-11-26 重构审计 #2: combat._country_id_map 会话级缓存 + combats() 0 战斗立即短路
+    def test_perf20261126_p2_country_id_map_cache_and_combats_short_circuit(self):
+        import combat as _cb
+        import session_state as _ss
+
+        reads = [0]
+
+        class _P:
+            pid = 77702
+            base = 0x140000000
+
+            def u64(self, addr):
+                if addr == self.base + _cb.G_GAMESTATE:
+                    return 0x500000
+                if addr == 0x500000 + _cb.GS_COMBATS:
+                    return 0x600000
+                return 0
+
+            def i32(self, addr):
+                if addr == 0x500000 + _cb.GS_COMBATS + 8:
+                    return 16
+                if addr == 0x500000 + _cb.GS_COMBATS + 12:
+                    return 0  # 0 active combats
+                reads[0] += 1
+                return {0x300008: 1, 0x310008: 2}.get(addr, 0)
+
+        class _G:
+            p = _P()
+
+            def tags(self):
+                return ["GER", "ENG"]
+
+            def country(self, t):
+                return type("_C", (), {"ptr": 0x300000 if t == "GER" else 0x310000})()
+
+        _ss.invalidate("test_p2_init")
+        g = _G()
+        m1 = _cb._country_id_map(g)
+        self.assertEqual(m1, {1: "GER", 2: "ENG"})
+        after_first = reads[0]
+        self.assertEqual(after_first, 2)
+
+        # 二次调用命中缓存，0 额外内存读取
+        m2 = _cb._country_id_map(g)
+        self.assertEqual(m2, {1: "GER", 2: "ENG"})
+        self.assertEqual(reads[0], after_first)
+
+        # session_state.invalidate 立即清空缓存
+        _ss.invalidate("test_p2_clear")
+        m3 = _cb._country_id_map(g)
+        self.assertEqual(m3, {1: "GER", 2: "ENG"})
+        self.assertGreater(reads[0], after_first)
+
+        # 0 战斗短路：严禁遍历 tags()
+        class _ZeroCombatG:
+            p = _P()
+
+            def tags(self):
+                raise AssertionError("combats() must short-circuit when size == 0")
+
+        with mock.patch("sys.platform", "win32"):
+            self.assertEqual(_cb.combats(_ZeroCombatG()), [])
+
+    # 39. 2026-11-26 重构审计 #3: Windows CO_CAPITAL_STATE=0x1018 + 过滤亡国 + 缓存注册
+    def test_perf20261126_p3_windows_capital_state_offset_and_dead_country_filter(self):
+        import offsets_win as _ow
+        import mapdata as _md
+        import session_state as _ss
+
+        self.assertEqual(_ow.CO_CAPITAL_STATE, 0x1018)
+        self.assertEqual(_ow.CO_ORIGINAL_CAPITAL_STATE, 0x101C)
+
+        # 模拟 GER(活, cap=64)、CHI(活/迁都, cap=1037)、AUS(已吞并亡国, cap=4, owned=0, ctrl=0)
+        # 在 +0xFF0 故意写入负数垃圾值，确认不会再误读 Linux 偏移
+        ptrs = [0x400000, 0x410000, 0x420000, 0x430000]  # 0=dummy, 1=GER, 2=AUS, 3=CHI
+        cap_vals = {ptrs[1]: 64, ptrs[2]: 4, ptrs[3]: 1037}
+        owned_vals = {ptrs[1]: 36, ptrs[2]: 0, ptrs[3]: 10}
+        ctrl_vals = {ptrs[1]: 36, ptrs[2]: 0, ptrs[3]: 28}
+
+        class _P:
+            pid = 77703
+            base = 0x140000000
+
+            def i32(self, addr):
+                for cp in ptrs[1:]:
+                    if addr == cp + 0x1018:
+                        return cap_vals[cp]
+                    if addr == cp + 0xFF0:
+                        return -123456789
+                    if addr == cp + _ow.CO_STATES + _ow.PDXARRAY_SIZE:
+                        return owned_vals[cp]
+                    if addr == cp + _ow.CO_STATES_B + _ow.PDXARRAY_SIZE:
+                        return ctrl_vals[cp]
+                return 0
+
+        class _G:
+            p = _P()
+            _tags = ["---", "GER", "AUS", "CHI"]
+            _tag2idx = [0, 1, 2, 3]
+
+            def _load_tags(self):
+                pass
+
+            def country_ptrs(self):
+                return ptrs
+
+            def date(self):
+                return {"text": "1940.01.01.11"}
+
+        fake_st2p = {64: [6521], 4: [11666], 1037: [6999]}
+        _ss.invalidate("test_p3_init")
+        with mock.patch.object(_md, "load_state_provinces", return_value=(fake_st2p, {})):
+            caps = _md.capital_provinces(_G())
+        self.assertEqual(caps.get(6521), "GER")
+        self.assertEqual(caps.get(6999), "CHI")
+        self.assertNotIn(11666, caps)  # 已灭亡的 AUS 不得占用维也纳
+        self.assertTrue(_md._CAP_PROV_CACHE)
+        _ss.invalidate("test_p3_clear")
+        self.assertEqual(_md._CAP_PROV_CACHE, {})
+
+    # 40. 2026-11-26 重构审计 #4: country_stats 跳过空 SCOPE_CALL_ALLOW + staff_army 直读 manpower
+    def test_perf20261126_p4_country_stats_short_circuit_and_staff_army_manpower(self):
+        import api as _api
+        import combat as _cb
+        import stats as _st
+        import staff_army as _sa
+        from domains.stats_vars import StatsVarsMixin
+
+        class _FakeCo:
+            ptr = 0x555000
+
+            def summary(self):
+                return {"tag": "GER", "manpower": 820000, "military_factories": 70}
+
+            def manpower(self):
+                return 820000
+
+        class _StatsG(StatsVarsMixin):
+            p = type("_P", (), {})()
+            gamestate = 0x600000
+
+            def __enter__(self):
+                raise AssertionError("country_stats must not enter `with self:` when SCOPE_CALL_ALLOW is empty")
+
+            def __exit__(self, *a):
+                pass
+
+            def _c(self, tag=None):
+                return _FakeCo()
+
+            def wars(self, tag=None):
+                raise AssertionError("country_stats must use combat.at_war instead of heavy self.wars()")
+
+        with mock.patch.object(_api, "SCOPE_CALL_ALLOW", set()), \
+             mock.patch.object(_st, "build", side_effect=AssertionError("must not call stats.build")), \
+             mock.patch.object(_cb, "at_war", return_value=False), \
+             mock.patch("domains.stats_vars._arr", side_effect=lambda p, ptr, off: [0x555000] if ptr == 0x600000 else [1, 2, 3]):
+            res = _StatsG().country_stats("GER")
+        self.assertEqual(res["divisions"], 3)
+        self.assertFalse(res["at_war"])
+        self.assertTrue(res["is_major"])
+        self.assertEqual(res["manpower"], 820000)
+
+        # staff_army.state() 直读 g._c(tag).manpower()，绝不调重接口 country_stats()
+        class _ArmyG:
+            def _c(self, tag=None):
+                return _FakeCo()
+
+            def country_stats(self, tag=None):
+                raise AssertionError("staff_army.state must not call country_stats when _c().manpower() works")
+
+            def division_detail(self, tag=None, limit=400):
+                return {"divisions": []}
+
+            def template_composition(self, tag=None):
+                return []
+
+            def equipment_stockpile(self, tag=None):
+                return {"stockpile": []}
+
+            def production_lines(self, tag=None):
+                return []
+
+            def order_groups(self, tag=None):
+                return []
+
+            def unassigned_divisions(self, tag=None):
+                return []
+
+            def conveyors(self, tag=None):
+                return []
+
+        snap = _sa.state(_ArmyG(), "GER")
+        self.assertEqual(snap["manpower"], 820000)
+
+    # 41. 2026-11-26 重构审计 #5: _world_epoch_check 接入 session_state.sync + 4 处缓存注册全覆盖
+    def test_perf20261126_p5_world_epoch_sync_and_cache_registrations(self):
+        mcp_dir = os.path.join(ROOT, "mcp")
+        if mcp_dir not in sys.path:
+            sys.path.insert(0, mcp_dir)
+        import combat as _cb
+        import equipmeta as _em
+        import mapdata as _md
+        import session_state as _ss
+        import staff_industry as _si
+        import offsets_win as _ow
+        from tools import runtime as _rt
+
+        reg = set(_ss.snapshot()["registered_caches"])
+        for expected in (
+            "combat._COUNTRY_ID_MAP_CACHE",
+            "equipmeta._SEEN_OBSOLETE",
+            "mapdata._CAP_PROV_CACHE",
+            "staff_industry._CACHE",
+        ):
+            self.assertIn(expected, reg, f"missing session_state cache registration: {expected}")
+
+        world_val = [0x20000000]
+        front_reset = [0]
+
+        class _EpochP:
+            pid = 77705
+            base = 0x140000000
+
+            def u64(self, addr):
+                if addr == self.base + _ow.G_GAMESTATE:
+                    return world_val[0]
+                return 0
+
+        class _EpochG:
+            _VT_SCAN = {"dummy": [1]}
+            p = _EpochP()
+
+            def __init__(self):
+                self._oi = object()
+                self._tags = ["GER"]
+                self._last_overview_hb = (1.0, {})
+                self._div_tagmap = {"x": 1}
+
+            def reset_front_snapshot(self):
+                front_reset[0] += 1
+
+        # 基线初始化（同 PID，world=0x20000000）
+        _ss.invalidate("test_p5_base", pid=77705, world_ptr=0x20000000)
+        g = _EpochG()
+        self.assertFalse(_rt._world_epoch_check(g))
+
+        # 写入四处模块缓存脏数据
+        _cb._COUNTRY_ID_MAP_CACHE[("k",)] = {1: "GER"}
+        _em._SEEN_OBSOLETE[(77705, "GER")] = {("x",)}
+        _md._CAP_PROV_CACHE[("k",)] = {6521: "GER"}
+        _si._CACHE[(77705, _ss.SESSION.save_epoch, "GER", "1936.01.01")] = {"ok": True}
+
+        # 同 PID 内读档/重开新局 -> CCurrentGameState* 变化 -> 自动触发全量清理
+        world_val[0] = 0x30000000
+        self.assertTrue(_rt._world_epoch_check(g))
+        self.assertEqual(_cb._COUNTRY_ID_MAP_CACHE, {})
+        self.assertEqual(_em._SEEN_OBSOLETE, {})
+        self.assertEqual(_md._CAP_PROV_CACHE, {})
+        self.assertEqual(_si._CACHE, {})
+        self.assertIsNone(g._oi)
+        self.assertIsNone(g._tags)
+        self.assertIsNone(g._last_overview_hb)
+        self.assertFalse(hasattr(g, "_div_tagmap"))
+        self.assertEqual(_EpochG._VT_SCAN, {})
+        self.assertEqual(front_reset[0], 1)
+
+    # 42. 2026-11-26 实测 B1: fronts_towards 核验 CFront+0x70 剔除蹭角点邻国前线 + 融合 CProvince+0xD0 实时占领态
+    def test_20261126_b1_fronts_towards_filters_third_country_front_and_tracks_occupation(self):
+        import armyops_win as _aw
+
+        AREA_GER = 0x264334CB770
+        AREA_HOL = 0x264334D1170
+        AREA_BEL = 0x264334CF430
+        FRONT_HOL = 0x2642DB0CAF0
+        FRONT_BEL = 0x2642DB0CA60
+
+        # 模拟省：9522 为德/荷/比三国交界角点省；9335 战前属 HOL 但战中 +0xD0 已翻成 AREA_GER；
+        # 1002 战前属 GER 但被 HOL 反推占领（+0xD0 已翻成 AREA_HOL）—— 绝不可把 AREA_HOL 错判成我方！
+        # 391 为 HOL 未沦陷腹地省；6537 为 BEL 边境省
+        prov_ptrs = {1001: 0x30010000, 1002: 0x30015000, 9522: 0x30020000, 9335: 0x30030000, 391: 0x30040000, 392: 0x30045000, 6537: 0x30050000}
+        mem_u64 = {
+            FRONT_HOL + 0x70: AREA_HOL,
+            FRONT_BEL + 0x70: AREA_BEL,
+            0x30010000 + 0xD0: AREA_GER,
+            0x30015000 + 0xD0: AREA_HOL,  # 被 HOL 反推占领的 GER 战前省！
+            0x30020000 + 0xD0: AREA_GER,
+            0x30030000 + 0xD0: AREA_GER,  # 已被 GER 占领，但州仍归 HOL
+            0x30040000 + 0xD0: AREA_HOL,
+            0x30045000 + 0xD0: AREA_HOL,
+            0x30050000 + 0xD0: AREA_BEL,
+        }
+
+        class _P:
+            def u64(self, addr):
+                return mem_u64.get(addr, 0)
+
+            def i32(self, addr):
+                return 0
+
+        class _G:
+            p = _P()
+
+            def player_tag(self):
+                return "GER"
+
+            def country(self, tag):
+                return type("C", (), {"tag": str(tag).upper(), "ptr": 0x1000})()
+
+            def province_ptr(self, pid):
+                return prov_ptrs[int(pid)]
+
+        adj = {
+            1001: {1002, 9335},
+            1002: {1001, 391},
+            9522: {9335, 391, 6537},
+            9335: {1001, 9522, 391},
+            391: {1002, 9335, 9522, 392},
+            392: {391},
+            6537: {9522},
+        }
+        fake_fronts = [
+            {"ptr": FRONT_HOL, "handle": [66, 7], "sections": [{"id": 1, "provinces": [1001, 9335, 9522]}]},
+            {"ptr": FRONT_BEL, "handle": [66, 8], "sections": [{"id": 2, "provinces": [9522]}]},
+        ]
+        cmap = {1001: "GER", 1002: "GER", 9522: "GER", 9335: "HOL", 391: "HOL", 392: "HOL", 6537: "BEL"}
+
+        with mock.patch.object(_aw, "owned_provinces", side_effect=lambda g, t: {1: [1001, 1002, 9522]} if t == "GER" else {2: [9335, 391, 392]}), \
+             mock.patch.object(_aw, "fronts", return_value=fake_fronts), \
+             mock.patch.object(_aw, "orders_groups", return_value=[]), \
+             mock.patch("mapdata.province_controller_map", return_value=cmap), \
+             mock.patch("mapdata.capital_provinces", return_value={1001: "GER", 391: "HOL"}), \
+             mock.patch("mapdata.build_adjacency", return_value=adj):
+            segs = _aw.fronts_towards(_G(), "HOL", "GER")
+            # 比利时前线 [66,8] 因 +0x70=AREA_BEL 不匹配 HOL 实控省被彻底剔除，只剩真 HOL 前线 [66,7]！
+            self.assertEqual([s["front_handle"] for s in segs], [[66, 7]])
+            # 已被占领的 9335 实时归入 mine 并成为贴着 391 的我方边境省
+            self.assertIn(9335, segs[0]["border_provinces"])
+            # target_provinces 不得再把已占领的 9335 当成敌方目标，但保留纵深省 392
+            tgts = _aw.target_provinces(_G(), "HOL", depth=1, own_tag="GER")
+            self.assertNotIn(9335, tgts)
+            self.assertIn(392, tgts)
+
+    # 43. 2026-11-26 实测 B2: plan_front_allocation 对已交战目标不再误判 suicidal
+    def test_20261126_b2_plan_front_allocation_not_suicidal_when_already_at_war(self):
+        import macros as _mc
+
+        class _WarG:
+            def _c(self, tag=None):
+                return type("C", (), {"tag": (tag or "GER").upper()})()
+
+            def date(self):
+                return {"year": 1936, "month": 10, "day": 14, "text": "1936.10.14.03"}
+
+            def divisions(self, tag=None, limit=1, deep=False):
+                return {"count": 34 if (tag or "GER").upper() == "GER" else 8}
+
+            def _border_divisions(self, tgt, tag=None):
+                return {"border_provinces": 6, "divisions_on_border": 10}
+
+            def _supply_front_guard(self, tgt, tag=None):
+                return {"capacity": 24.0, "measured_capped_provinces": []}
+
+            def war_escalation_forecast(self, tgt, tag=None):
+                return fake_diplo
+
+        fake_diplo = {
+            "diplomatic_blockers": ["already at war with HOL"],
+            "diplomatic_warnings": [],
+            "co_belligerents": ["INS"],
+            "guaranteed_by": [],
+            "co_belligerent_borders": [],
+            "total_enemy_divisions_est": 8,
+        }
+        with mock.patch("diplomacy.war_escalation_forecast", return_value=fake_diplo), \
+             mock.patch("diplomacy.divisions_on_border", return_value={"border_provinces": 6, "divisions_on_border": 10}), \
+             mock.patch("staff_supply.front_budget", return_value={"capacity": 24.0, "measured_capped_provinces": []}):
+            res = _mc.plan_front_allocation(_WarG(), "HOL", execute=False)
+        self.assertTrue(res["ok"])
+        self.assertTrue(res["already_at_war"])
+        self.assertEqual(res["blockers"], [])
+        self.assertNotEqual(res["verdict"], "suicidal")
+
+    # 44. 2026-11-26 实测 B3: compile_profile 对列表字段传裸布尔返回结构化报错而非裸 TypeError
+    def test_20261126_b3_compile_profile_rejects_bool_in_list_fields(self):
+        res = AP.compile_profile(self.g, {
+            "xp_policy": {
+                "army_template_upgrades": True,
+                "doctrines": False,
+            },
+            "pp_policy": {"agenda": True},
+            "construction": {"queue": True, "rules": 123},
+            "focus": {"must": True, "queue": "GER_rhineland"},
+            "research": {"queue": True},
+        })
+        self.assertFalse(res["ok"])
+        errs_joined = "\n".join(res["errors"])
+        for field in (
+            "xp_policy.army_template_upgrades",
+            "xp_policy.doctrines",
+            "pp_policy.agenda",
+            "construction.queue",
+            "construction.rules",
+            "focus.must",
+            "focus.queue",
+            "research.queue",
+        ):
+            self.assertIn(field, errs_joined, f"missing structured error for {field}: {res['errors']}")
+
+    # 45. 2026-11-26 实测 B4: _tick_pp_policy 自改核心法案后移除同槽旧法案，下帧不误报 external_law_or_regime_change
+    def test_20261126_b4_pp_policy_replaces_same_slot_law_without_false_floor(self):
+        # 关键顺序：limited_exports 在字母序上排在 autarkic_economy 之后，旧代码会覆写回 limited_exports！
+        self.g.active_ideas = {"limited_exports", "partial_economic_mobilisation", "limited_conscription"}
+        self.g.pp = 300.0
+        orig_add = self.g.add_idea
+
+        def _swap_law(key, tag=None):
+            if key == "autarkic_economy":
+                self.g.active_ideas.discard("limited_exports")
+                self.g.active_ideas.add("autarkic_economy")
+                self.g.pp -= 150.0
+                return {"ok": True}
+            return orig_add(key, tag)
+
+        self.g.add_idea = _swap_law
+        AP.set_standing_orders(self.g, {
+            "pp_policy": {
+                "enabled": True,
+                "reserve_pp": 50,
+                "agenda": [{"kind": "law", "key": "autarkic_economy", "cost": 150}],
+                "on_agenda_done": "hold",
+            },
+        })
+        tk1 = AP.run_tick(self.g)
+        self.assertTrue(any(a["action"] == "law:autarkic_economy" and a["ok"] for a in tk1["actions"]), tk1)
+        st = AP.get_active_state(self.g)
+        self.assertEqual((st.get("known_core_laws") or {}).get("trade_laws"), "autarkic_economy")
+
+        # 下一帧检查地板：绝不得触发 external_law_or_regime_change！
+        tk2 = AP.run_tick(self.g, dry_run=True)
+        self.assertFalse(
+            any(w.get("floor") == "external_law_or_regime_change" for w in tk2["wake_triggers"]),
+            tk2["wake_triggers"],
+        )
+
+    # 46. 2026-11-26 实测 B6: available_research / start_research 过滤未激活 DLC 互斥科技树
+    def test_20261126_b6_research_filters_inactive_dlc_mutex_folders(self):
+        from domains.research import ResearchMixin
+
+        class _ResG(ResearchMixin):
+            def __init__(self):
+                self._tech_by_name = {
+                    "early_transport_plane": 0x1001,
+                    "early_fighter": 0x1002,
+                    "fighter1": 0x1003,
+                    "bba_early_transport_plane": 0x1004,
+                    "basic_machine_tools": 0x1005,
+                }
+                self._tech_by_id = {}
+
+            def _load_tech_db(self, wait_s=0.0):
+                return
+
+            def date(self):
+                return {"year": 1936, "month": 10, "day": 14}
+
+            def researched(self, tag=None):
+                return ["early_fighter", "early_transport_plane"]
+
+            def research_slots(self, tag=None):
+                return [{"slot": 0, "researching": None, "slot_busy": False, "slot_done": False}]
+
+            def _c(self, tag=None):
+                return type("C", (), {"tag": "GER", "tag_id": 1})()
+
+        fake_defs = {
+            "early_transport_plane": {"category": "air", "folder": "air_techs_folder", "year": 1936, "parents": []},
+            "early_fighter": {"category": "air", "folder": "air_techs_folder", "year": 1936, "parents": []},
+            "fighter1": {"category": "air", "folder": "air_techs_folder", "year": 1936, "parents": ["early_fighter"]},
+            "bba_early_transport_plane": {"category": "air", "folder": "bba_air_techs_folder", "year": 1936, "parents": []},
+            "basic_machine_tools": {"category": "industry", "folder": "industry_folder", "year": 1936, "parents": []},
+        }
+        rg = _ResG()
+        with mock.patch("techdata.load", return_value=fake_defs):
+            avail = rg.available_research("GER")
+            self.assertIn("fighter1", avail)
+            self.assertIn("basic_machine_tools", avail)
+            self.assertNotIn("bba_early_transport_plane", avail)
+
+            sr = rg.start_research("bba_early_transport_plane", slot=0, tag="GER")
+            self.assertFalse(sr["ok"])
+            self.assertEqual(sr["blocked_by"], "inactive_dlc_folder")
+            self.assertEqual(sr["equivalent_tech"], "early_transport_plane")
+            self.assertTrue(sr["equivalent_researched"])
+
+    # 47. 2026-11-26 实测 B7: purge_empty_orders 遇到引擎级联删单时实时回读跳过已消失订单，不报假失败
+    def test_20261126_b7_purge_empty_orders_skips_cascade_deleted_ids(self):
+        import armyops as _ao
+        import armyops_win as _aw
+        from domains.battleplan_orders import BattleplanOrdersMixin
+
+        live_roots = [{"id": 10, "assigned_divisions": 0}]
+        live_kids = [{"id": 11, "root": 10, "assigned": 0}, {"id": 12, "root": 10, "assigned": 0}]
+        del_calls = []
+
+        class _P:
+            def u8(self, addr):
+                return 0
+
+        class _PurgeG(BattleplanOrdersMixin):
+            p = _P()
+
+            def _c(self, tag=None):
+                return type("C", (), {"tag": "GER", "ptr": 0x100})()
+
+            def delete_order(self, og, oid, allow_child=False):
+                del_calls.append((oid, allow_child))
+                # 删 11 时模拟引擎级联把 12 也顺带删掉
+                live_kids[:] = [k for k in live_kids if k["id"] not in (oid, 12 if oid == 11 else -1)]
+                live_roots[:] = [r for r in live_roots if r["id"] != oid]
+                return {"ok": True, "error": ""}
+
+        with mock.patch.object(sys, "platform", "win32"), \
+             mock.patch.object(_ao, "orders_groups", return_value=[0x50000]), \
+             mock.patch.object(_aw, "orders", side_effect=lambda g, og: list(live_roots)), \
+             mock.patch.object(_aw, "order_children", side_effect=lambda g, og: list(live_kids)):
+            res = _PurgeG().purge_empty_orders("GER")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["failed_count"], 0)
+        self.assertEqual(res["orders_left"], [])
+        # 12 已被级联清除，不应再发起实际 delete_order(12)
+        self.assertNotIn((12, True), del_calls)
+        self.assertTrue(any(r["order"] == 12 and r.get("already_removed") for r in res["removed"]))
+
+    # 48. 2026-11-26 实测 B5 & B9: 和平期海空节油跳过高油耗任务 + Plan DSL 补齐海空/前线/伞降动词
+    def test_20261126_b5_b9_peacetime_fuel_conserve_and_plan_dsl_verbs(self):
+        from housekeep import HousekeepMixin
+
+        class _HKG(HousekeepMixin):
+            def __init__(self, at_war=False):
+                self._at_war = at_war
+                self.air_missions_called = 0
+                self.air_attach_called = 0
+
+            def _current_fuel(self, tag=None):
+                return 80000.0
+
+            def wars(self, tag=None):
+                return {"enemies": ["HOL"] if self._at_war else []}
+
+            def set_air_missions(self, tag=None):
+                self.air_missions_called += 1
+                return {"ok": True}
+
+            def attach_air_wings_to_armies(self, tag=None):
+                self.air_attach_called += 1
+                return {"ok": True, "attached_count": 4}
+
+        with mock.patch("combat.at_war", side_effect=lambda g, t=None: g._at_war):
+            # 和平期：默认 conserve -> 跳过空军作战任务（仅执行 0 油耗 attach）与海军巡逻
+            gp = _HKG(at_war=False)
+            ra = gp.housekeep_air("GER")
+            rn = gp.housekeep_navy("GER")
+            self.assertTrue(ra["ok"])
+            self.assertEqual(ra["skipped_reason"], "peacetime_fuel_conservation")
+            self.assertEqual(gp.air_missions_called, 0)
+            self.assertEqual(gp.air_attach_called, 1)
+            self.assertTrue(rn["ok"])
+            self.assertEqual(rn["skipped_reason"], "peacetime_fuel_conservation")
+
+            # 战时：正常挂空军作战任务
+            gw = _HKG(at_war=True)
+            ra_war = gw.housekeep_air("GER")
+            self.assertTrue(ra_war["ok"])
+            self.assertEqual(gw.air_missions_called, 1)
+
+        # Plan DSL 新动词校验（offensive_line / air_mission / naval_mission / paradrop + inspect paradrop_targets）
+        ok, errs = TE.validate_plan({
+            "actions": [
+                {"op": "offensive_line", "args": {"orders_group": "0x1234", "parent_order_id": 18, "enemy_tag": "HOL"}},
+                {"op": "air_mission", "args": {"wings": "all", "mission": 0}},
+                {"op": "naval_mission", "args": {"stand_down": True}},
+                {"op": "paradrop", "args": {"orders_group": "0x1234", "target": 391, "dry_run": True}},
+            ],
+            "inspect": [{"topic": "paradrop_targets", "target": "HOL"}],
+        })
+        self.assertTrue(ok, errs)
+
+    # 49. 2026-11-26 伞降 PE 1.19.5.0: 偏移真源一致 + 双命令结构精准落位 + 只读目标航程过滤
+    def test_20261126_paradrop_pe_offsets_builders_and_readonly_targets(self):
+        import struct
+        import armyops_win as _aw
+        import offsets as _O
+        import offsets_win as _OW
+
+        self.assertEqual(_OW.ORDER_VT_PARADROP_SOURCE, 0x2A86420)
+        self.assertEqual(_OW.ORDER_SIZE_PARADROP_SOURCE, 0x50)
+        self.assertEqual(_OW.ORDER_VT_PARADROP_TARGET, 0x2A864E0)
+        self.assertEqual(_OW.ORDER_SIZE_PARADROP_TARGET, 0x38)
+        for name in (
+            "ORDER_VT_PARADROP_SOURCE", "ORDER_SIZE_PARADROP_SOURCE",
+            "ORDER_CANEXEC_PARADROP_SOURCE", "ORDER_EXEC_PARADROP_SOURCE",
+            "ORDER_VT_PARADROP_TARGET", "ORDER_SIZE_PARADROP_TARGET",
+            "ORDER_CANEXEC_PARADROP_TARGET", "ORDER_EXEC_PARADROP_TARGET",
+            "ORDER_FN_PARADROP_SRC_VALID", "ORDER_FN_PARADROP_TGT_VALID",
+        ):
+            self.assertEqual(getattr(_O, name), getattr(_OW, name))
+            self.assertIn(name, _O.__all__)
+
+        # 验证双命令构造器写入的偏移与字节完全对齐 PE 反汇编布局
+        captured = []
+
+        class _BuildP:
+            base = 0x140000000
+
+            def u64(self, addr):
+                return 0x0000000500000035  # packed COrdersGroup handle
+
+            def read(self, addr, n):
+                if n == 0x18:
+                    return struct.pack("<QiiQ", 0x999000, 2, 2, 0x1430FD000)
+                return b"\x00" * n
+
+        class _BuildG:
+            p = _BuildP()
+
+        with mock.patch("cmdwin.build_by_vt", side_effect=lambda g, vt, sz, fields: captured.append((vt, sz, dict((o, v) for o, _f, v in fields))) or 0x888000), \
+             mock.patch.object(_aw, "_mkhandlearray", return_value=0x777000):
+            _aw._build_paradrop_source_cmd(_BuildG(), 0x50000, 6521, order_id=0, valid_divs=[0x60001, 0x60002])
+            _aw._build_paradrop_target_cmd(_BuildG(), 0x50000, 19, 391)
+
+        vt_s, sz_s, f_s = captured[0]
+        self.assertEqual((vt_s, sz_s), (0x2A86420, 0x50))
+        self.assertEqual(f_s[0x30], 0)
+        self.assertEqual(f_s[0x34], 6521)
+        self.assertEqual(f_s[0x44], 2)
+
+        vt_t, sz_t, f_t = captured[1]
+        self.assertEqual((vt_t, sz_t), (0x2A864E0, 0x38))
+        self.assertEqual(f_t[0x30], 19)
+        self.assertEqual(f_t[0x34], 391)
+
+        # 验证 paradrop_targets 纯只读 0 注入按航程与陆地属性精确筛选
+        class _PtG:
+            def _c(self, tag=None):
+                return type("C", (), {"tag": "GER"})()
+
+            def researched(self, tag=None):
+                return ["early_transport_plane"]
+
+        fake_srcs = {
+            "ok": True, "tag": "GER", "range_km": 1000.0, "min_planes_required": 50,
+            "transport_wings": [{"id": 1, "planes": 100}], "total_transport_planes": 100,
+            "has_enough_transports": True,
+            "sources": [{"state_id": 51, "province": 6469, "air_base_level": 6}],
+        }
+        fake_cd = {"width": 5632, "height": 2048, "centroids": {6469: [2900, 500], 391: [2870, 490], 9999: [2880, 495], 8888: [1000, 500]}}
+        fake_ptype = {6469: "land", 391: "land", 9999: "sea", 8888: "land"}
+        fake_ctrl = {6469: "GER", 391: "HOL", 8888: "HOL"}
+
+        with mock.patch.object(_aw, "paradrop_sources", return_value=fake_srcs), \
+             mock.patch("mapdata.province_centroids", return_value=fake_cd), \
+             mock.patch("mapdata.load_definitions", return_value=({}, fake_ptype)), \
+             mock.patch("mapdata.province_controller_map", return_value=fake_ctrl), \
+             mock.patch("mapdata.load_state_provinces", return_value=({}, {391: 7, 8888: 99})):
+            pt = _aw.paradrop_targets(_PtG(), target_tag="HOL")
+        self.assertTrue(pt["ok"])
+        self.assertEqual(pt["source_province"], 6469)
+        self.assertEqual(pt["provinces"], [391])  # 剔除了海洋省 9999 与超航程省 8888
+
 
 if __name__ == "__main__":
     unittest.main()

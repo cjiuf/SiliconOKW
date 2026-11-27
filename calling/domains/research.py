@@ -48,6 +48,64 @@ class ResearchMixin:
         "special_forces_quality": "GRAND_DOCTRINE_SPECIAL_FORCES_QUALITY",
     }
 
+    # 2026-11-26 (B6 根治): common/technology_tags/00_technology.txt 定义的 DLC 互斥科技树组。
+    # 未启用对应 DLC（BBA/NSB/MTG）时，另一侧科技模板虽仍驻留在内存中，但引擎 CanExecute 会
+    # 拒绝研发（如未开 BBA 时 bba_early_transport_plane 不可研，实际使用的是 early_transport_plane）。
+    DLC_MUTEX_FOLDERS = (
+        (("air_techs_folder",), ("bba_air_techs_folder",)),
+        (("armour_folder",), ("nsb_armour_folder",)),
+        (("naval_folder",), ("mtgnavalfolder", "mtgnavalsupportfolder")),
+    )
+
+    def _inactive_dlc_folders(self, defs, researched=None, tag=None):
+        """纯只读推断当前档未激活的 DLC 互斥科技树 folder 集合（0 注入）。"""
+        if not defs:
+            return set()
+        sample = set(researched or ())
+        if not sample:
+            try:
+                sample = set(self.researched(tag) or ())
+            except Exception:
+                sample = set()
+        # 统计每对互斥组中左右两侧已研科技计数；若本国某组双侧皆为 0（如内陆小国 0 海军科技），
+        # 兜底抽查常见大国（GER/ENG/USA/FRA/SOV/ITA/JAP）的已研科技，因 DLC 状态全局一致。
+        def _count_pair(left_fs, right_fs, tech_set):
+            lc = sum(1 for tk in tech_set if (defs.get(tk) or {}).get("folder") in left_fs)
+            rc = sum(1 for tk in tech_set if (defs.get(tk) or {}).get("folder") in right_fs)
+            return lc, rc
+
+        inactive = set()
+        need_majors = []
+        for left_fs, right_fs in self.DLC_MUTEX_FOLDERS:
+            lc, rc = _count_pair(left_fs, right_fs, sample)
+            if lc > 0 and rc == 0:
+                inactive.update(right_fs)
+            elif rc > 0 and lc == 0:
+                inactive.update(left_fs)
+            elif lc == 0 and rc == 0:
+                need_majors.append((left_fs, right_fs))
+
+        if need_majors and hasattr(self, "researched"):
+            major_sample = set(sample)
+            for mtag in ("GER", "ENG", "USA", "FRA", "SOV", "ITA", "JAP"):
+                try:
+                    major_sample.update(self.researched(mtag) or ())
+                except Exception:
+                    continue
+                still = []
+                for left_fs, right_fs in need_majors:
+                    lc, rc = _count_pair(left_fs, right_fs, major_sample)
+                    if lc > 0 and rc == 0:
+                        inactive.update(right_fs)
+                    elif rc > 0 and lc == 0:
+                        inactive.update(left_fs)
+                    else:
+                        still.append((left_fs, right_fs))
+                need_majors = still
+                if not need_majors:
+                    break
+        return inactive
+
     def _tech_ids_from_disk(self):
         """Provisional live-tech-id -> name table (stable across processes)."""
         try:
@@ -230,12 +288,13 @@ class ResearchMixin:
         return self.p.u64(self._c(tag).ptr + CO_TECH_STATUS)
 
     def tech_cost_days(self, tech_name):
-        """Base research time of a technology, in days.
+        """Base research time of a technology, in progress-days.
 
-        `CTechnologyTemplate+0x3E0` holds days x1000 on the PE build (verified:
-        basic_machine_tools 150000 -> "130日"-class values, synth_oil_experiments
-        300000, improved_light_tank_chassis 200000).  The old 0x3D0 is not the
-        cost: it reads -1 for most techs (0x3D8 is the start year).
+        2026-11-26 (P0-2 根治):
+          `CTechnologyTemplate+0x3E0` 存的是 `research_cost * 100000`（如 2.0 -> 200000,
+          1.5 -> 150000, 0.5 -> 50000），而 HOI4 1.19 `NTechnology.BASE_TECH_COST = 110`
+          （非 100！活进程 48/48 已研科技 `TE_PROGRESS / (cost_3e0 * 100) == 1.1000`）。
+          旧实现 `raw / 1000.0` 漏乘了 1.1，导致科技进度在 ~91% 即谎报 100% / 0.0 天。
         """
         self._load_tech_db()
         t = (self._tech_by_name or {}).get(tech_name)
@@ -244,7 +303,12 @@ class ResearchMixin:
         raw = self.p.i32(t + TT_RESEARCH_COST)
         if not (0 < raw < 100000 * 1000):
             return None
-        return round(raw / 1000.0, 1)
+        try:
+            import techdata as _td_cost
+            base_cost = float(getattr(_td_cost, "BASE_TECH_COST", 110.0) or 110.0)
+        except Exception:
+            base_cost = 110.0
+        return round((raw / 100000.0) * base_cost, 1)
 
     def tech_progress(self, tech_obj):
         """Research days already invested in a CTechnology, speed-weighted."""
@@ -272,6 +336,13 @@ class ResearchMixin:
         # hoi4_overview then fired a FALSE "RESEARCH_IDLE: 4 slots empty" alert.
         self._load_tech_db()
         ts = self.tech_status(tag)
+        # 2026-11-26 (长跑 §4 根治): 只有真正在引擎 TS_RESEARCHED 列表里的科技才算 slot_done。
+        # 仅凭 prog_days >= cost_days * 0.999 会因速度/超前修正提前误报 slot_done=True，
+        # 导致 autopilot 误把尚未研完的科技（如 artillery1）中途覆写取消并反复触发假 OBSOLETE_LINE。
+        try:
+            researched_ptrs = set(_arr(p, ts, TS_RESEARCHED))
+        except Exception:
+            researched_ptrs = set()
         out = []
         for i, s in enumerate(_arr(p, ts, TS_SLOTS)):
             cur = p.u64(s + RS_CURRENT)
@@ -279,12 +350,17 @@ class ResearchMixin:
             speed = p.i64(s + RS_SPEED) / float(O.FIXED) or 1.0
             prog_days = self.tech_progress(cur) if cur else 0.0
             cost_days = self.tech_cost_days(nm) if nm else None
+            is_done = bool(cur and cur in researched_ptrs)
             # 2026-11-21 (P2-13): was `... if cost_days else 0.0`, so a slot with
             # 55.35 days done and `required_known: false` reported `percent: 0.0`
             # -- indistinguishable from "just started" for anything that sorts or
             # thresholds on it.  Unknown must stay unknown (None), the same way
             # `required` already does.
+            # 2026-11-26 (P0-2): 尚未真正进入 TS_RESEARCHED 时（slot_done=False），
+            # percent 封顶 99.9 且 days_remaining 不输出误导性的 0.0，避免误判卡槽覆盖取消。
             pct = round(100.0 * prog_days / cost_days, 2) if cost_days else None
+            if pct is not None:
+                pct = 100.0 if is_done else min(pct, 99.9)
             rec = {
                 "slot": i,
                 "researching": nm,
@@ -293,13 +369,8 @@ class ResearchMixin:
                 # database being warm.  Never call a slot idle because the NAME
                 # is missing.
                 "slot_busy": bool(cur),
-                # 2026-11-19 (measured): on the tick a technology finishes, the
-                # slot still holds the pointer and the old name while
-                # percent == 100 / days_remaining == 0 for one or more reads.
-                # `fill_research` and the RESEARCH_IDLE alert both keyed off
-                # slot_busy and therefore missed the free slot. Report it
-                # separately instead of lying about slot_busy.
-                "slot_done": bool(cur and cost_days and prog_days >= cost_days * 0.999),
+                # 仅当槽内科技指针已真正进入 TS_RESEARCHED 才标记 slot_done=True（引擎尚未清槽的瞬态）
+                "slot_done": is_done,
                 "tech_ptr": ("0x%x" % cur) if cur else None,
                 "progress": round(prog_days, 3),          # days of research done
                 # 2026-11-20 (P2 #12): `required: 0.0` looked like "this costs
@@ -307,7 +378,7 @@ class ResearchMixin:
                 # yet".  null says unknown; `required_known` makes it explicit.
                 "required": round(cost_days, 3) if cost_days else None,  # days to do
                 "required_known": bool(cost_days),
-                "percent": None if pct is None else min(pct, 100.0),
+                "percent": pct,
                 "speed": speed,
                 "base_days": cost_days,
             }
@@ -315,7 +386,11 @@ class ResearchMixin:
                 rec["name_unknown"] = ("technology database not warm yet -- "
                                        "the slot IS occupied, retry in ~90 s")
             if cost_days:
-                rec["days_remaining"] = round(max(cost_days - prog_days, 0.0) / speed, 1)
+                if is_done:
+                    rec["days_remaining"] = 0.0
+                else:
+                    rem = round(max(cost_days - prog_days, 0.0) / speed, 1)
+                    rec["days_remaining"] = rem if rem > 0.0 else 0.1
             # 2026-11-21 (P3-4): `speed` below 1.0 is the ahead-of-time penalty (the
             # tech's historical year has not arrived), not "research got slower".
             # The 2026-11-20 playtest read 0.296 and assumed a bug.
@@ -381,6 +456,7 @@ class ResearchMixin:
         researched = set(self.researched(tag))
         active = {s["researching"] for s in self.research_slots(tag) if s.get("researching")}
         my_tag = self._c(tag).tag
+        inactive_folders = self._inactive_dlc_folders(defs, researched=researched, tag=tag)
         order = {"infantry": 0, "industry": 1, "computing": 2,
                  "armor": 3, "air": 4, "artillery": 5,
                  "support": 6, "naval": 7}
@@ -394,7 +470,8 @@ class ResearchMixin:
             if d.get("always_no") or d.get("special_project_gated"):
                 continue
             # Focus-granted modifier techs have no folder; they are not in the tree.
-            if not d.get("folder"):
+            folder = d.get("folder")
+            if not folder or folder in inactive_folders:
                 continue
             allow_tags = d.get("allow_tags") or []
             if allow_tags and my_tag not in allow_tags:
@@ -608,9 +685,39 @@ class ResearchMixin:
         # `available` predicate does.  fill_research therefore started
         # concentrated_industry AND dispersed_industry at the same time, which no
         # player can do.  Refuse here.
+        # 2026-11-26 (B6 根治): 同时拦截未激活的 DLC 互斥科技树（如未开 BBA 时点
+        # bba_early_transport_plane），并提示对侧已激活科技树的等价科技及研究状态。
         try:
             import techdata as _td
-            _info = (_td.load() or {}).get(tech_name) or {}
+            _defs_all = _td.load() or {}
+            _info = _defs_all.get(tech_name) or {}
+            _folder = _info.get("folder") or ""
+            if _folder:
+                _inactive = self._inactive_dlc_folders(_defs_all, researched=_researched_now, tag=tag)
+                if _folder in _inactive:
+                    _alt_name = tech_name[4:] if tech_name.startswith("bba_") else (
+                        tech_name[4:] if tech_name.startswith("mtg_") else None
+                    )
+                    _alt_note = ""
+                    if _alt_name and _alt_name in _defs_all:
+                        _alt_done = _alt_name in _researched_now
+                        _alt_note = "；当前激活树等价科技为 %r（%s）" % (
+                            _alt_name, "已研究完成" if _alt_done else "可直接研发"
+                        )
+                    return {
+                        "ok": False,
+                        "tech": tech_name,
+                        "slot": slot,
+                        "folder": _folder,
+                        "blocked_by": "inactive_dlc_folder",
+                        "failure_class": "content",
+                        "equivalent_tech": _alt_name if (_alt_name and _alt_name in _defs_all) else None,
+                        "equivalent_researched": bool(_alt_name and _alt_name in _researched_now),
+                        "error": (
+                            "%s 属于本局未激活的 DLC 互斥科技树 (%s)%s"
+                            % (tech_name, _folder, _alt_note)
+                        ),
+                    }
             _xor = _info.get("xor") or []
             if _xor:
                 _done = _researched_now

@@ -194,7 +194,8 @@ def test_offsets_win_no_linux_bleed():
     import offsets_win as W
     check("offsets_win.FP_COMPLETED is explicitly None", W.FP_COMPLETED is None)
     check("offsets_win.GS_PLAYER_TAG_ALT is explicitly None", W.GS_PLAYER_TAG_ALT is None)
-    check("offsets_win.CO_CAPITAL_STATE is explicitly None", W.CO_CAPITAL_STATE is None)
+    check("offsets_win.CO_CAPITAL_STATE is verified PE 0x1018 (not Linux 0xFF0)",
+          W.CO_CAPITAL_STATE == 0x1018 and W.CO_CAPITAL_STATE != 0xFF0)
 
 
 def test_hard_constraints_intact():

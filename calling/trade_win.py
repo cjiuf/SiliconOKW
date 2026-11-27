@@ -345,18 +345,58 @@ def resource_pointers(g, force=False):
     return out
 
 
-def _current_import_amount(g, exporter_ptr, importer_tag_id, ridx):
+def _proc_alive(p):
+    """检测目标进程是否仍在运行（防止进程退出后 _book 吞异常把失败伪造成 amount_after=0.0）。"""
+    if p is None:
+        return False
+    base = int(getattr(p, "base", 0) or 0)
+    if base <= 0:
+        return True
+    try:
+        hdr = p.read(base, 4)
+        return bool(hdr) and len(hdr) >= 2
+    except Exception:
+        return False
+
+
+def _current_import_amount_checked(g, exporter_ptr, importer_tag_id, ridx):
+    """返回 `(amount, alive)`：进程死亡/内存不可读时明确返回 `(None, False)`，绝不假报 0.0。"""
     p = g.p
+    try:
+        res = p.u64(exporter_ptr + COUNTRY_RESOURCES)
+    except Exception:
+        if not _proc_alive(p):
+            return None, False
+        return None, True
+    if not res:
+        if not _proc_alive(p):
+            return None, False
+        return 0.0, True
     for slot, partner, amt, _e in _entries(p, exporter_ptr):
         if slot == ridx and partner == importer_tag_id:
-            return round(amt, 2)
-    return 0.0
+            return round(amt, 2), True
+    if not _proc_alive(p):
+        return None, False
+    return 0.0, True
+
+
+def _current_import_amount(g, exporter_ptr, importer_tag_id, ridx):
+    amt, alive = _current_import_amount_checked(g, exporter_ptr, importer_tag_id, ridx)
+    if not alive or amt is None:
+        return 0.0
+    return amt
 
 
 def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=False):
     """通过引擎原生 CCreateTradeCommand 建立/调整/取消资源进口贸易。
 
     amount 为目标资源总进口单位数（如 8 = 1 座民工买 8 单位，16 = 2 座民工，0 = 取消贸易）。
+
+    2026-11-26 (P0-1 根治):
+      1. 发令前纯只读校验交战状态（`CanExecute` 0x16DABF0 不校验交战），交战时 0 注入拦截并推荐卖方；
+      2. 若当前已等于目标进口量则幂等短路返回 `ok=True`，不浪费时钟或触碰引擎删除重建路径；
+      3. 显式挂接 `vt_rva=VT_CREATE_TRADE` 私有虚表，并通过改造后的 `post_drained`（暂停态先入队再短暂解暂停 + `done_fn`）消除 TBB `hourlyUpdateUnits` 线程竞态；
+      4. 回读循环实时校验进程存活，若进程异常退出明确回报 `alive=False, amount_after=None, blocked_by="process_exited"`，绝不伪造 `amount_after=0.0`。
     """
     import cmdwin
     import time as _time
@@ -380,6 +420,27 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
     if imp.tag_id == exp.tag_id:
         return {"ok": False, "error": "cannot trade with yourself (%s)" % imp.tag}
 
+    # 纯只读前置护栏 1：交战拦截（CCreateTradeCommand::CanExecute 不校验敌对状态）
+    if amt > 0:
+        try:
+            import combat as _cb
+            enemies = {str(x).upper() for x in (_cb.enemy_tags(g, imp.tag) or ())}
+        except Exception:
+            enemies = set()
+        if str(exp.tag).upper() in enemies:
+            sugg = suggest_exporters(g, rkey, imp.tag, limit=3)
+            return {
+                "ok": False,
+                "blocked_by": "at_war",
+                "importer": imp.tag,
+                "exporter": exp.tag,
+                "resource": rkey,
+                "amount_requested": amt,
+                "suggested_exporters": sugg,
+                "error": "cannot import %s from %s: %s is currently at war with %s"
+                % (rkey, exp.tag, imp.tag, exp.tag),
+            }
+
     ridx = RESOURCE_NAMES.index(rkey) + 1
     rptr = resource_pointers(g).get(rkey)
     if not rptr:
@@ -388,7 +449,57 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
             "error": "could not resolve CStrategicResource* for %s" % rkey,
         }
 
-    before_amt = _current_import_amount(g, exp.ptr, imp.tag_id, ridx)
+    before_amt, alive0 = _current_import_amount_checked(g, exp.ptr, imp.tag_id, ridx)
+    if not alive0 or before_amt is None:
+        return {
+            "ok": False,
+            "alive": False,
+            "blocked_by": "process_exited",
+            "importer": imp.tag,
+            "exporter": exp.tag,
+            "resource": rkey,
+            "amount_requested": amt,
+            "amount_before": None,
+            "amount_after": None,
+            "error": "hoi4.exe process is not readable before trade command",
+        }
+
+    # 采集卖方资源余量诊断（纯只读，不影响执行，用于解释为何被截断）
+    exporter_surplus = None
+    try:
+        _eres = g.resources(exp.tag) or {}
+        if isinstance(_eres, dict) and rkey in _eres and _eres[rkey] is not None:
+            exporter_surplus = round(float(_eres[rkey]), 2)
+    except Exception:
+        exporter_surplus = None
+
+    # 幂等短路：非 dry_run 且目标数量与当前完全一致时，无需发令
+    if (not dry_run) and abs(before_amt - amt) < 0.01:
+        out_idem = {
+            "ok": True,
+            "verified": True,
+            "posted": False,
+            "already_at_target": True,
+            "can_execute": True,
+            "importer": imp.tag,
+            "exporter": exp.tag,
+            "resource": rkey,
+            "amount_requested": amt,
+            "amount_before": before_amt,
+            "amount_after": before_amt,
+            "civ_factories_cost_est": (amt + 7) // 8 if amt > 0 else 0,
+        }
+        if exporter_surplus is not None:
+            out_idem["exporter_resource_surplus"] = exporter_surplus
+        return out_idem
+
+    def _trade_done():
+        cur, ok_alive = _current_import_amount_checked(g, exp.ptr, imp.tag_id, ridx)
+        if not ok_alive:
+            return True
+        if cur is None:
+            return False
+        return abs(cur - amt) < 0.01 or abs(cur - before_amt) >= 0.01
 
     import win_pipeline as _wp
     pipe = _wp.WinCommandPipeline(g, only_if_live=True)
@@ -399,13 +510,15 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
             (0x30, "<Q", int(rptr)),
             (0x38, "<i", amt),
         ]),
+        vt_rva=VT_CREATE_TRADE,
         can_exec_rva=CANEXEC_CREATE_TRADE,
         drain=True,
         seconds=1.5,
+        done_fn=_trade_done,
         dry_run=dry_run,
     )
     if dry_run:
-        return {
+        out_dry = {
             "ok": bool(res.can_execute),
             "dry_run": True,
             "can_execute": bool(res.can_execute),
@@ -416,6 +529,9 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
             "amount_before": before_amt,
             "resource_ptr": hex(rptr),
         }
+        if exporter_surplus is not None:
+            out_dry["exporter_resource_surplus"] = exporter_surplus
+        return out_dry
     if res.can_execute is False:
         return {
             "ok": False,
@@ -432,21 +548,51 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
     posted = bool(res.posted)
 
     after_amt = before_amt
+    alive = True
     if posted:
         deadline = _time.time() + 2.0
         while True:
-            after_amt = _current_import_amount(g, exp.ptr, imp.tag_id, ridx)
-            if abs(after_amt - amt) < 0.01 or abs(after_amt - before_amt) >= 0.01 or _time.time() >= deadline:
+            cur_amt, alive = _current_import_amount_checked(g, exp.ptr, imp.tag_id, ridx)
+            if not alive:
+                after_amt = None
                 break
-            _time.sleep(0.1)
+            if cur_amt is not None:
+                after_amt = cur_amt
+                if abs(after_amt - amt) < 0.01 or abs(after_amt - before_amt) >= 0.01:
+                    break
+            if _time.time() >= deadline:
+                break
+            _time.sleep(0.08)
 
-    verified = posted and (
+    if not alive:
+        return {
+            "ok": False,
+            "alive": False,
+            "verified": False,
+            "posted": posted,
+            "can_execute": True,
+            "blocked_by": "process_exited",
+            "importer": imp.tag,
+            "exporter": exp.tag,
+            "resource": rkey,
+            "amount_requested": amt,
+            "amount_before": before_amt,
+            "amount_after": None,
+            "error": (
+                "hoi4.exe process exited or crashed during CCreateTradeCommand "
+                "(%s <- %s, %s: %.1f -> %d); amount_after is unavailable (not 0.0)"
+                % (imp.tag, exp.tag, rkey, before_amt, amt)
+            ),
+        }
+
+    verified = posted and after_amt is not None and (
         abs(after_amt - amt) < 0.01
         or (amt > 0 and after_amt > before_amt)
         or (amt == 0 and after_amt == 0.0)
     )
     out = {
         "ok": bool(verified),
+        "alive": True,
         "verified": bool(verified),
         "posted": posted,
         "can_execute": True,
@@ -458,6 +604,8 @@ def create_trade(g, exporter_tag, resource, amount, importer_tag=None, dry_run=F
         "amount_after": after_amt,
         "civ_factories_cost_est": (amt + 7) // 8 if amt > 0 else 0,
     }
+    if exporter_surplus is not None:
+        out["exporter_resource_surplus"] = exporter_surplus
     if not verified:
         out["error"] = (
             "trade command posted but %s export book to %s for %s stayed %.1f -> %.1f "

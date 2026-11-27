@@ -403,6 +403,22 @@ class PoliticsMixin:
                 if meta.get("is_law"):
                     candidate_keys.append(k)
 
+        # 2026-11-26 (A3 性能优化): 循环外单次读取 summary 与 at_war，消除对 18 个法案
+        # 反复调 c.summary() 与 self.wars() 导致的 ~395ms 热态延迟。
+        try:
+            _sum_cache = c.summary()
+        except Exception:
+            _sum_cache = None
+        _at_war_cache = None
+        try:
+            import combat as _cb_ic
+            _at_war_cache = bool(_cb_ic.at_war(self, my_tag))
+        except Exception:
+            try:
+                _at_war_cache = bool((self.wars(my_tag) or {}).get("at_war"))
+            except Exception:
+                _at_war_cache = False
+
         for k in candidate_keys:
             if k in seen:
                 continue
@@ -418,7 +434,10 @@ class PoliticsMixin:
             seen.add(k)
             is_law = bool(meta.get("is_law") or k in self._LAW_GATE)
             cost = int(meta.get("cost")) if meta.get("cost") is not None else (150 if is_law else 150)
-            gate_reason = self._idea_block_reason(k, c, my_tag) if is_law else None
+            gate_reason = (
+                self._idea_block_reason(k, c, my_tag, summary=_sum_cache, at_war=_at_war_cache)
+                if is_law else None
+            )
             rows.append({
                 "key": k,
                 "kind": "law" if is_law else "idea",
@@ -436,6 +455,17 @@ class PoliticsMixin:
                 adv_rows = _adv.load_advisors(my_tag) or []
             except Exception:
                 adv_rows = []
+            # 2026-11-26 (A3): 将 legality._state 提到 75 个顾问的循环外单次求值（省 ~30ms）
+            _leg = None
+            _leg_st = None
+            if adv_rows:
+                try:
+                    import legality as _leg_mod
+                    _leg = _leg_mod
+                    _leg_st = _leg._state(self, my_tag)
+                except Exception:
+                    _leg = None
+                    _leg_st = None
             for a in adv_rows:
                 ck = a.get("character") or ""
                 tok = a.get("idea_token") or ck
@@ -451,20 +481,19 @@ class PoliticsMixin:
                 is_active = (ck in active_set) or (tok in active_set)
                 avail_ok = True
                 blk = None
-                try:
-                    import legality as _leg
-                    _st = _leg._state(self, my_tag)
-                    for bname in ("visible_block", "available_block"):
-                        blk_txt = a.get(bname)
-                        if not blk_txt:
-                            continue
-                        unk = []
-                        if not _leg._eval(blk_txt, _st, unk) and not unk:
-                            avail_ok = False
-                            blk = "%s unmet" % bname
-                            break
-                except Exception:
-                    pass
+                if _leg is not None and _leg_st is not None:
+                    try:
+                        for bname in ("visible_block", "available_block"):
+                            blk_txt = a.get(bname)
+                            if not blk_txt:
+                                continue
+                            unk = []
+                            if not _leg._eval(blk_txt, _leg_st, unk) and not unk:
+                                avail_ok = False
+                                blk = "%s unmet" % bname
+                                break
+                    except Exception:
+                        pass
                 rows.append({
                     "key": ck,
                     "idea_token": tok,
@@ -480,12 +509,17 @@ class PoliticsMixin:
 
         rows.sort(key=lambda r: (0 if r["kind"] == "law" else (1 if r["kind"] == "advisor" else 2),
                                  r["slot"], r["key"]))
+        lim = max(1, int(limit or 120))
+        items_out = rows[:lim]
         return {
             "tag": my_tag,
             "political_power": pol.get("political_power", getattr(c, "political_power", None)),
             "active_ideas": sorted(active_set),
             "total": len(rows),
-            "items": rows[:max(1, int(limit or 120))],
+            "returned": len(items_out),
+            "limit": lim,
+            "truncated": len(rows) > len(items_out),
+            "items": items_out,
         }
 
     def _find_idea(self, key, tag=None):
@@ -575,11 +609,11 @@ class PoliticsMixin:
                                     "(CanExecute said no; nothing else changed)")
         return out
 
-    def _idea_block_reason(self, key, c, tag=None):
+    def _idea_block_reason(self, key, c, tag=None, summary=None, at_war=None):
         """Best-effort explanation of why a law change would be refused."""
         reasons = []
         try:
-            s = c.summary()
+            s = summary if isinstance(summary, dict) else c.summary()
             pp = int(s.get("political_power") or 0)
             ws = float(s.get("war_support") or 0)
         except Exception:
@@ -588,10 +622,15 @@ class PoliticsMixin:
         if gate:
             need_ws, need_war = gate
             if need_war:
-                try:
-                    at_war = bool(self.wars(tag or c.tag).get("at_war"))
-                except Exception:
-                    at_war = False
+                if at_war is None:
+                    try:
+                        import combat as _cb_br
+                        at_war = bool(_cb_br.at_war(self, tag or c.tag))
+                    except Exception:
+                        try:
+                            at_war = bool(self.wars(tag or c.tag).get("at_war"))
+                        except Exception:
+                            at_war = False
                 if not at_war:
                     reasons.append("needs a war (this law is war-only)")
             if ws < need_ws:

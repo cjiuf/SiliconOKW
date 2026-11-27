@@ -1,6 +1,7 @@
 """陆地 BFS 寻路、按师移动/分散部署（move_divisions / deploy_to_border）与底层移动发令。"""
 from __future__ import annotations
 
+import math
 import struct
 import sys
 import time
@@ -553,7 +554,8 @@ def _other_neighbor_borders(owners, adj, ptype, me_tag, target_tag, ignore_tags=
 
 
 def deploy_to_border(g, target_tag, orders_group=None, include_unassigned=True, tag=None,
-                     protect_borders=None, min_other_garrison=0):
+                     protect_borders=None, min_other_garrison=0,
+                     max_divisions=None, reserve_divisions=0):
     """One-click: assemble unassigned divisions, then spread them EVENLY over every
     border province facing `target_tag`, while never stripping another directive's
     garrison or active wartime fronts.
@@ -733,12 +735,35 @@ def deploy_to_border(g, target_tag, orders_group=None, include_unassigned=True, 
         except Exception as _e:
             allot = {}
         cap_per = max(2, int(len(movable) / max(1, len(border))) + 1)
+        # 2026-11-26 (长跑 §9 根治):
+        #   1) 单省补给上限按 floor(allot[bp]) 严格取整（至少 1 师），防止 2.05 浮点配额放进 3 师导致全线超载；
+        #   2) 支持 max_divisions / reserve_divisions 硬预算（由 plan_front_allocation 透传），
+        #      超过配额或触及预备队底线时立刻留作后方战略预备队，绝不再把 26 师全砸向 15.8 补给边境。
+        allot_int = {
+            bp: max(1, int(math.floor(float(v) + 1e-6)))
+            for bp, v in allot.items()
+            if v is not None and float(v) > 0
+        }
+        max_border_divs = int(max_divisions) if max_divisions is not None else None
+        reserve_floor = max(0, int(reserve_divisions or 0))
         held_back = 0
         held_provs = Counter()
-        for d, src in movable:
+        for idx_m, (d, src) in enumerate(movable):
+            remaining_movable = len(movable) - idx_m
+            cur_border_total = sum(cov.values())
+            if (max_border_divs is not None and cur_border_total >= max_border_divs) or (
+                reserve_floor > 0 and remaining_movable <= reserve_floor
+            ):
+                held_provs[src] += 1
+                held_back += 1
+                rows.append({"division": hex(d), "from": src, "to": None,
+                             "ok": False, "held_in_reserve": True,
+                             "error": "held in strategic reserve (budget=%s, reserve=%d)"
+                                      % (max_border_divs, reserve_floor)})
+                continue
             dists = _border_distances(g, src, border, owners, allowed)
             cands = [bp for bp in border if bp in dists
-                     and cov[bp] < min(cap_per, allot.get(bp, cap_per))]
+                     and cov[bp] < min(cap_per, allot_int.get(bp, cap_per))]
             if not cands:
                 held_provs[src] += 1
                 if any(bp in dists for bp in border):
@@ -837,11 +862,15 @@ def deploy_to_border(g, target_tag, orders_group=None, include_unassigned=True, 
             "on %s border -- thin out divisions or upgrade template quality (9inf+3art) instead of stacking more"
             % (oos_on_border, low_supply_on_border, target_tag)
         )
-    if supply_total > 0 and len(rows) > 1.5 * supply_total:
+    # 若调用方显式传了 max_divisions 预算且实际部署在补给承载范围内，不再误报 supply overload；
+    # 未传预算时保留原有 total_targeted > 1.5 * supply_total 预警口径（兼容既有契约）。
+    deployed_on_border = int(sum(cov.values()))
+    effective_target_n = deployed_on_border if max_border_divs is not None else len(rows)
+    if supply_total > 0 and effective_target_n > 1.5 * supply_total:
         warnings.append(
             "supply overload: %d divisions targeted at %s's %d border provinces whose total "
             "supply allotment is only %.1f (%d held in reserve at origin)"
-            % (len(rows), target_tag, len(border), supply_total, held_back)
+            % (effective_target_n, target_tag, len(border), supply_total, held_back)
         )
     for fr in other_fronts_at_risk:
         if fr["is_co_belligerent"] and fr["divisions_on_border"] < max(1, fr["border_provinces"] // 2):

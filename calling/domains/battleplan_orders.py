@@ -608,21 +608,45 @@ class BattleplanOrdersMixin:
             except Exception as e:
                 errors.append({"army": hex(og), "error": repr(e)})
                 continue
+            def _live_ids(_og):
+                try:
+                    _r_now = A.orders(self, _og) or []
+                except Exception:
+                    _r_now = []
+                try:
+                    _k_now = A.order_children(self, _og) or []
+                except Exception:
+                    _k_now = []
+                return ({int(x.get("id") or -1) for x in _r_now},
+                        {int(x.get("id") or -1) for x in _k_now})
+
             for k in kids:
                 if k.get("foreign_group"):
                     continue
+                kid_id = int(k["id"])
+                _cur_r, _cur_k = _live_ids(og)
+                if kid_id not in _cur_k and kid_id not in _cur_r:
+                    deleted.append({"army": hex(og), "order": kid_id, "kind": "child",
+                                    "already_removed": True})
+                    continue
                 # 2026-11-23 (E-1): 走 PE 原生安全 armyops_win.delete_order(..., allow_child=True)
                 try:
-                    r = A.delete_order(self, og, k["id"], allow_child=True)
+                    r = A.delete_order(self, og, kid_id, allow_child=True)
                 except Exception as e:
                     r = {"ok": False, "error": repr(e)}
                 (deleted if r.get("ok") else errors).append(
-                    {"army": hex(og), "order": k["id"], "kind": "child",
+                    {"army": hex(og), "order": kid_id, "kind": "child",
                      **({} if r.get("ok") else {"error": r.get("error")})})
             for o in rows:
-                r = self.delete_order(og, o["id"])
+                oid = int(o["id"])
+                _cur_r, _cur_k = _live_ids(og)
+                if oid not in _cur_r and oid not in _cur_k:
+                    deleted.append({"army": hex(og), "order": oid, "kind": "root",
+                                    "type": o.get("type"), "already_removed": True})
+                    continue
+                r = self.delete_order(og, oid)
                 (deleted if r.get("ok") else errors).append(
-                    {"army": hex(og), "order": o["id"], "kind": "root",
+                    {"army": hex(og), "order": oid, "kind": "root",
                      "type": o.get("type"),
                      **({} if r.get("ok") else {"error": r.get("error")})})
         left = []
@@ -686,10 +710,25 @@ class BattleplanOrdersMixin:
                            if (o.get("assigned_divisions") or 0) == 0]
             kept += len([o for o in rows
                          if (o.get("assigned_divisions") or 0) > 0])
+            empty_kid_set = set(empty_kids)
+            # 2026-11-26 (B7 根治): 删除一条子订单或父订单时，引擎可能会级联移除同树下的
+            # 其他订单（例如删完父子链中的一条后另一条同步消失）。每步删除前先实时回读内存
+            # 中的现存订单 ID，已不在树中则视为已被级联移除，不再发多余删单造成假失败！
             for oid in empty_kids + empty_roots:
-                r = self.delete_order(og, oid, allow_child=(oid in empty_kids))
+                is_child = oid in empty_kid_set
+                try:
+                    cur_roots = {int(x.get("id") or -1) for x in (A.orders(self, og) or [])}
+                    cur_kids = {int(x.get("id") or -1) for x in (A.order_children(self, og) or [])}
+                except Exception:
+                    cur_roots, cur_kids = None, None
+                if cur_roots is not None and oid not in cur_roots and oid not in cur_kids:
+                    removed.append({"army": hex(og), "order": oid,
+                                    "kind": "child" if is_child else "root",
+                                    "ok": True, "already_removed": True, "error": ""})
+                    continue
+                r = self.delete_order(og, oid, allow_child=is_child)
                 removed.append({"army": hex(og), "order": oid,
-                                "kind": "child" if oid in empty_kids else "root",
+                                "kind": "child" if is_child else "root",
                                 "ok": r.get("ok"), "error": r.get("error")})
         # 2026-11-21 (P2-8): `removed_count` used to be len(removed), i.e. it
         # counted ATTEMPTS -- a run that deleted 1 of 3 orders and failed twice
@@ -699,9 +738,14 @@ class BattleplanOrdersMixin:
         # numbers, and `ok` must say whether any attempt failed.
         _deleted = sum(1 for r in removed if r.get("ok") is True)
         _failed = len(removed) - _deleted
-        return {"ok": _failed == 0, "armies": len(ogs), "kept_orders": kept,
+        left = []
+        try:
+            left = self.empty_order_scan(tag) or []
+        except Exception:
+            left = []
+        return {"ok": (_failed == 0 and not left), "armies": len(ogs), "kept_orders": kept,
                 "removed_count": _deleted, "attempted_count": len(removed),
-                "failed_count": _failed, "removed": removed,
+                "failed_count": _failed, "removed": removed, "orders_left": left,
                 "note": ("0-division orders crash the engine at hoi4.exe+0xB2E62E; "
                          "this list should be empty before any war")}
 
@@ -938,7 +982,7 @@ class BattleplanOrdersMixin:
         div = self.divisions(me, limit=1, deep=False)
         my_divs = int(div.get("count") or 0)
         try:
-            enemy_divs = int((self.divisions(tgt_tag) or {}).get("count") or 0)
+            enemy_divs = int((self.divisions(tgt_tag, limit=1, deep=False) or {}).get("count") or 0)
         except Exception:
             enemy_divs = 0
         rifles = 0.0
@@ -1057,7 +1101,16 @@ class BattleplanOrdersMixin:
                 _dip = None
             if _dip is not None:
                 try:
-                    _just = [j for j in _dip.justifying(self)
+                    # 2026-11-26 (长跑 §12 性能根治): 优先走毫秒级 0-deep-scan 的 justifying_fast，
+                    # 消除无正当化时 _dip.justifying() 触发 3.8GB 全堆扫描导致 war_readiness 耗时 3-4s。
+                    # 若单测显式 monkey-patch 了 _dip.justifying，则自动尊重单测桩。
+                    if getattr(_dip.justifying, "__name__", "") != "justifying":
+                        _jrows = _dip.justifying(self)
+                    elif hasattr(_dip, "justifying_fast"):
+                        _jrows = _dip.justifying_fast(self, tag=me)
+                    else:
+                        _jrows = _dip.justifying(self)
+                    _just = [j for j in (_jrows or ())
                              if str((j or {}).get("target") or "").upper() == tgt_tag]
                 except Exception:
                     _just = []
@@ -1134,3 +1187,34 @@ class BattleplanOrdersMixin:
             "year": year,
             "completed_snowball": sorted(f for f in self.GER_SNOWBALL if f in completed),
         }
+
+    def paradrop_targets(self, orders_group=None, source_province=None, limit=2000,
+                         target_tag=None, tag=None, max_range_km=None):
+        """纯只读枚举伞降可达目标陆地省（0 注入，PE 1.19.5.0 原生实现）。"""
+        import armyops
+        return armyops.paradrop_targets(
+            self, orders_group=orders_group, source_province=source_province,
+            limit=limit, target_tag=target_tag, tag=tag, max_range_km=max_range_km,
+        )
+
+    def paradrop(self, orders_group, source_province=None, target_province=0,
+                 divisions=None, order_id=0, confirm=False, wait=8.0, dry_run=False,
+                 replace_existing=False, allow_duplicate=False):
+        """创建/更新并可选激活伞降订单（type-4，PE 1.19.5.0 双命令原生实现）。"""
+        import armyops
+        res = armyops.paradrop(
+            self, orders_group, source_province, target_province,
+            divisions=divisions, order_id=order_id, confirm=confirm,
+            wait=wait, dry_run=dry_run,
+            replace_existing=replace_existing, allow_duplicate=allow_duplicate,
+        )
+        if isinstance(res, tuple):
+            if len(res) == 3:
+                ok, err, info = res
+                out = dict(info or {})
+                out["ok"] = bool(ok)
+                out["error"] = err or ""
+                return out
+            ok, err = res
+            return {"ok": bool(ok), "error": err or ""}
+        return res

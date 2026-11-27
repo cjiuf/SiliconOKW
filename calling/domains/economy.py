@@ -153,7 +153,8 @@ class EconomyMixin:
             _cls = _vt_names.get(p.u64(l))
             if _cls is None:
                 _cls = self.oi.class_of(l)
-            out.append({
+            _max_eff = p.i32(l + ML_MAX_EFFICIENCY)
+            _row = {
                 "index": i,
                 "equipment": self._eq_by_id.get(eid),
                 "factories": p.i32(l + ML_FACTORIES),
@@ -176,10 +177,15 @@ class EconomyMixin:
                 # industrial_capacity_dockyard_factor is exactly +0.174.
                 "output_per_day": round(icpd, 3),
                 "output_units_per_day": (round(icpd / cost, 4) if cost > 0 else None),
-                "max_efficiency": p.i32(l + ML_MAX_EFFICIENCY),
+                "max_efficiency": _max_eff,
                 "priority": p.i32(l + ML_PRIORITY),
                 "class": _cls,
-            })
+            }
+            # 2026-11-26 (P2-9): CNavalProductionLine+0xC8 实测为引擎单舰船坞硬上限
+            # （主力舰/重巡=5，轻巡/驱逐/潜艇=10，运输船=15），直接透出 max_dockyards 消除盲撞。
+            if _cls == "CNavalProductionLine" and 1 <= _max_eff <= 25:
+                _row["max_dockyards"] = _max_eff
+            out.append(_row)
         # 2026-11-22 (复测 5 §8.4 时刻 ②): 每条军工产线透出 variant_year / obsolete /
         # upgrade_to，过时产线附带 upgrade_gain / retool_cost / payback_days / suggested_action。
         if include_obsolete and out:
@@ -439,7 +445,9 @@ class EconomyMixin:
                                 "before": cur_f,
                                 "after": int(rr.get("after", cur_f - actual_taken)),
                                 "reclaimed": actual_taken,
-                                "surplus_ratio": sr.get("surplus_ratio"),
+                                "surplus_ratio": (
+                                    sr.get("ratio") if sr.get("ratio") is not None else sr.get("surplus_ratio")
+                                ),
                             })
                             need_reclaim -= actual_taken
                 except Exception:
@@ -514,6 +522,16 @@ class EconomyMixin:
         except Exception:
             alloc = pre_alloc
             idle_fac = pre_idle
+        # 2026-11-26 (P2-9): 直接从 CNavalProductionLine+ML_MAX_EFFICIENCY 读取本船坞线的
+        # 真实单舰船坞硬上限（重巡/战列/航母=5，轻巡/驱逐/潜艇=10，运输船=15）。
+        line_cap = None
+        if is_naval:
+            try:
+                _lc = int(p.i32(line + ML_MAX_EFFICIENCY))
+                if 1 <= _lc <= 25:
+                    line_cap = _lc
+            except Exception:
+                line_cap = None
         note = ""
         if after != int(amount):
             extra_dock = ""
@@ -527,12 +545,14 @@ class EconomyMixin:
                        alloc.get("naval_raw_buildings"))
                 )
             cmd_consumed = (after != before) or (has_req_field and req_after != req_before)
-            if hit_line_cap and delta > 0 and is_naval:
+            if (hit_line_cap or (line_cap is not None and after >= line_cap and int(amount) > line_cap)) and delta > 0 and is_naval:
+                hit_line_cap = True
                 note = (
-                    "line %d hit the per-ship dockyard cap at %d (requested %d; CAddProductionLineFactoriesCommand::CanExecute "
-                    "refuses new_req > GetMaxFactories() — capital ships cap at 5, screens/subs at 10, convoys at 15). "
+                    "line %d hit its per-ship dockyard cap at %d (requested %d, line_cap=%s; "
+                    "CAddProductionLineFactoriesCommand::CanExecute refuses new_req > GetMaxFactories() "
+                    "— capital ships including heavy cruisers cap at 5, light cruisers/screens/subs at 10, convoys at 15). "
                     "Put the remaining idle dockyards (%s) on another naval line or open a new naval line%s"
-                    % (line_index, after, int(amount), idle_fac, extra_dock)
+                    % (line_index, after, int(amount), line_cap if line_cap is not None else after, idle_fac, extra_dock)
                 )
             elif delta > 0 and (idle_fac == 0 or (after > before)):
                 note = ("only reached %d of %d — not enough spare %s "
@@ -550,6 +570,9 @@ class EconomyMixin:
                "idle_factories": idle_fac,
                "hit_line_cap": bool(hit_line_cap),
                "steps": steps, "readback": tray, "paused": paused, "note": note}
+        if line_cap is not None:
+            out["line_cap"] = line_cap
+            out["reached_cap"] = bool(after >= line_cap)
         if has_req_field:
             out["requested_before"] = req_before
             out["requested_after"] = req_after
@@ -623,7 +646,33 @@ class EconomyMixin:
                     "available": avail[:40]}
         lh = self.handle_of(line)
         if lh["type"] != 56:
-            return {"ok": False, "error": "expected military line handle 56, got %d" % lh["type"]}
+            mil_lines = []
+            for idx_i, ln_i in enumerate(lines):
+                try:
+                    lhi = self.handle_of(ln_i)
+                    if lhi.get("type") == 56:
+                        eq_i = self._eq_by_id.get(p.i32(p.u64(ln_i + ML_VARIANT) + EV_TYPE_ID))
+                        mil_lines.append({"line": idx_i, "equipment": eq_i})
+                except Exception:
+                    continue
+            is_naval = lh["type"] in (57, 71)
+            kind_desc = "naval dockyard line (CNavalProductionLine)" if is_naval else "non-military production line"
+            return {
+                "ok": False,
+                "blocked_by": "not_military_production_line",
+                "line": line_index,
+                "before": before_name,
+                "requested": equipment,
+                "line_handle": [lh["type"], lh["id"]],
+                "is_naval_line": is_naval,
+                "military_lines": mil_lines,
+                "error": (
+                    "line %d (%s) is a %s (handle type %d, expected military line handle 56); "
+                    "cannot swap it to military/air equipment %s. To open a new line for %s, "
+                    "call create_production_line(equipment=%r) instead (or pick a military line index from military_lines)."
+                    % (line_index, before_name, kind_desc, lh["type"], equipment, equipment, equipment)
+                ),
+            }
         if vh["type"] != 70:
             return {"ok": False, "error": "expected equipment variant handle 70, got %d" % vh["type"]}
         packed_line = (lh["id"] << 32) | (lh["type"] & 0xFFFFFFFF)
@@ -792,8 +841,23 @@ class EconomyMixin:
                                " -- %s is not producible by this country "
                                "(not researched / embargoed)" % equipment))
             return out
-        posted = cmdwin.post(self, cmd)
-        self._settle(0.4)
+        def _new_line_appeared():
+            try:
+                cur_lines = _arr(p, p.u64(self._c(tag).ptr + CO_PRODUCTION), PS_MIL_LINES)
+                return any(x not in before_ptrs for x in cur_lines)
+            except Exception:
+                return False
+
+        # 2026-11-26 (P2-4 顺带根治): 暂停态下 cmdwin.post 不会消费命令队列，导致永远
+        # 报 "no new line appeared"；统一改走 post_drained（暂停态先安全入队再短暂消费）。
+        if hasattr(cmdwin, "post_drained"):
+            try:
+                posted = cmdwin.post_drained(self, cmd, seconds=2.0, done_fn=_new_line_appeared)
+            except TypeError:
+                posted = cmdwin.post_drained(self, cmd, seconds=2.0)
+        else:
+            posted = cmdwin.post(self, cmd)
+        self._settle(0.15)
         after_lines = _arr(p, p.u64(self._c(tag).ptr + CO_PRODUCTION), PS_MIL_LINES)
         new = [x for x in after_lines if x not in before_ptrs]
         out["posted"] = posted

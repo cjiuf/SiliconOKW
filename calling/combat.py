@@ -162,22 +162,23 @@ def combats(g, only_mine=True, me=None):
             data = p.u64(gs + GS_COMBATS)
             cap = p.i32(gs + GS_COMBATS + 8)
             size = p.i32(gs + GS_COMBATS + 12)
-            if not (0 <= size <= cap <= 4096) or (size and not data):
+            # 2026-11-26: 0 战斗直接短路返回，省去无意义的 439 国遍历
+            if size == 0:
+                return []
+            if not (0 < size <= cap <= 4096) or not data:
                 return []
         except Exception:
             return []
+    combat_ptrs = _arr(p, gs, GS_COMBATS)
+    if not combat_ptrs:
+        return []
     # 2026-11-20: `me` used to be hard-wired to the PLAYER tag, so
     # `hoi4_wars(tag="ITA")` filtered on Germany and reported 0 active combats
     # while Italy had four.  Callers that ask about another country pass it in.
     me = me or g.player_tag()
-    tagof = {}
-    for t in g.tags():
-        try:
-            tagof[p.i32(g.country(t).ptr + 8)] = t
-        except Exception:
-            pass
+    tagof = _country_id_map(g)
     out = []
-    for c in _arr(p, gs, GS_COMBATS):
+    for c in combat_ptrs:
         try:
             a = _side(g, p.u64(c + LC_SIDE_A), tagof)
             b = _side(g, p.u64(c + LC_SIDE_B), tagof)
@@ -473,15 +474,90 @@ WR_INSTIGATOR       = O.COMBAT_WR_INSTIGATOR                        # first_was_
 WR_THREAT           = O.COMBAT_WR_THREAT
 
 
+_COUNTRY_ID_MAP_CACHE = {}
+_SS.register_cache("combat._COUNTRY_ID_MAP_CACHE", container=_COUNTRY_ID_MAP_CACHE)
+
+
 def _country_id_map(g):
-    """country_id -> TAG. Pure read."""
-    p = g.p
-    out = {}
-    for t in g.tags():
+    """country_id -> TAG. Pure read (session-cached + fastmem batch cold build)."""
+    p = getattr(g, "p", None)
+    if p is None:
+        return {}
+    pid = getattr(p, "pid", None)
+    base = getattr(p, "base", None)
+    use_cache = isinstance(pid, int) and pid > 0 and base is not None
+
+    tags = None
+    ptrs = None
+    if hasattr(g, "_load_tags") and hasattr(g, "country_ptrs"):
         try:
-            out[p.i32(g.country(t).ptr + 8)] = t
+            g._load_tags()
+            tags = getattr(g, "_tags", None)
+            ptrs = g.country_ptrs() or []
         except Exception:
-            pass
+            tags, ptrs = None, None
+    if tags is None:
+        try:
+            tags = list(g.tags() or ())
+        except Exception:
+            return {}
+
+    n_tags = len(tags)
+    n_ptrs = len(ptrs) if ptrs is not None else n_tags
+    cache_key = (pid, base, _SS.SESSION.save_epoch, n_tags, n_ptrs) if use_cache else None
+    if cache_key is not None:
+        hit = _COUNTRY_ID_MAP_CACHE.get(cache_key)
+        if hit is not None:
+            return dict(hit)
+
+    out = {}
+    t2i = getattr(g, "_tag2idx", None)
+    if ptrs and t2i is not None and len(ptrs) > 0:
+        # 优先使用 fastmem.read_batch 一次性批量读出全部 CCountry+0x08 (i32)
+        raw_ids = None
+        try:
+            import fastmem as _fm
+            raw_ids = _fm.read_batch(p, [(int(q) + 8, 4) for q in ptrs])
+        except Exception:
+            raw_ids = None
+        if raw_ids is not None and len(raw_ids) == len(ptrs):
+            ptr_ids = []
+            id_set = set()
+            for r in raw_ids:
+                if r and len(r) >= 4:
+                    v = struct.unpack("<i", r)[0]
+                    ptr_ids.append(v)
+                    id_set.add(v)
+                else:
+                    ptr_ids.append(None)
+            for tid, tag in enumerate(tags):
+                if not tag or tag == "---":
+                    continue
+                ci = t2i[tid] if tid < len(t2i) else -1
+                if 0 <= ci < len(ptr_ids) and ptr_ids[ci] is not None:
+                    cid = ptr_ids[ci]
+                    if cid == tid:
+                        out[cid] = tag
+                    elif tid in id_set:
+                        out[tid] = tag
+                    else:
+                        out[cid] = tag
+                elif tid in id_set:
+                    out[tid] = tag
+
+    if not out:
+        for t in (g.tags() if hasattr(g, "tags") else tags):
+            if not t or t == "---":
+                continue
+            try:
+                out[p.i32(g.country(t).ptr + 8)] = t
+            except Exception:
+                pass
+
+    if cache_key is not None and out:
+        if len(_COUNTRY_ID_MAP_CACHE) >= 4:
+            _COUNTRY_ID_MAP_CACHE.clear()
+        _COUNTRY_ID_MAP_CACHE[cache_key] = dict(out)
     return out
 
 

@@ -111,8 +111,39 @@ class BattleplanMixin:
                                  "section": best["section"],
                                  "border": len(best["border_provinces"]),
                                  "slice_range": [sub_from, sub_to],
-                                 "sections_facing_enemy": len(segs)}
+                                 "sections_facing_enemy": len(segs),
+                                 **({"front_area": best["front_area"]} if best.get("front_area") else {})}
+        # 2026-11-26 (B1 根治): 用所选 CFront+0x70 敌方控制区按引擎 0xD57D90 语义预过滤目标省；
+        # 若 depth=1 过滤后为空（如小国只剩沿线 1 排省），依次回退 depth=0 -> 全部匹配敌方实控省，
+        # 彻底杜绝把不匹配/已占领省塞给 CompletePlan 导致 children=[]！
+        front_ctx = 0
+        try:
+            _fp = int(best.get("front") or 0)
+            if _fp > 0x10000:
+                front_ctx = int(p.u64(_fp + 0x70))
+        except Exception:
+            front_ctx = 0
         targets = A.target_provinces(self, enemy_tag, depth=1, own_tag=co.tag)
+        if front_ctx > 0x10000 and targets:
+            _og_hint = None
+            try:
+                _ogs_h = armyops.orders_groups(self, co)
+                if _ogs_h:
+                    _og_hint = _ogs_h[0]
+            except Exception:
+                _og_hint = None
+            _filtered = A.filter_front_provinces(self, targets, front_ctx, og=_og_hint)
+            if not _filtered:
+                _t0 = A.target_provinces(self, enemy_tag, depth=0, own_tag=co.tag)
+                _filtered = A.filter_front_provinces(self, _t0, front_ctx, og=_og_hint)
+            if not _filtered and hasattr(A, "_live_side_provinces"):
+                try:
+                    _m_live, _e_live, _ = A._live_side_provinces(self, co.tag, enemy_tag)
+                    _filtered = A.filter_front_provinces(self, sorted(_e_live), front_ctx, og=_og_hint)
+                except Exception:
+                    _filtered = []
+            if _filtered:
+                targets = _filtered
         out["steps"]["targets"] = targets[:20]
         if not targets:
             return {"ok": False, "error": "no enemy province %d steps in" % depth,
@@ -120,12 +151,44 @@ class BattleplanMixin:
 
         all_og = [og for og in armyops.orders_groups(self, co)
                   if not p.u8(og + A.OG_IS_GROUP)]
+        # 2026-11-26 (P1-2 根治): 区分 type==2 陆地前线单与 type in (3, 4) 特种订单（登陆/伞降）。
+        # 只要集团军没有 type==2 前线单、仅挂了伞降/登陆单且还有未绑定特种单的自由陆战师，
+        # 就绝不把它整军跳过，而是自动排除已绑定特种单的师（保护伞兵不被抢走）并让剩余师正常画前线！
+        special_reserved = {}
+        special_summary = []
+
+        def _collect_special_reserved(og_ptr):
+            res_set = set()
+            spec_ords = []
+            try:
+                ords = A.orders(self, og_ptr) or []
+            except Exception:
+                ords = []
+            for _o in ords:
+                if _o.get("type") in (3, 4):
+                    spec_ords.append(_o)
+                    if hasattr(A, "order_assigned_divisions"):
+                        try:
+                            res_set |= set(A.order_assigned_divisions(self, og_ptr, _o["id"]) or ())
+                        except Exception:
+                            pass
+            return ords, spec_ords, res_set
+
         if armies:
             want = {int(a, 16) if isinstance(a, str) else int(a) for a in armies}
             all_og = [og for og in all_og if og in want]
+            for og in all_og:
+                _, spec_ords, res_set = _collect_special_reserved(og)
+                if spec_ords and res_set:
+                    special_reserved[og] = res_set
+                    special_summary.append({
+                        "army": hex(og),
+                        "special_orders": [{"id": x.get("id"), "type": x.get("type")} for x in spec_ords],
+                        "reserved_special_divisions": len(res_set),
+                    })
         else:
             # 2026-11-17: never strip another front. An army that already carries a
-            # front order belongs to a different war; only armies with no orders are
+            # front order belongs to a different war; only armies with no front orders are
             # freely available.
             # 2026-11-23 (复测 10 A-4 根治): 当所有集团军都已有前线订单（free=[]）时，
             # 严禁把所有军（例如正守 FRA 马奇诺防线的 6 个军）一并抓来重排！只允许重排
@@ -133,13 +196,37 @@ class BattleplanMixin:
             # 没有任何面向 enemy_tag 的军，明确拒绝并请调用方显式传 armies=[...]。
             busy = []
             for og in list(all_og):
-                try:
-                    if A.orders(self, og):
-                        busy.append(og)
-                except Exception:
-                    pass
+                ords, spec_ords, res_set = _collect_special_reserved(og)
+                if not ords:
+                    continue
+                has_front = any(x.get("type") == 2 for x in ords)
+                if has_front:
+                    busy.append(og)
+                    continue
+                # 无 type==2 前线单，仅有登陆/伞降等特种单：检查是否还有未被特种单占用的自由陆战师
+                if spec_ords:
+                    try:
+                        og_divs = list(A.divisions_of(self, og) or ())
+                    except Exception:
+                        og_divs = []
+                    free_divs = [d for d in og_divs if d not in res_set]
+                    if free_divs:
+                        special_reserved[og] = res_set
+                        special_summary.append({
+                            "army": hex(og),
+                            "special_orders": [{"id": x.get("id"), "type": x.get("type")} for x in spec_ords],
+                            "reserved_special_divisions": len(res_set),
+                            "available_front_divisions": len(free_divs),
+                        })
+                        continue
+                    # 整军所有师都已挂在特种单上，不打扰
+                    busy.append(og)
+                else:
+                    busy.append(og)
             free = [og for og in all_og if og not in busy]
             out["steps"]["armies_with_existing_orders"] = [hex(o) for o in busy]
+            if special_summary:
+                out["steps"]["armies_with_special_orders"] = special_summary
             # 2026-11-23 (复测 11 P1-2 加固): 即使集团军当前没有前线订单（free，例如刚
             # reset_battleplans 后或手工驻防在 FRA 马奇诺边境的 6 个军），只要其师实站
             # 在其他邻国边境且不贴着本敌国 enemy_tag 边境，绝不能被 set_front_directive(enemy_tag)
@@ -158,12 +245,19 @@ class BattleplanMixin:
                     _owners_fr, _adj_fr, _ptype_fr, _me_fr = {}, {}, {}, str(co.tag).upper()
                 if _owners_fr and _adj_fr:
                     _keep_free = []
+                    _incidental_other = []
                     for og in free:
                         _touch_target = 0
                         _touch_other = set()
                         _other_div_n = 0
+                        _elig_div_n = 0
+                        _res_s = special_reserved.get(og) or set()
                         try:
                             for _dp in A.divisions_of(self, og):
+                                # 2026-11-26 (P2-6 根治): 已绑定特种单（伞降/登陆）的师不计入常规边境驻防判定
+                                if _dp in _res_s:
+                                    continue
+                                _elig_div_n += 1
                                 _pv = _uo_fr.province_of(self, _dp)
                                 if _pv is None:
                                     continue
@@ -181,17 +275,34 @@ class BattleplanMixin:
                                     _touch_other.update(_nbs)
                         except Exception:
                             pass
-                        # 只要该军完全不贴着 enemy_tag 边境，且至少 1 个师明确驻防在他国边境，
-                        # 视为守他国边境的驻防军（例如正对 FRA 马奇诺的军），禁止自动抽调。
-                        if _touch_target == 0 and _other_div_n > 0:
+                        # 2026-11-26 (P2-6 根治): 只有当该军显著驻防在他国边境（例如守马奇诺防线）
+                        # 才视为他国边防军禁止自动抽调；绝不因 32 师大军里仅 1 个路过师贴着 BEL 边境
+                        # 就整军跳过！门槛：小军(<=4师)至少半数（1师须全员1/1），大军(>=5师)至少 max(3, ceil(40%)) 师。
+                        _guard_min = (
+                            max(1, (_elig_div_n + 1) // 2)
+                            if _elig_div_n <= 4
+                            else max(3, (_elig_div_n * 2 + 4) // 5)
+                        )
+                        if _touch_target == 0 and _elig_div_n > 0 and _other_div_n >= _guard_min:
                             guarded_other.append({
                                 "army": hex(og),
                                 "bordering": sorted(_touch_other),
                                 "border_divisions": _other_div_n,
+                                "eligible_divisions": _elig_div_n,
                             })
                         else:
+                            if _touch_target == 0 and _other_div_n > 0:
+                                _incidental_other.append({
+                                    "army": hex(og),
+                                    "bordering": sorted(_touch_other),
+                                    "border_divisions": _other_div_n,
+                                    "eligible_divisions": _elig_div_n,
+                                    "threshold": _guard_min,
+                                })
                             _keep_free.append(og)
                     eligible_free = _keep_free
+                    if _incidental_other:
+                        out["steps"]["incidental_other_border_armies"] = _incidental_other
                 if guarded_other:
                     out["steps"]["free_armies_guarding_other_borders"] = guarded_other
             if eligible_free:
@@ -285,10 +396,14 @@ class BattleplanMixin:
                     "front": out["steps"]["front"],
                     "free_armies_guarding_other_borders": guarded_other,
                 }
+        if special_summary and "armies_with_special_orders" not in out["steps"]:
+            out["steps"]["armies_with_special_orders"] = special_summary
         sizes = {}
         for og in all_og:
             try:
-                sizes[og] = len(A.divisions_of(self, og))
+                _all_d = A.divisions_of(self, og) or []
+                _res_s = special_reserved.get(og)
+                sizes[og] = len([d for d in _all_d if d not in _res_s]) if _res_s else len(_all_d)
             except Exception:
                 sizes[og] = 0
         all_og = [og for og in all_og if sizes.get(og)]
@@ -407,6 +522,47 @@ class BattleplanMixin:
                 out["steps"]["supply_trim"] = trim_obj
                 all_og = keep
 
+        # 2026-11-26 (P2-7 根治): 对齐 steps.supply 口径与实际拟上线师数 committed_divs；
+        # 若经过 supply_trim 后连最小单军依然严重超过前线补给容量 (> 1.5x) 且未传 force=True，
+        # 明确拒绝硬压上去并提示拆分小集团军或显式传 force=True。
+        committed_divs = sum(sizes[og] for og in all_og)
+        if isinstance(out["steps"].get("supply"), dict):
+            sup = out["steps"]["supply"]
+            sup["total_country_divisions"] = sup.get("needed")
+            sup["committed"] = committed_divs
+            if cap:
+                c_ratio = round(committed_divs / float(cap), 2)
+                c_ok = committed_divs <= float(cap) * 1.25
+                sup["committed_ratio"] = c_ratio
+                sup["committed_ok"] = c_ok
+                # 若总军力虽大于容量但裁剪后实际投入已满足补给容量，同步将 ok 反映为实际计划合规
+                if c_ok and sup.get("ok") is False:
+                    sup["ok"] = True
+                    sup["note"] = (
+                        "country total (%s) exceeds front capacity (%.1f), "
+                        "but actual committed divisions (%d) fit within supply budget"
+                        % (sup.get("total_country_divisions"), float(cap), committed_divs)
+                    )
+                elif not c_ok and not force:
+                    if committed_divs > float(cap) * 1.5:
+                        return {
+                            "ok": False,
+                            "enemy_tag": enemy_tag,
+                            "blocked_by": "supply_over_capacity",
+                            "error": (
+                                "front towards %s can only supply %.1f divisions, but even the smallest "
+                                "candidate army would commit %d divisions (ratio %.2fx > 1.5x). "
+                                "Split a smaller army (<= %d divs), upgrade supply hubs, or pass force=true to override."
+                                % (enemy_tag, float(cap), committed_divs, c_ratio, max(1, int(float(cap))))
+                            ),
+                            "steps": out["steps"],
+                        }
+                    out["supply_warning"] = (
+                        "committed %d divisions onto a front with capacity %.1f (ratio %.2fx); "
+                        "watch supply attrition or split into smaller armies"
+                        % (committed_divs, float(cap), c_ratio)
+                    )
+
         n = len(all_og)
         plan = []
         span = max(1, sub_to - sub_from)
@@ -441,7 +597,9 @@ class BattleplanMixin:
             results = []
             for i, og in enumerate(all_og):
                 frm, to = plan[i]["from"], plan[i]["to"]
-                divs = A.divisions_of(self, og)
+                divs = list(A.divisions_of(self, og) or ())
+                if og in special_reserved:
+                    divs = [d for d in divs if d not in special_reserved[og]]
                 # 2026-11-20: the ONLY plan shape the engine actually feeds is
                 # the one built by CompletePlan (0x18CFC70).  A front order made
                 # by draw_front_line + execute_plan/manual_offensive gets a
@@ -471,7 +629,7 @@ class BattleplanMixin:
                 root_id = 0
                 fresh = []
                 info = {}
-                ok, err, ok2, err2, ok3, err3 = True, "", True, "", True, ""
+                ok, err = True, ""
                 flags = []
                 assign_fix = None
                 dropped = None
@@ -520,7 +678,9 @@ class BattleplanMixin:
                 if (assigned or 0) == 0:
                     try:
                         assign_fix = self.assign_divisions_to_front(
-                            og, enemy_tag, mode="all", order_ids=[root_id])
+                            og, enemy_tag, mode="all", order_ids=[root_id],
+                            divisions=(divs if og in special_reserved else None),
+                        )
                     except Exception as e:
                         assign_fix = {"ok": False, "error": repr(e)}
                     self._settle(0.5)
@@ -570,16 +730,37 @@ class BattleplanMixin:
                                "ok": dr.get("ok"), "error": dr.get("error")}
                     out.setdefault("steps", {}).setdefault(
                         "dropped_empty_orders", []).append(dropped)
+                # 2026-11-26 (B1 根治): offensive_ok / execute_ok 必须由实际内存回读的
+                # kids_fed 与 executing 派生，禁止硬编码 True 谎报成功！
+                offensive_ok = bool(kids_fed)
+                if offensive_ok:
+                    offensive_error = ""
+                elif kids:
+                    offensive_error = "offensive child %s has 0 assigned divisions" % ([k["id"] for k in kids],)
+                else:
+                    offensive_error = (
+                        err
+                        or (info or {}).get("note")
+                        or ("CompletePlan produced root order %d but no type-1 offensive child" % root_id)
+                    )
+                execute_ok = bool(kids_fed and any(k.get("executing") == 1 for k in kids_fed))
+                if execute_ok:
+                    execute_error = ""
+                elif not kids_fed:
+                    execute_error = "no fed offensive child to execute"
+                else:
+                    execute_error = "offensive child exists but executing flag remained 0"
+
                 results.append({"army": hex(og), "from": frm, "to": to,
                                 "divisions": len(divs),
                                 "front_order": root_id,
                                 "front_ok": bool(ok), "front_error": err,
-                                "offensive_ok": bool(ok2), "offensive_error": err2,
+                                "offensive_ok": offensive_ok, "offensive_error": offensive_error,
                                 "children": [k["id"] for k in kids],
                                 "children_fed": [k["id"] for k in kids_fed],
                                 "children_executing": [k["id"] for k in kids
                                                        if k.get("executing") == 1],
-                                "execute_ok": bool(ok3), "execute_error": err3,
+                                "execute_ok": execute_ok, "execute_error": execute_error,
                                 "root_assigned": assigned,
                                 "root_total_assigned": root_total_assigned,
                                 "offensive_assigned": min(
@@ -597,10 +778,9 @@ class BattleplanMixin:
                                 # arrow and it is switched on -- the 1937 test
                                 # had every other box ticked while the front
                                 # stood still for 16 days.
-                                "ok": (bool(fresh) and bool(kids_fed)
+                                "ok": (bool(fresh) and offensive_ok
                                        and (assigned or 0) > 0
-                                       and any(k.get("executing") == 1
-                                               for k in kids_fed))})
+                                       and execute_ok)})
             out["steps"]["armed"] = results
             out["steps"]["children"] = [(c["id"], c["assigned"], c["executing"])
                                         for og in all_og for c in A.order_children(self, og)]

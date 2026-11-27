@@ -313,18 +313,25 @@ class ResolverMixin:
                     return int(s["ptr"], 16)
             raise KeyError("no such battalion: %s" % val)
         if kind in ("wargoal", "occupationlaw"):
+            if kind == "wargoal" and hasattr(self, "_win_wargoal_types_map"):
+                wmap = self._win_wargoal_types_map()
+                if wmap:
+                    if val in wmap:
+                        return wmap[val]
+                    raise KeyError("no such wargoal: %s (valid: %s)" % (val, ", ".join(sorted(wmap))))
             which = "war_goals" if kind == "wargoal" else "occupation_laws"
             cls, off, _ = self.DATABASE_ARRAYS[which]
             db = self.oi.singleton(cls)
-            for it in _arr(p, db, off):
-                nm = None
-                for o in range(0, 0x300, 8):
-                    v2 = item_name(p, it + o)
-                    if v2 and v2.isprintable() and 2 < len(v2) < 48:
-                        nm = v2
-                        break
-                if nm == val:
-                    return it
+            if db:
+                for it in _arr(p, db, off):
+                    nm = None
+                    for o in range(0, 0x300, 8):
+                        v2 = item_name(p, it + o)
+                        if v2 and v2.isprintable() and 2 < len(v2) < 48:
+                            nm = v2
+                            break
+                    if nm == val:
+                        return it
             raise KeyError("no such %s: %s" % (kind, val))
         raise KeyError("unknown reference kind: %s (valid: %s)"
                        % (kind, sorted(self.REF_TYPES)))
@@ -578,9 +585,6 @@ class ResolverMixin:
 
     def air_enable_mission(self, tag=None, **kw):
         return self._sc("CStratAirEnableMissionCommand", tag, **kw)
-
-    def air_transfer(self, tag=None, **kw):
-        return self._sc("CStratAirTransferCommand", tag, **kw)
 
     def create_fleet(self, tag=None, **kw):
         return self._sc("CCreateFleetCommand", tag, **kw)

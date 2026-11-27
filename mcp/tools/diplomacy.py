@@ -252,17 +252,20 @@ def _peace_options(a):
 
 @tool("hoi4_peace_demands",
       "Submit peace-conference demands for the player (or `winner`) against a beaten country. "
-      "This is the conference's 提交要求 button: the demands go into the conference's turn map "
-      "exactly as if they had been selected and submitted in the window. Omit `states` with "
-      "`kinds=state` to take *every* state of the loser, or pass `states=[...]` (from "
-      "`hoi4_peace_options`) to demand only a chosen subset.",
+      "By default (`replace=false`), repeated calls in the same conference APPEND and deduplicate "
+      "into one bidding turn (preserving caller `states` priority order) so demanding HOL and then "
+      "INS never overwrites earlier demands. Pass `replace=true` to clear previous queued demands. "
+      "Omit `states` with `kinds=state` to take *every* state of the loser, or pass `states=[...]` "
+      "(from `hoi4_peace_options`) in priority order.",
       {"loser": dict(_STR, description="Country tag that lost, e.g. HOL"),
        "winner": dict(_STR, description="Country that takes (empty = the player)"),
        "kinds": {"type": "array", "items": {"type": "string",
                                             "enum": ["state", "puppet", "navy", "liberate", "gov"]},
                  "description": "Demand types; default ['state']"},
        "states": {"type": "array", "items": _INT,
-                  "description": "Optional subset of state IDs to demand (from hoi4_peace_options)."}},
+                  "description": "Optional subset of state IDs to demand in priority order (from hoi4_peace_options)."},
+       "replace": {"type": "boolean",
+                   "description": "If true, replace previously queued demands instead of appending (default false)."}},
       ["loser"])
 def _peace_demands(a):
     import peacewin
@@ -275,18 +278,31 @@ def _peace_demands(a):
         lose = _country_index(g, a["loser"])
         kinds = a.get("kinds") or ["state"]
         states = a.get("states")
+        replace = bool(a.get("replace", False))
         finfo = {}
         try:
             turn, acts = peacewin.submit_demands(
-                g, conf, win, lose, kinds, states=states, filter_info=finfo
+                g, conf, win, lose, kinds, states=states, filter_info=finfo,
+                append=not replace, replace=replace,
             )
         except ValueError as e:
             return {"ok": False, "error": str(e), **finfo}
         out = {"ok": True, "turn": turn, "actions": len(acts),
+               "mode": finfo.get("mode"),
+               "added_actions": finfo.get("added_actions"),
+               "total_queued_actions": finfo.get("total_queued_actions"),
+               "queued_states_by_loser": finfo.get("queued_states_by_loser"),
+               "estimated_added_cost": finfo.get("estimated_added_cost"),
+               "estimated_total_cost": finfo.get("estimated_total_cost"),
+               "score_now": finfo.get("score_now"),
+               "over_budget": finfo.get("over_budget"),
                "detail": [{"type": g.p.i32(x + 8), "winner": g.p.i32(x + 0x30),
-                           "loser": g.p.i32(x + 0x34), "state": g.p.i32(x + 0x48)}
+                           "loser": g.p.i32(x + 0x34), "state": g.p.i32(x + 0x48),
+                           "cost": g.p.i32(x + peacewin.ACT_COST)}
                           for x in acts],
                "status": peacewin.summary(g)}
+        if finfo.get("budget_warning"):
+            out["budget_warning"] = finfo["budget_warning"]
         if states is not None:
             out["requested_states"] = finfo.get("requested_states")
             out["matched_states"] = finfo.get("matched_states")

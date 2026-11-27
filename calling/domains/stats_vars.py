@@ -79,48 +79,59 @@ class StatsVarsMixin:
 
     def country_stats(self, tag=None, raw=False):
         """~44 country statistics gathered from the game's own trigger functions."""
-        import stats as _st
-        table = _st.build()
-        FIXED_KEYS = {"command_power", "command_power_daily", "political_power_daily",
-                      "surrender_progress", "convoy_threat", "naval_mine_danger"}
-        # Bool triggers return "actual == expected", and the expected field is zero, so
-        # the result comes back inverted. The right value is not (rax & 1). Checked
-        # against is_major, is_in_faction, has_war and has_capitulated; all agree.
-        BOOL_PREFIX = ("has_", "is_", "exists", "country_has")
-        # These want an extra parameter (id/tag), so they are not reliable here:
-        SKIP = ("owns_", "days_since", "has_decision", "has_rule", "has_terrain",
-                "has_opinion_modifier", "has_country_leader_ideology",
-                "has_completed_national_focus", "has_active_timed_decision",
-                "country_has_cosmetic_tag", "has_attache")
+        import api
         out = {}
-        with self:
-            for name, (fn, cls) in sorted(table.items()):
-                if not raw and name.startswith(SKIP):
-                    continue
-                try:
-                    v = self._scope_call(fn, tag)
-                except Exception:
-                    continue
-                if raw:
-                    out[name] = v
-                elif name in FIXED_KEYS:
-                    out[name] = round(v / O.FIXED, 4)
-                elif name.startswith(BOOL_PREFIX):
-                    out[name] = not bool(v & 1)
-                elif -10 ** 9 < v < 10 ** 9:
-                    out[name] = v
+        allow = getattr(api, "SCOPE_CALL_ALLOW", None) or ()
+        # 2026-11-26: 当 api.SCOPE_CALL_ALLOW 为空（如 Windows 1.19.5.0 PE，1.19.2 触发器地址
+        # 全部禁用）时直接短路跳过 stats.build()、`with self:`（避免无谓 FileLock/attach）
+        # 以及 44 次必然抛 CallError 的循环。
+        if allow:
+            import stats as _st
+            table = _st.build()
+            FIXED_KEYS = {"command_power", "command_power_daily", "political_power_daily",
+                          "surrender_progress", "convoy_threat", "naval_mine_danger"}
+            # Bool triggers return "actual == expected", and the expected field is zero, so
+            # the result comes back inverted. The right value is not (rax & 1). Checked
+            # against is_major, is_in_faction, has_war and has_capitulated; all agree.
+            BOOL_PREFIX = ("has_", "is_", "exists", "country_has")
+            # These want an extra parameter (id/tag), so they are not reliable here:
+            SKIP = ("owns_", "days_since", "has_decision", "has_rule", "has_terrain",
+                    "has_opinion_modifier", "has_country_leader_ideology",
+                    "has_completed_national_focus", "has_active_timed_decision",
+                    "country_has_cosmetic_tag", "has_attache")
+            with self:
+                for name, (fn, cls) in sorted(table.items()):
+                    if not raw and name.startswith(SKIP):
+                        continue
+                    if fn not in allow:
+                        continue
+                    try:
+                        v = self._scope_call(fn, tag)
+                    except Exception:
+                        continue
+                    if raw:
+                        out[name] = v
+                    elif name in FIXED_KEYS:
+                        out[name] = round(v / O.FIXED, 4)
+                    elif name.startswith(BOOL_PREFIX):
+                        out[name] = not bool(v & 1)
+                    elif -10 ** 9 < v < 10 ** 9:
+                        out[name] = v
         if not out:
             # 2026-11-11: stats.build() points at 1.19.2 trigger addresses and every
             # call is refused, so this tool returned {} for EVERY country — the agent
             # had no way to size up an opponent (it never knew France had 127
             # divisions). Fall back to the memory-only country summary plus the live
             # division count, and say so.
+            co = None
             try:
-                out = dict(self._c(tag).summary() or {})
+                co = self._c(tag)
+                out = dict(co.summary() or {})
             except Exception:
                 out = {}
             try:
-                out["divisions"] = len(_arr(self.p, self._c(tag).ptr, CO_ARMIES))
+                if co is not None:
+                    out["divisions"] = len(_arr(self.p, co.ptr, CO_ARMIES))
             except Exception:
                 pass
             # 2026-11-22 (P2-2): the description promised ~44 trigger statistics
@@ -128,12 +139,16 @@ class StatsVarsMixin:
             # cheap and real (memory reads), and NAME the ones that are not, so
             # "casualties: missing" can never be read as "no casualties".
             try:
-                out["at_war"] = bool(self.wars(tag).get("at_war"))
+                import combat as _cb
+                out["at_war"] = bool(_cb.at_war(self, tag))
             except Exception:
-                out["at_war"] = None
+                try:
+                    out["at_war"] = bool(self.wars(tag).get("at_war"))
+                except Exception:
+                    out["at_war"] = None
             try:
                 _maj = set(_arr(self.p, self.gamestate, O.GS_MAJORS))
-                out["is_major"] = self._c(tag).ptr in _maj
+                out["is_major"] = (co.ptr in _maj) if co is not None else None
             except Exception:
                 out["is_major"] = None
             out["unavailable"] = [

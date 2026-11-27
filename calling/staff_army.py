@@ -149,7 +149,15 @@ def state(g, tag=None):
     except Exception:
         pass
     try:
-        out["manpower"] = (g.country_stats(tag) or {}).get("manpower")
+        # 2026-11-26: 直读国家 manpower，避免为单字段调用重接口 country_stats()
+        mp = None
+        if hasattr(g, "_c"):
+            co = g._c(tag)
+            mp_attr = getattr(co, "manpower", None)
+            mp = mp_attr() if callable(mp_attr) else mp_attr
+        if mp is None and hasattr(g, "country_stats"):
+            mp = (g.country_stats(tag) or {}).get("manpower")
+        out["manpower"] = mp
     except Exception:
         out["manpower"] = None
     try:
