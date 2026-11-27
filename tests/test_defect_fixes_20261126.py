@@ -385,13 +385,20 @@ class TestP0PeaceDemandsAndFinish(unittest.TestCase):
             self.assertTrue(fin["partial_acquisition"])
             self.assertIn("acquisition_warning", fin)
 
-            # 验证 replace=True 可覆盖队列
+            # 验证 replace=True 按 loser 作用域替换（D-19: 保留 INS，仅替换 HOL），replace_all=True 清空整场会议
             p.write(conf + 0xDD, b"\x00")
             p.write(conf + 0x1F8 + 8, struct.pack("<Q", 1))
             f4 = {}
             _, acts4 = PW.submit_demands(g, conf, 1, 10, states=[36], filter_info=f4, replace=True)
-            self.assertEqual(f4["mode"], "replace")
-            self.assertEqual([p.i32(a + 0x48) for a in acts4], [36])
+            self.assertEqual(f4["mode"], "replace_loser")
+            self.assertEqual([p.i32(a + 0x48) for a in acts4], [672, 335, 334, 36])
+            self.assertEqual(f4["preserved_other_losers"], {"INS": 3})
+
+            f5 = {}
+            _, acts5 = PW.submit_demands(g, conf, 1, 10, states=[36], filter_info=f5, replace_all=True)
+            self.assertEqual(f5["mode"], "replace_all")
+            self.assertEqual([p.i32(a + 0x48) for a in acts5], [36])
+            self.assertIn("warning", f5)
 
 
 class TestP1AndP2AirbaseParadropAndFront(unittest.TestCase):

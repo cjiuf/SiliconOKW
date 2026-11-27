@@ -35,11 +35,13 @@ def _turn_brief(a):
 @tool(
     "hoi4_inspect",
     "Bounded read-only escape hatch (max 3 queries per call) for deep inspection "
-    "when hoi4_turn_brief lacks detail. Allowed topics (20): country, events, "
+    "when hoi4_turn_brief lacks detail. Allowed topics: country, events, "
     "selectable_focuses, research_available (includes start_year/ahead_years/cost_days), "
     "advisors, idea_catalog (unified laws/ideas/advisors with slot & cost), decisions, "
-    "armies, war_readiness, combat, stockpile, resources, state, peace, air, navy, staff, "
-    "health, autopilot (active Standing Orders & journal), strategy_catalog (auditable strategy formulas).",
+    "armies, templates (division template composition & real engine paradrop counts), "
+    "war_readiness, combat, stockpile, resources, state, peace, air, navy, "
+    "paradrop_targets, garrison, staff, health, autopilot (active Standing Orders & journal), "
+    "strategy_catalog (auditable strategy formulas).",
     dict(
         TAG_DEFAULT,
         queries={
@@ -50,6 +52,7 @@ def _turn_brief(a):
                     "topic": {"type": "string"},
                     "tag": {"type": "string"},
                     "target": {"type": "string"},
+                    "template": {"type": "string"},
                     "filter": {"type": "string"},
                     "slot": {"type": "string"},
                     "state": {"type": "integer"},
@@ -130,6 +133,11 @@ def _turn_execute_plan(a):
             _BOOL,
             description="Enforce red-dot gate during this wait (default true; also disabled globally when hoi4_red_dot_guard enabled=false)",
         ),
+        ignore_red_dots={
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional non-strict red-dot codes to ignore during this wait only (e.g. ['IDLE_MIL','IDLE_DOCK','DEFICIT_OVER_TRAINING']); strict/crisis codes (PENDING_EVENT, NO_FOCUS, IDLE_RESEARCH, CB_AVAILABLE, SUPPLY_CRISIS, FUEL_ZERO) can never be ignored.",
+        },
         autopilot=dict(
             _BOOL,
             description="Enable Standing Orders autopilot during wait (omit = auto when Standing Orders active; false = bypass for this wait)",
@@ -154,6 +162,7 @@ def _turn_wait_and_brief(a):
         timeout_seconds=a.get("timeout_seconds"),
         pause_on_wake=a.get("pause_on_wake", True),
         respect_red_dots=a.get("respect_red_dots", True),
+        ignore_red_dots=a.get("ignore_red_dots"),
         tag=a.get("tag"),
         include_data=bool(a.get("include_data", False)),
         autopilot=a.get("autopilot"),

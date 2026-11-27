@@ -194,7 +194,7 @@ class FocusMixin:
             cur_key = item_name(self.p, cur + NF_KEY)
             if cur_key and cur_key != key:
                 return ("another focus is already in progress (%s); "
-                        "hoi4_drop_focus first" % cur_key)
+                        "call drop_focus (or hoi4_drop_focus) first" % cur_key)
         try:
             import focusplan
             m = (focusplan.load().get("focuses") or {}).get(key) or {}
@@ -267,6 +267,60 @@ class FocusMixin:
                 return f
         return None
 
+    _FOCUS_AVAIL_CACHE = {}
+
+    @classmethod
+    def _focus_available_snippet(cls, key):
+        """纯文件只读：从 HOI4 `common/national_focus/*.txt` 提取指定国策的 `available = { ... }` 摘要（D-09/D-10）。"""
+        k = str(key or "").strip()
+        if not k:
+            return None
+        if k in cls._FOCUS_AVAIL_CACHE:
+            return cls._FOCUS_AVAIL_CACHE[k]
+        snippet = None
+        try:
+            import glob as _glob, os as _os, re as _re
+            import mapdata as _md
+            fdir = _os.path.join(_md.GAME, "common", "national_focus")
+            if _os.path.isdir(fdir):
+                pat = _re.compile(r"\bid\s*=\s*" + _re.escape(k) + r"\b")
+                for fn in sorted(_glob.glob(_os.path.join(fdir, "*.txt"))):
+                    try:
+                        with open(fn, encoding="utf-8", errors="replace") as _fh:
+                            txt = _fh.read()
+                    except OSError:
+                        continue
+                    m = pat.search(txt)
+                    if not m:
+                        continue
+                    # 定位本 focus 块内紧随其后的 available = { ... }
+                    chunk = txt[m.end():m.end() + 4000]
+                    next_foc = _re.search(r"\bfocus\s*=\s*\{", chunk)
+                    if next_foc:
+                        chunk = chunk[:next_foc.start()]
+                    ma = _re.search(r"\bavailable\s*=\s*\{", chunk)
+                    if not ma:
+                        break
+                    pos = ma.end()
+                    depth = 1
+                    while pos < len(chunk) and depth > 0:
+                        ch = chunk[pos]
+                        if ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                        pos += 1
+                    raw = chunk[ma.end():max(ma.end(), pos - 1)]
+                    lines = [ln.split("#", 1)[0].strip() for ln in raw.splitlines()]
+                    flat = " ".join(ln for ln in lines if ln)
+                    if flat:
+                        snippet = flat[:260] + ("..." if len(flat) > 260 else "")
+                    break
+        except Exception:
+            snippet = None
+        cls._FOCUS_AVAIL_CACHE[k] = snippet
+        return snippet
+
     def set_focus(self, key, tag=None):
         c = self._c(tag)
         f = self.find_focus(key, tag)
@@ -282,11 +336,22 @@ class FocusMixin:
                       "ok": bool(r.get("ok")) and got == f})
             if not r["ok"]:
                 reason = r.get("reason") or self.focus_block_reason(key, tag)
-                r["reason"] = reason or (
-                    "the engine took the command but did not switch the focus; "
-                    "its `available` trigger (manpower / army ratio / political "
-                    "power / war state) is the remaining candidate — the same "
-                    "focus keeps failing until that condition changes")
+                if not reason:
+                    avail_snip = self._focus_available_snippet(key)
+                    if avail_snip:
+                        r["available_trigger"] = avail_snip
+                        reason = (
+                            "the engine did not switch to %s; its script `available` trigger is not met: %s"
+                            % (key, avail_snip)
+                        )
+                    else:
+                        reason = (
+                            "the engine took the command but did not switch the focus; "
+                            "its `available` trigger (manpower / army ratio / political "
+                            "power / war state) is the remaining candidate — the same "
+                            "focus keeps failing until that condition changes"
+                        )
+                r["reason"] = reason
             return r
         with self:
             self.cmd.send("SetNationalFocus", tag=c.tag_id, focus_ptr=f)
@@ -606,12 +671,39 @@ class FocusMixin:
                 sb = self.GER_SNOWBALL_CHAIN.get(k)
                 if sb:
                     sb_score, min_d, min_y, need_peace = sb
-                    if (need_peace and at_war) or my_divs < min_d or yr < min_y:
-                        blocked.append("%s (wait: divs %d/%d, year %d/%d, at_war=%s)"
-                                       % (k, my_divs, min_d, yr, min_y, at_war))
+                    # 2026-11-27 (D-20 附带纠偏): Gotterdammerung (1.19.5) 中 GER_anschluss 的真实
+                    # 脚本条件是 `has_war = no` + 对奥陆军实力比（fighting_army_strength_ratio vs AUS），
+                    # 而非旧版固定 54 师；和平期且年份达标时不再因 divs < 54 静态隐藏，让引擎探针真测！
+                    if need_peace and at_war:
+                        blocked.append(
+                            "%s (blocked: requires has_war=no, currently at_war=True; divs=%d, year=%d)"
+                            % (k, my_divs, yr)
+                        )
+                        continue
+                    if yr < min_y:
+                        blocked.append(
+                            "%s (wait: year %d/%d, divs=%d, at_war=%s)"
+                            % (k, yr, min_y, my_divs, at_war)
+                        )
+                        continue
+                    if k != "GER_anschluss" and my_divs < min_d:
+                        blocked.append(
+                            "%s (wait: divs %d/%d, year %d/%d, at_war=%s)"
+                            % (k, my_divs, min_d, yr, min_y, at_war)
+                        )
                         continue
                     score, tier = sb_score, "S0_snowball"
-                    reason = "德国史实吞并雪球核心主线 (divs=%d >= %d)" % (my_divs, min_d)
+                    if k == "GER_anschluss" and my_divs < min_d:
+                        reason = (
+                            "德国史实吞并雪球核心主线（divs=%d；1.19.5 Gotterdammerung 使用 "
+                            "has_war=no + 对奥陆军实力比而非固定 54 师，须过引擎 available 条件）"
+                            % my_divs
+                        )
+                    else:
+                        reason = (
+                            "德国史实吞并雪球核心主线（启发式顺位，divs=%d；实际能否启动须过引擎 available 条件）"
+                            % my_divs
+                        )
                 elif k in self.GER_OPENING_TOP:
                     score, tier, reason = (self.GER_OPENING_TOP[k], "S0_opening",
                                            "德国开局核心工业/政治主线")
@@ -668,6 +760,7 @@ class FocusMixin:
         res = {
             "recommended": recommended,
             "recommended_reason": rows[0]["reason"] if rows else "",
+            "recommended_verified": bool(engine_checked),
             "count": len(rows),
             "engine_checked": engine_checked,
             "focus_in_progress": item_name(p, current + NF_KEY) if current else None,
@@ -678,6 +771,15 @@ class FocusMixin:
             "focuses": [r["id"] for r in rows[:60]],
             "blocked": blocked[:40],
         }
+        if not engine_checked:
+            res["engine_checked_note"] = (
+                "a focus is currently in progress, so engine CanExecute probes were skipped; "
+                "`selectable` and `recommended` reflect static prerequisites/heuristics only and "
+                "must still pass each focus's script `available` trigger once the focus slot is free"
+                if current else
+                "engine CanExecute verification was incomplete (%d unverified); check script `available` trigger before assuming startable"
+                % engine_unknown
+            )
         if sys.platform == "win32":
             # 2026-11-20 (P0 #4): the engine check runs here now.  Prerequisites
             # and mutexes stay on the parsed script data (CNationalFocus does not

@@ -543,8 +543,8 @@ class BattleplanMixin:
                         "but actual committed divisions (%d) fit within supply budget"
                         % (sup.get("total_country_divisions"), float(cap), committed_divs)
                     )
-                elif not c_ok and not force:
-                    if committed_divs > float(cap) * 1.5:
+                elif not c_ok:
+                    if not force and committed_divs > float(cap) * 1.5:
                         return {
                             "ok": False,
                             "enemy_tag": enemy_tag,
@@ -557,11 +557,23 @@ class BattleplanMixin:
                             ),
                             "steps": out["steps"],
                         }
-                    out["supply_warning"] = (
-                        "committed %d divisions onto a front with capacity %.1f (ratio %.2fx); "
-                        "watch supply attrition or split into smaller armies"
-                        % (committed_divs, float(cap), c_ratio)
-                    )
+                    # 2026-11-27 (D-21 根治): 即使传了 force=True 跳过裁剪与拦截，也必须在顶层
+                    # 显式标明 supply_overloaded=True 与 supply_warning，绝不静默返回 ok=True。
+                    out["supply_overloaded"] = True
+                    out["recommended_max_divisions"] = max(1, int(float(cap)))
+                    if force and committed_divs > float(cap) * 1.5:
+                        out["supply_warning"] = (
+                            "SEVERE SUPPLY OVERLOAD (overridden by force=true): committed %d divisions "
+                            "onto a front with capacity %.1f (ratio %.2fx; recommended <= %d divs). "
+                            "Expect SUPPLY_CRISIS attrition unless surplus divisions are moved to rear reserve."
+                            % (committed_divs, float(cap), c_ratio, max(1, int(float(cap))))
+                        )
+                    else:
+                        out["supply_warning"] = (
+                            "committed %d divisions onto a front with capacity %.1f (ratio %.2fx; "
+                            "recommended <= %d divs); watch supply attrition or split into smaller armies"
+                            % (committed_divs, float(cap), c_ratio, max(1, int(float(cap))))
+                        )
 
         n = len(all_og)
         plan = []

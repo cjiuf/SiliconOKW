@@ -512,7 +512,7 @@ def _pe_build(g, t, line_slots, supp_slots, tag):
     return cmd
 
 
-def _pe_edit_template(g, template_ptr, line_counts, dry_run, support_counts):
+def _pe_edit_template(g, template_ptr, line_counts, dry_run, support_counts, tag=None):
     """Windows 1.19.5.0: the proven player-command path (see constants above)."""
     import cmdwin
     p = g.p
@@ -521,7 +521,7 @@ def _pe_edit_template(g, template_ptr, line_counts, dry_run, support_counts):
         return {"ok": False, "error":
                 "pointer %#x is not a CReferencedDivisionTemplate (vptr %#x)"
                 % (t, p.u64(t))}
-    tag = int(g.player().tag_id)
+    tag_id = int(g._c(tag).tag_id) if tag else int(g.player().tag_id)
     arrs = _pe_template_arrays(g, t)
     line_slots, line_info = _pe_plan(g, arrs["line"], line_counts, "line")
     # 2026-11-23 (复测 10 B-6 根治): _pe_plan 失败时返回 (None, "error msg")！
@@ -539,14 +539,14 @@ def _pe_edit_template(g, template_ptr, line_counts, dry_run, support_counts):
     if line_slots is None and supp_slots is None:
         return {"ok": False, "applied": False, "error": "nothing to edit (line/support empty)"}
 
-    cmd = _pe_build(g, t, line_slots, supp_slots, tag)
+    cmd = _pe_build(g, t, line_slots, supp_slots, tag_id)
     can = bool(g.call(p.base + CANEXEC_UPDATE_TEMPLATE, (cmd, 0),
                       absolute=True, force=True) & 0xFF)
-    cost = _pe_cost(g, t + 0x18, cmd + PE_DATA_OFF, tag)
-    xp = _pe_army_xp(g, tag)
+    cost = _pe_cost(g, t + 0x18, cmd + PE_DATA_OFF, tag_id)
+    xp = _pe_army_xp(g, tag_id)
     res = {
         "ok": can, "applied": False, "mode": "pe-player-command", "cmd": hex(cmd),
-        "template": hex(t), "handle": hex(p.u64(cmd + 0x270)), "tag": tag,
+        "template": hex(t), "handle": hex(p.u64(cmd + 0x270)), "tag": tag_id,
         "can_execute": can, "xp_cost": cost, "army_xp": xp,
         "xp_note": "engine units: 1 army XP = 100,000 (verified: +1 line battalion = 500,000 = 5 XP); the engine deducts its own cost",
         "army_xp_display": round(xp / 100000.0, 2),
@@ -571,7 +571,7 @@ def _pe_edit_template(g, template_ptr, line_counts, dry_run, support_counts):
     after = _pe_template_arrays(g, t)
     res["after"] = {k: v["names"] for k, v in after.items()}
     try:
-        res["xp_after"] = _pe_army_xp(g, tag)
+        res["xp_after"] = _pe_army_xp(g, tag_id)
     except Exception:
         pass
     # 2026-11-18: compare COMPACTED slot lists (without compacting, a straight
@@ -706,7 +706,7 @@ def mem_edit(g, template_ptr, line_counts, support_counts=None, pool_path=None):
     return res
 
 
-def edit_template(g, template_ptr, line_counts=None, dry_run=True, support_counts=None):
+def edit_template(g, template_ptr, line_counts=None, dry_run=True, support_counts=None, tag=None):
     """line_counts: {"infantry": 10, "artillery_brigade": 3, ...}.
 
     Windows 1.19.5.0 dispatches to the PE player-command path (verified live
@@ -716,7 +716,7 @@ def edit_template(g, template_ptr, line_counts=None, dry_run=True, support_count
     if sys.platform == "win32":
         try:
             return _pe_edit_template(g, template_ptr, line_counts, dry_run,
-                                     support_counts)
+                                     support_counts, tag=tag)
         except Exception as e:
             return {"ok": False, "error": "PE template edit failed: %s" % e,
                     "mode": "pe-player-command"}

@@ -953,22 +953,29 @@ class DiplomacyWarMixin:
         return {"ok": ok, "error": err}
 
     def declare_war(self, target_tag, dry_run=False, force=False, override_checks=False,
-                    ack_co_belligerents=False):
-        """Declare war -- behind a preflight covering army, border, battle plan,
-        casus belli, AND diplomatic escalation (factions / guarantees / subjects).
+                    ack_co_belligerents=False, confirm_escalation=False):
+        """Declare war -- behind a preflight separating tactical and strategic gates.
 
-        `force` skips advisory warnings (rifles, division ratio, timeline).
-        `ack_co_belligerents=True` acknowledges undefended co-belligerent borders
-        (e.g. a guarantor/faction ally with 0 divisions on our shared border).
-        `override_checks=True` bypasses the hard military/wargoal preflight gates.
-        Note: diplomatic illegality (self, already at war, same faction ally,
-        own subject/overlord) is still checked unless override_checks=True.
+        2026-11-27 (D-20 根治):
+          * `override_checks=True` 仅跳过**战术门禁**（边境驻军、前线计划、战争借口等），
+            不再静默放行高危**战略门禁**（列强保独 `guaranteed_by`、主要国裸边境、压倒性联军）。
+          * `ack_co_belligerents=True` 确认普通非保独/非主要国裸边境连带（如宗主/附庸）；
+            若触发列强保独或主要国裸边境，须显式传 `confirm_escalation=True` 或具名列表
+            `ack_co_belligerents=["ENG", "FRA"]` 覆盖高危国家方可放行。
         """
-        readiness = self.war_readiness_check(
-            target_tag, force=force,
-            hard=not override_checks,
-            ack_co_belligerents=bool(ack_co_belligerents or override_checks),
-        )
+        try:
+            readiness = self.war_readiness_check(
+                target_tag, force=False if override_checks else force,
+                hard=not override_checks,
+                ack_co_belligerents=ack_co_belligerents,
+                confirm_escalation=bool(confirm_escalation),
+            )
+        except TypeError:
+            readiness = self.war_readiness_check(
+                target_tag, force=force,
+                hard=not override_checks,
+                ack_co_belligerents=bool(ack_co_belligerents),
+            )
         _diplo_summary = {
             "target_faction": readiness.get("target_faction"),
             "guaranteed_by": readiness.get("guaranteed_by") or [],
@@ -979,18 +986,36 @@ class DiplomacyWarMixin:
             "co_belligerent_borders": readiness.get("co_belligerent_borders") or [],
             "total_enemy_divisions_est": readiness.get("total_enemy_divisions_est"),
         }
+        _strat_req = readiness.get("strategic_escalation_required_ack") or []
+        _strat_blks = readiness.get("strategic_blockers") or []
         if not readiness["ready"] and not dry_run:
-            return {"ok": False, "blocked_by": "war_preflight",
+            _blk_code = (
+                "strategic_escalation_unconfirmed"
+                if (_strat_req and any("STRATEGIC ESCALATION GUARD" in str(x) for x in _strat_blks))
+                else "war_preflight"
+            )
+            return {"ok": False, "blocked_by": _blk_code,
                     "error": "; ".join(readiness["blockers"] or readiness["warnings"]),
                     "readiness": readiness,
+                    "tactical_blockers": readiness.get("tactical_blockers") or [],
+                    "strategic_blockers": _strat_blks,
+                    "strategic_escalation_required_ack": _strat_req,
                     **_diplo_summary,
-                    "hint": ("Check readiness.blockers: draw battle plan with "
-                             "hoi4_army_battleplans(enemy_tag=%s), verify casus belli, "
-                             "and guard borders of any co-belligerents (guarantors / "
-                             "faction allies) listed in co_belligerent_borders. "
-                             "ack_co_belligerents=true confirms undefended co-belligerent "
-                             "borders; override_checks=true bypasses hard gates."
-                             % str(target_tag).upper())}
+                    "hint": (
+                        "Strategic escalation detected (%s): override_checks=true only bypasses "
+                        "tactical gates (border/front-line) and will NOT auto-approve major guarantors "
+                        "or undefended major borders. Pass confirm_escalation=true or "
+                        "ack_co_belligerents=%s to explicitly accept this coalition."
+                        % (", ".join(_strat_req), _strat_req)
+                        if _blk_code == "strategic_escalation_unconfirmed" else
+                        "Check readiness.blockers: draw battle plan with "
+                        "hoi4_army_battleplans(enemy_tag=%s), verify casus belli, "
+                        "and guard borders of any co-belligerents (guarantors / "
+                        "faction allies) listed in co_belligerent_borders. "
+                        "override_checks=true bypasses tactical gates only; "
+                        "confirm_escalation=true (or ack_co_belligerents=[...]) confirms strategic escalation."
+                        % str(target_tag).upper()
+                    )}
         import diplomacy
         import combat
         import time as _t

@@ -447,7 +447,8 @@ class TurnLoop:
              stop_event=None, respect_red_dots=True, wake_on_battle=False,
              housekeep_interval_days=10, timeout_meta=None,
              autopilot=None, autopilot_interval_days=1,
-             fast_forward=False, fast_forward_speed=3):
+             fast_forward=False, fast_forward_speed=3,
+             ignore_red_dots=None):
         """Wait for a signal, for the date, or for max_days: whichever first.
 
         max_days       : in-game days. Even with "do not disturb me", it ALWAYS
@@ -543,7 +544,12 @@ class TurnLoop:
         if respect_red_dots:
             try:
                 import reddots as _rd
-                gate = _rd.check_unpause_gate(g, ensure_paused=True)
+                try:
+                    gate = _rd.check_unpause_gate(
+                        g, ensure_paused=True, ignore_red_dots=ignore_red_dots
+                    )
+                except TypeError:
+                    gate = _rd.check_unpause_gate(g, ensure_paused=True)
                 if gate:
                     gate["woke_because"] = [
                         "red_dot_gate: " + ", ".join(gate.get("blocking_codes") or [])
@@ -673,7 +679,12 @@ class TurnLoop:
                             try:
                                 import reddots as _rd
                                 if _rd.CONFIG.get("enabled", True):
-                                    _has_rd = bool(_rd.evaluate(g, fast=True).get("has_blocking"))
+                                    try:
+                                        _has_rd = bool(_rd.evaluate(
+                                            g, fast=True, ignore_codes=ignore_red_dots
+                                        ).get("has_blocking"))
+                                    except TypeError:
+                                        _has_rd = bool(_rd.evaluate(g, fast=True).get("has_blocking"))
                             except Exception:
                                 _has_rd = False
                         if not _has_rd:
@@ -768,7 +779,10 @@ class TurnLoop:
                 try:
                     import reddots as _rd
                     if _rd.CONFIG.get("enabled", True):
-                        _rd_ev = _rd.evaluate(g, fast=True)
+                        try:
+                            _rd_ev = _rd.evaluate(g, fast=True, ignore_codes=ignore_red_dots)
+                        except TypeError:
+                            _rd_ev = _rd.evaluate(g, fast=True)
                         _obs_acked_in_rd = any(
                             isinstance(x, dict) and x.get("code") == "OBSOLETE_LINE"
                             for x in (_rd_ev.get("acked") or ())

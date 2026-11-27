@@ -1213,19 +1213,29 @@ def validate_orders_group_ptr(p, og):
 
 
 def can_division_paradrop(p, div_ptr):
-    """纯只读 0 注入判定单个 CArmy* 师是否为伞兵师（`CArmy+0x138 -> CDivisionTemplate+0x5B5`）。
+    """纯只读 0 注入判定单个 CArmy* 师是否为伞兵师（`CArmy+0x138 -> CSubUnitDefinition+0x5B5`）。
 
-    经 PE 1.19.5.0 `0x10B3763` 反汇编与活进程 42 师（6 伞兵 / 36 非伞兵）100% 实证。
-    若指针缺少模板字段（如离线单测轻量 mock）则返回 None（未知，不误拦截）。
+    经 PE 1.19.5.0 `0x10B3771..0x10B377E` 反汇编、MSVC RTTI（`0x2807710 -> .?AVCSubUnitDefinition@@`）
+    及活进程全球 1070 师 100% 实证：
+      * `CArmy + 0x138` 为该师动态聚合的 `CSubUnitDefinition*`，其 `+0x5B5` 为引擎权威布尔值
+        `can_be_parachuted`（`1 -> True`，`0 -> False`）；
+      * `CArmy + 0x3B8` 为 `CReferencedDivisionTemplate*`（对象总长仅 `0x270`），不存在 `+0x5B5`，
+        绝不可从 `+0x3B8` 越界读取，也绝不可用模板名启发式覆盖引擎真值 `0`。
+    若指针缺少该字段或字节不在 `(0, 1)`（如轻量离线 mock）则返回 `None`。
     """
     try:
         d = int(div_ptr, 16) if isinstance(div_ptr, str) else int(div_ptr)
         if d <= 0:
             return False
-        tmpl = int(p.u64(d + CARMY_TEMPLATE) or 0)
-        if not (0x10000 < tmpl < 0x7F0000000000):
+        sub_def = int(p.u64(d + CARMY_TEMPLATE) or 0)
+        if not (0x10000 < sub_def < 0x7F0000000000):
             return None
-        return bool(p.u8(tmpl + DT_CAN_PARADROP))
+        v = int(p.u8(sub_def + DT_CAN_PARADROP))
+        if v == 1:
+            return True
+        if v == 0:
+            return False
+        return None
     except Exception:
         return None
 
@@ -1415,7 +1425,8 @@ def complete_plan(g, og, front, provinces, section=None, frm=0, to=FULL,
         section = p.i32(secs[0] + SEC_ID)
 
     # +0x30 必须存放真实的 8 字节 CArmy 句柄数组（若调用方未传，则读该集团军实有师列表）
-    raw_divs = divisions if divisions is not None else divisions_of(g, og)
+    explicit_divisions = divisions is not None
+    raw_divs = divisions if explicit_divisions else divisions_of(g, og)
     valid_divs, rejected = validate_division_ptrs(p, raw_divs)
     if not valid_divs:
         return False, _format_no_valid_divisions(rejected, "CompletePlan (+0x30)"), {
@@ -2878,6 +2889,14 @@ def paradrop_sources(g, tag=None):
                     tw["range_km"] = w.get("range_km")
                 if "paradrop_ready" in w:
                     tw["paradrop_ready"] = bool(w.get("paradrop_ready"))
+                if w.get("transferring"):
+                    tw["transferring"] = True
+                    if w.get("transfer_target_handle"):
+                        tw["transfer_target_handle"] = w.get("transfer_target_handle")
+                    if w.get("transferring_to_state") is not None:
+                        tw["transferring_to_state"] = w.get("transferring_to_state")
+                    if w.get("transferring_to_province") is not None:
+                        tw["transferring_to_province"] = w.get("transferring_to_province")
                 transport_wings.append(tw)
     except Exception:
         transport_wings = []
@@ -3267,7 +3286,8 @@ def paradrop(g, orders_group, source_province, target_province,
         }
 
     # 0-injection Guard 2: 校验师指针有效性（P1-3）
-    raw_divs = divisions if divisions is not None else divisions_of(g, og)
+    explicit_divisions = divisions is not None
+    raw_divs = divisions if explicit_divisions else divisions_of(g, og)
     valid_divs, rejected = validate_division_ptrs(p, raw_divs)
     if not valid_divs:
         stale = any(r.get("stale_pointer") for r in rejected)
@@ -3353,6 +3373,9 @@ def paradrop(g, orders_group, source_province, target_province,
         "source_state": (matched_src or {}).get("state_id"),
         "target_province": tgt_prov,
         "divisions_passed": len(valid_divs),
+        "divisions_to_assign": len(valid_divs),
+        "divisions_source": "explicit" if explicit_divisions else "army_all_paratroopers",
+        "division_ptrs_to_assign": [hex(int(d)) for d in valid_divs],
         "range_km": eff_range_km,
         "transport_tier": _transport_tier_name(eff_range_km),
         "source_transport_planes": src_t_planes,
@@ -3376,19 +3399,37 @@ def paradrop(g, orders_group, source_province, target_province,
     except Exception:
         pass
 
-    # 0-injection Guard 5: 起飞机场停驻运输机充足校验（P1-1 / P2-3）
+    # 0-injection Guard 5: 起飞机场停驻运输机充足校验（P1-1 / P2-3 / D-14）
     if src_meta.get("airbase_scan_ok") and src_avail_planes < MIN_PARADROP_PLANES:
         info["blocked_by"] = "insufficient_transports_at_source"
-        info["transport_wings"] = src_meta.get("transport_wings") or []
+        tw_all = src_meta.get("transport_wings") or []
+        info["transport_wings"] = tw_all
+        src_sid = (matched_src or {}).get("state_id")
+        in_transit_here = [
+            tw for tw in tw_all
+            if tw.get("transferring") and (
+                (src_sid is not None and tw.get("transferring_to_state") == src_sid)
+                or tw.get("transferring_to_province") == src_prov
+            )
+        ]
+        transit_msg = ""
+        if in_transit_here:
+            info["in_transit_to_source"] = in_transit_here
+            transit_desc = ", ".join(
+                "联队#%s(%d架, 从州%s飞往州%s)"
+                % (x.get("id"), int(x.get("planes") or 0), x.get("air_base_state"), x.get("transferring_to_state"))
+                for x in in_transit_here[:4]
+            )
+            transit_msg = " 检测到运输机正在向该机场转场途中：%s，请推进游戏时间待其落地后再建单。" % transit_desc
         ready_desc = ", ".join(
             "省%d(州%d, %d架)" % (x["province"], x["state_id"], x["available_paradrop_planes"])
             for x in (src_meta.get("ready_sources") or ())[:6]
         ) or "无（请先将至少 50 架空闲运输机转场到起飞机场）"
         return False, (
             "起飞机场省 %d 当前停驻空闲运输机仅 %d 架（总计 %d 架），不足引擎门槛 %d 架"
-            "（按机场空闲运输机总数计，不按师数倍乘）；命令未提交、0 时钟推进。"
+            "（按机场空闲运输机总数计，不按师数倍乘）；命令未提交、0 时钟推进。%s"
             "当前可直接起飞的机场：%s。"
-            % (src_prov, src_avail_planes, src_t_planes, MIN_PARADROP_PLANES, ready_desc)
+            % (src_prov, src_avail_planes, src_t_planes, MIN_PARADROP_PLANES, transit_msg, ready_desc)
         ), info
 
     # 0-injection Guard 6: 航程预检
@@ -3465,10 +3506,17 @@ def paradrop(g, orders_group, source_province, target_province,
                 info["target_can_execute"] = can_tgt
                 return bool(can_tgt), ("" if can_tgt else "COrderSetParadropTargetCommand::CanExecute refused"), info
             info["note"] = (
-                "dry_run=True：已通过全部 0 注入预检（伞兵师、陆地目标、起飞机场停驻空闲运输机 %d >= %d 架、"
-                "航程 %.1f <= %.0f km）及源命令 CanExecute。"
-                % (src_avail_planes, MIN_PARADROP_PLANES,
-                   float(_dkm or 0.0), float(eff_range_km))
+                "dry_run=True：已通过全部 0 注入预检（将指派 %d 个伞兵师 [来源=%s]、陆地目标、起飞机场停驻空闲运输机 %d >= %d 架、"
+                "航程 %.1f <= %.0f km）及源命令 CanExecute。%s"
+                % (
+                    len(valid_divs),
+                    info["divisions_source"],
+                    src_avail_planes,
+                    MIN_PARADROP_PLANES,
+                    float(_dkm or 0.0),
+                    float(eff_range_km),
+                    "" if explicit_divisions else "未传 divisions 时默认指派整军全部伞兵师；如需分投多个目标，请显式传 divisions=[...]。",
+                )
             )
             return True, "", info
 

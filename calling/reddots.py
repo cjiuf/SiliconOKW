@@ -59,6 +59,13 @@ STRICT_CODES = frozenset({
     "JUSTIFY_LOST",
 })
 
+# 不可通过 wait_and_brief(ignore_red_dots=[...]) 静默的高危/严控项（D-25 安全底线）
+NON_IGNORABLE_CODES = STRICT_CODES | frozenset({
+    "SUPPLY_CRISIS",
+    "FUEL_ZERO",
+    "PEACE_OPEN",
+})
+
 # 2026-11-23 (反糊弄升级 / 复测 8 防自锁校准):
 # 仅把 100% 确定可由工具 1 步清零的项放入 AUTO_SOLVABLE_CODES；
 # IDLE_DOCK 虽已修好修理船坞账本与 housekeep 自动分船坞，但存在 0 船线/全满单线上限等
@@ -188,7 +195,8 @@ def _load_persisted():
     if not os.path.isfile(STATE_PATH):
         return
     try:
-        raw = json.load(open(STATE_PATH, "r", encoding="utf-8"))
+        with open(STATE_PATH, "r", encoding="utf-8") as _fh_rd:
+            raw = json.load(_fh_rd)
         if not isinstance(raw, dict):
             return
         for k_str, st in (raw.get("states") or {}).items():
@@ -1079,6 +1087,17 @@ def _scan_raw(g, fast=False):
             and avg_eq_ratio < float(CONFIG["deficit_equip_ratio_max"])
             and zero_core
         ):
+            conv_bd = [
+                {
+                    "ptr": cv.get("ptr"),
+                    "template": cv.get("template"),
+                    "lines": cv.get("lines"),
+                    "progress": cv.get("progress"),
+                    "equipment_ratio": cv.get("equipment_ratio"),
+                    "stall_reason": cv.get("stall_reason"),
+                }
+                for cv in (convs or ())[:8]
+            ]
             items.append(_make_item(
                 "DEFICIT_OVER_TRAINING",
                 "装备库存吃紧（步枪 %.0f）仍开启 %d 条训练队列，会抽干前线补充"
@@ -1086,13 +1105,14 @@ def _scan_raw(g, fast=False):
                 {
                     "training_lines": total_train_lines,
                     "conveyors": len(convs),
+                    "conveyors_breakdown": conv_bd,
                     "rifles_stockpile": round(rifles_total, 1),
                     "avg_equipment_ratio": round(avg_eq_ratio, 3) if avg_eq_ratio is not None else None,
                     "scarce_core_types": zero_core,
                 },
                 [
-                    "调用 cancel_training(lines=<削减线数>) 缩减多余训练队列，或提高步枪/火炮军工配额",
-                    "如确需抢训应急部队，调用 ack_red_dot(code='DEFICIT_OVER_TRAINING', reason='...')",
+                    "调用 cancel_training(lines=<削减线数>) 缩减多余或卡死(0.0)的训练队列，或提高步枪/火炮军工配额",
+                    "如确需抢训应急部队，调用 ack_red_dot(code='DEFICIT_OVER_TRAINING', reason='...') 或在 wait_and_brief 传 ignore_red_dots=['DEFICIT_OVER_TRAINING']",
                 ],
                 severity="block",
                 tier=total_train_lines,
@@ -1412,8 +1432,27 @@ def _is_acked(item, acks, now_date_raw):
     return True
 
 
-def evaluate(g, fast=False):
-    """完整评估当前红点，按未签收阻塞项 / 已签收项 / 提醒项分类返回。"""
+def _split_ignore_codes(ignore_codes):
+    """将用户传入的 ignore_red_dots 分为 (allowed_ignored, rejected_unignorable)。"""
+    allowed, rejected = set(), set()
+    for raw in (ignore_codes or ()):
+        c = str(raw or "").strip().upper()
+        if not c:
+            continue
+        if c in NON_IGNORABLE_CODES:
+            rejected.add(c)
+        else:
+            allowed.add(c)
+    return allowed, rejected
+
+
+def evaluate(g, fast=False, ignore_codes=None):
+    """完整评估当前红点，按未签收阻塞项 / 已签收项 / 提醒项分类返回。
+
+    2026-11-27 (D-25): 支持可选 `ignore_codes` 在单次等待中精细静音非严控/非危机噪声项
+    （如 `IDLE_MIL` / `IDLE_DOCK` / `DEFICIT_OVER_TRAINING`），严控项与危机项不可忽略。
+    """
+    ign_allowed, ign_rejected = _split_ignore_codes(ignore_codes)
     with _LOCK:
         raw = _scan_raw(g, fast=fast)
         if not raw.get("ok"):
@@ -1482,7 +1521,7 @@ def evaluate(g, fast=False):
         else:
             last_def.clear()
 
-        blocking, acked, advisory = [], [], []
+        blocking, acked, advisory, ignored = [], [], [], []
         for it in raw["items"]:
             if it["severity"] == "advisory":
                 advisory.append(it)
@@ -1495,10 +1534,14 @@ def evaluate(g, fast=False):
                     "expire_date_raw": rec.get("expire_date_raw"),
                 }
                 acked.append(it_copy)
+            elif it["code"] in ign_allowed:
+                it_ign = dict(it)
+                it_ign["ignored_for_wait"] = True
+                ignored.append(it_ign)
             else:
                 blocking.append(it)
 
-        return {
+        out = {
             "ok": True,
             "tag": raw["tag"],
             "date": raw["date"],
@@ -1511,6 +1554,12 @@ def evaluate(g, fast=False):
             "advisory": advisory,
             "guard": guard_status(),
         }
+        if ignored:
+            out["ignored"] = ignored
+            out["ignored_codes"] = [x["code"] for x in ignored]
+        if ign_rejected:
+            out["unignorable_codes"] = sorted(ign_rejected)
+        return out
 
 
 def ack(g, code, reason, snooze_days=None, force=False, persist=True):
@@ -1709,7 +1758,7 @@ def ack_many(g, ack_list, persist=True):
     return {"ok": all_ok, "results": results}
 
 
-def check_unpause_gate(g, ack_red_dots=None, ensure_paused=True):
+def check_unpause_gate(g, ack_red_dots=None, ensure_paused=True, ignore_red_dots=None):
     """闸门 B：开表/推进时间前的硬拦截。无阻塞红点返回 None，否则返回阻塞 dict。"""
     if not CONFIG.get("enabled", True):
         return None
@@ -1722,14 +1771,15 @@ def check_unpause_gate(g, ack_red_dots=None, ensure_paused=True):
                 "error": "部分红点签收未通过（严控项需 force=True 且必须填写原因）",
                 "ack_results": ack_res["results"],
             }
-    ev = evaluate(g, fast=False)
+    ev = evaluate(g, fast=False, ignore_codes=ignore_red_dots)
     if not ev.get("has_blocking"):
         return None
     paused = _force_pause_safe(g) if ensure_paused else _is_paused_fast(g)
     blocking = ev["blocking"]
     codes = [x["code"] for x in blocking]
     housekeepable = [x["code"] for x in blocking if x.get("housekeepable")]
-    return {
+    ignorable_hits = [c for c in codes if c not in NON_IGNORABLE_CODES]
+    out = {
         "ok": False,
         "blocked_by": "red_dots",
         "paused": paused,
@@ -1745,6 +1795,15 @@ def check_unpause_gate(g, ack_red_dots=None, ensure_paused=True):
         "red_dots": blocking,
         "advisory": ev.get("advisory") or [],
     }
+    if ignorable_hits and not ignore_red_dots:
+        out["long_run_hint"] = (
+            "长跑期间如需仅屏蔽工业/训练类非严控红点而不关闭全局红点守护，可在 hoi4_wait_and_brief "
+            "传 ignore_red_dots=%s（或在 Standing Orders 开启 production.enabled=true 自动分配新厂）"
+            % ignorable_hits
+        )
+    if ev.get("unignorable_codes"):
+        out["unignorable_codes"] = ev["unignorable_codes"]
+    return out
 
 
 def format_briefing_section(ev):

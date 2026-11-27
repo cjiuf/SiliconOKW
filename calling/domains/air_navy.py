@@ -415,9 +415,18 @@ class AirNavyMixin:
                     }
         else:
             mask = int(mission or 0)
+        if mask < 0:
+            return {
+                "ok": False,
+                "blocked_by": "invalid_mission",
+                "error": "air mission mask must be >= 0, got %d" % mask,
+            }
 
         try:
-            picked = AW.select_wings(self, wings or "all")
+            try:
+                picked = AW.select_wings(self, wings or "all", tag=tag)
+            except TypeError:
+                picked = AW.select_wings(self, wings or "all")
         except Exception as e:
             return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
         if not picked:
@@ -426,59 +435,68 @@ class AirNavyMixin:
         handles = [h for _wid, h in picked]
         ids = [wid for wid, _h in picked]
         enable_bit = 1 if mask != 0 else 0
+        # 2026-11-27 (PE 1.19.5.0 0x19CD6AE..0x19CD70F / 0x19D2304 反汇编实证):
+        #   +0x44 (flag1) = 启用/切换指定任务位（mask>0 时校验 [CAirWing+0x30] & mask != 0）；
+        #   +0x45 (flag2) = clear_all 开关。当 mask==0 清空任务时必须传 flag1=0, flag2=1，
+        #   引擎 CanExecute 才会放行并走 0x10003F0 -> 0x100B860 正规清零并同步战区状态！
         f1 = enable_bit if flag1 is None else int(bool(flag1))
-        f2 = enable_bit if flag2 is None else int(bool(flag2))
+        f2 = 1 if flag2 is None else int(bool(flag2))
         cmd = AW.make_set_mission(self, handles, mask, f1, f2)
         can = AW.can_exec(self, cmd, AW.CANEXEC_SET_MISSION)
         if not can:
-            # 2026-11-26: 战时联队已挂任务（如运输机被自动挂 port_strike=64）时，
-            # 引擎对 SetMission(mask=0) 的 CanExecute 会直接拒绝，导致运输机联队
-            # 永远回不到 mission==0 的 paradrop_ready 状态（伞降被死死卡住）。
-            # mask==0 的语义只是「清掉任务、回到空闲」，等价于把两个字段写 0，
-            # 因此这里退回纯字段写（无引擎调用、可回读校验）。
-            if mask == 0:
-                import offsets_win as _OW
-                try:
-                    _tag = self._c(tag).tag
-                except Exception:
-                    _tag = tag
+            # 严禁绕过 CStratAirSetMissionCommand::CanExecute 直接写内存：
+            # CanExecute 拒绝通常表示该机型规则上不允许执行该任务（如 tac_bomber 不支持 air_superiority），
+            # 此处纯只读读取 [CAirWing+0x30] 合法任务掩码返回明确诊断。
+            incompatible = []
+            try:
+                _tag = self._c(tag).tag
+            except Exception:
+                _tag = tag
+            try:
                 cw = AW.country_wings(self, _tag) or {}
-                by_id = {int(w["id"]): w for w in (cw.get("wings") or [])
-                         if w.get("id") is not None}
-                written, errs = [], []
-                for wid in ids:
-                    row = by_id.get(int(wid))
-                    if not row or not row.get("ptr"):
-                        errs.append({"id": wid, "error": "wing ptr not found"})
-                        continue
-                    try:
-                        wptr = int(row["ptr"], 16)
-                        self.p.write(wptr + _OW.AIR_WING_MISSION, b"\x00\x00\x00\x00")
-                        self.p.write(wptr + _OW.AIR_WING_MISSION_ON, b"\x00\x00\x00\x00")
-                        written.append({
-                            "id": wid,
-                            "mission_after": int(self.p.u32(wptr + _OW.AIR_WING_MISSION)),
-                            "mission_on_after": int(self.p.u32(wptr + _OW.AIR_WING_MISSION_ON)),
-                        })
-                    except Exception as e:
-                        errs.append({"id": wid, "error": repr(e)})
-                ok_write = bool(written) and all(w["mission_after"] == 0 for w in written)
-                return {
-                    "ok": ok_write,
-                    "wings": ids,
-                    "mission": 0,
-                    "can_execute": False,
-                    "fallback": "direct_field_write",
-                    "written": written,
-                    "errors": errs,
-                    "error": "" if ok_write else "direct write did not clear the mission field",
+                by_id = {
+                    int(w["id"]): w for w in (cw.get("wings") or [])
+                    if w.get("id") is not None
                 }
+                for wid in ids:
+                    row = by_id.get(int(wid)) or {}
+                    wptr_s = row.get("ptr")
+                    if not wptr_s:
+                        continue
+                    wptr = int(wptr_s, 16)
+                    allowed_raw, allowed_names = AW.wing_allowed_missions(self.p, wptr)
+                    if allowed_raw is not None and mask > 0 and not (allowed_raw & mask):
+                        incompatible.append({
+                            "id": wid,
+                            "type": row.get("type"),
+                            "requested_mission": AW.mission_name(mask) or mask,
+                            "allowed_mask": hex(allowed_raw),
+                            "allowed_missions": allowed_names,
+                        })
+            except Exception:
+                incompatible = []
+            err_msg = "CStratAirSetMissionCommand::CanExecute refused"
+            if incompatible:
+                sample = incompatible[0]
+                err_msg = (
+                    "CStratAirSetMissionCommand::CanExecute refused: wing #%s (%s) cannot perform %r "
+                    "(allowed: %s)"
+                    % (
+                        sample["id"],
+                        sample.get("type") or "?",
+                        sample["requested_mission"],
+                        ", ".join(sample["allowed_missions"]) or sample["allowed_mask"],
+                    )
+                )
             return {
                 "ok": False,
+                "blocked_by": "mission_not_allowed" if incompatible else "can_execute_refused",
                 "wings": ids,
                 "mission": mask,
+                "mission_name": AW.mission_name(mask) or "none",
                 "can_execute": False,
-                "error": "CStratAirSetMissionCommand::CanExecute refused",
+                "incompatible_wings": incompatible,
+                "error": err_msg,
             }
         posted = AW.post(self, cmd)
         # 同步维护 +0xA4 持久化启用位：停飞时清 0，挂任务时置 1

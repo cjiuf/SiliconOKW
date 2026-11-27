@@ -52,6 +52,63 @@ class MilitaryLandMixin:
         t, i = struct.unpack("<ii", raw)
         return raw, t, i, (i << 32) | (t & 0xFFFFFFFF)
 
+    _SPECIAL_FORCES_SUBUNITS = frozenset({
+        "paratrooper", "mountaineers", "marine", "marine_commando",
+        "penal_battalion", "rangers", "camelry",
+    })
+    _SPECIAL_FORCES_NAME_HINTS = ("paratroop", "fallschirm", "gebirg", "mountain", "marine")
+
+    def _estimate_special_forces_cap(self, tag=None):
+        """纯只读估算本国特种部队营数占用与上限（0 注入，用于诊断 0.0 卡死训练带，D-23）。"""
+        try:
+            import divreserve as _dr_sf
+            co = self._c(tag)
+            p = self.p
+            tmpls = self.template_composition(co.tag) or []
+            by_ptr = {}
+            by_name = {}
+            for t in tmpls:
+                if not isinstance(t, dict):
+                    continue
+                line_map = t.get("line") or {}
+                tot_bat = sum(int(v or 0) for v in line_map.values())
+                sf_bat = sum(
+                    int(v or 0) for k, v in line_map.items()
+                    if str(k).lower() in self._SPECIAL_FORCES_SUBUNITS
+                )
+                rec = {
+                    "name": t.get("name"),
+                    "total_battalions": tot_bat,
+                    "sf_battalions": sf_bat,
+                    "is_special_forces": sf_bat > 0,
+                }
+                if t.get("ptr"):
+                    by_ptr[str(t["ptr"]).lower()] = rec
+                if t.get("name"):
+                    by_name[str(t["name"]).lower()] = rec
+            total_field_bat = 0
+            sf_field_bat = 0
+            for d_ptr in (_arr(p, co.ptr, CO_ARMIES) or ()):
+                try:
+                    ref_ptr = int(p.u64(int(d_ptr) + _dr_sf.CDIV_TEMPLATE) or 0)
+                except Exception:
+                    ref_ptr = 0
+                rec = by_ptr.get(hex(ref_ptr).lower()) if ref_ptr else None
+                if rec:
+                    total_field_bat += rec["total_battalions"]
+                    sf_field_bat += rec["sf_battalions"]
+            # HOI4 基础规则：特种部队营上限 = max(24, floor(总营数 * 5%))
+            est_cap = max(24, int(total_field_bat * 0.05))
+            return {
+                "total_field_battalions": total_field_bat,
+                "special_forces_battalions": sf_field_bat,
+                "estimated_cap": est_cap,
+                "at_or_over_cap": sf_field_bat >= est_cap,
+                "by_name": by_name,
+            }
+        except Exception:
+            return None
+
     def conveyors(self, tag=None):
         """Live division-training conveyors.
 
@@ -60,6 +117,13 @@ class MilitaryLandMixin:
         0 to 1 and the element's class resolves to CMilitaryDeploymentConveyor.
         (An `oi.instances()` scan cannot be used here — the index is a snapshot taken
         before the conveyor existed.)
+
+        2026-11-27 (D-22 / D-23 根治):
+          * 实证 PE 1.19.5.0 中 `conv+0x48` 为 `series`（0=无限循环，>0=剩余批次），
+            `CMilitaryDeployment+0x68` 为 `equipment_ratio`（fixed 1e5，如 83401 = 83.4%），
+            `+0xB0` 为已配人力；
+          * 补齐 `series`/`min_progress`/`equipment_ratio`/`stall_reason`，当特种部队训练带
+            （如 Paratroopers）装备已齐但卡在 `progress=0.0` 时自动识别特种兵上限锁死。
         """
         p = self.p
         c = self._c(tag)
@@ -73,6 +137,14 @@ class MilitaryLandMixin:
         dep = p.u64(c.ptr + dep_off)
         if not dep:
             return out
+        sf_info_cache = [False, None]  # [loaded, dict|None]
+
+        def _get_sf_info():
+            if not sf_info_cache[0]:
+                sf_info_cache[0] = True
+                sf_info_cache[1] = self._estimate_special_forces_cap(c.tag)
+            return sf_info_cache[1]
+
         for conv in _arr(p, dep, conv_off):
             try:
                 h_type, h_id = struct.unpack("<ii", p.read(conv + 0x08, 8))
@@ -82,14 +154,19 @@ class MilitaryLandMixin:
                    "packed_handle": (h_id << 32) | (h_type & 0xFFFFFFFF)}
             # CMilitaryDeploymentConveyor.  The field map is build-specific:
             #   Linux 1.19.4.1: +0x18 template  +0x48 lines  +0x70 line array  +0x88 priority
-            #   PE    1.19.5.0: +0x20 template  +0x50 priority  +0x78 line array
-            #                   +0x4C deploy province (int32)
-            # Verified 2026-11-15 by creating a conveyor and matching +0x20 against the
-            # template pointer hoi4_division_templates returns.
+            #   PE    1.19.5.0: +0x20 template  +0x48 series  +0x4C deploy province (int32)
+            #                   +0x50 priority  +0x78 line array
             try:
                 if sys.platform == "win32":
                     t_off, prio_off, arr_off = 0x20, 0x50, 0x78
                     row["deploy_province"] = p.i32(conv + 0x4C)
+                    try:
+                        _ser = int(p.i32(conv + 0x48))
+                        if 0 <= _ser <= 1000:
+                            row["series"] = _ser
+                            row["infinite"] = (_ser == 0)
+                    except Exception:
+                        pass
                 else:
                     t_off, prio_off, arr_off = 0x18, 0x88, 0x70
                 row["priority"] = p.i32(conv + prio_off)
@@ -101,12 +178,8 @@ class MilitaryLandMixin:
                 _arr_size = p.i32(conv + arr_off + O.PDXARRAY_SIZE)
                 row["lines"] = _arr_size
                 row["lines_capacity"] = _arr_cap
-                # 2026-11-21 (P2-5 / P2-4): the tool promised "deployment state and
-                # its lines" and returned a bare integer.  Walk the line array once
-                # and report each line's progress, the conveyor's deployment state,
-                # and whether it just started a NEW batch -- a progress drop from
-                # 0.991 to 0.008 is the next batch, not corruption.
                 _rows, _done, _best = [], 0, 0.0
+                _eq_vals = []
                 for _ln in _arr(p, conv, arr_off):
                     _md = p.u64(_ln + 0x30 if sys.platform == "win32" else _ln + 0x28)
                     if not _md or _md < 0x10000000000:
@@ -114,6 +187,21 @@ class MilitaryLandMixin:
                     _pr = p.u32(_md + 0x60) / 1e5
                     _lrow = {"line_ptr": hex(_ln), "progress": round(_pr, 3),
                              "done": _pr >= 0.999}
+                    if sys.platform == "win32":
+                        try:
+                            _eq_raw = int(p.i64(_md + 0x68))
+                            if 0 <= _eq_raw <= 105000:
+                                _eq_r = round(_eq_raw / 1e5, 3)
+                                _lrow["equipment_ratio"] = _eq_r
+                                _eq_vals.append(_eq_r)
+                        except Exception:
+                            pass
+                        try:
+                            _mp_v = int(p.i32(_md + 0xB0))
+                            if 0 <= _mp_v <= 100000:
+                                _lrow["manpower"] = _mp_v
+                        except Exception:
+                            pass
                     try:
                         _lt, _li = struct.unpack("<ii", p.read(_ln + 0x08, 8))
                         if _lt > 0 and _li >= 0:
@@ -128,11 +216,62 @@ class MilitaryLandMixin:
                 if len(_rows) != _arr_size:
                     row["lines_mismatch"] = {"array_size": _arr_size, "detail_count": len(_rows)}
                 row["progress"] = round(_best, 3)
+                row["min_progress"] = round(min(r["progress"] for r in _rows), 3) if _rows else 0.0
+                if _eq_vals:
+                    row["equipment_ratio"] = round(sum(_eq_vals) / len(_eq_vals), 3)
+                    row["min_equipment_ratio"] = round(min(_eq_vals), 3)
                 row["lines_done"] = _done
                 row["deployment_state"] = (
                     "no_location" if not row.get("deploy_province")
                     else "ready" if _rows and _done >= len(_rows)
                     else "training")
+                # D-23: 对 progress==0.0 的训练带做零注入根因诊断（无部署地 / 特种兵上限 / 缺装备）
+                if _rows and _best <= 0.001:
+                    if not row.get("deploy_province"):
+                        row["stall_reason"] = "no_deploy_location"
+                        row["stall_detail"] = "conveyor has no deployment province set"
+                    else:
+                        _tpl_l = str(row.get("template") or "").lower()
+                        _eq_avg = row.get("equipment_ratio")
+                        _sf_i = _get_sf_info()
+                        _tpl_sf = False
+                        if _sf_i and _tpl_l in (_sf_i.get("by_name") or {}):
+                            _tpl_sf = bool(_sf_i["by_name"][_tpl_l].get("is_special_forces"))
+                        elif any(h in _tpl_l for h in self._SPECIAL_FORCES_NAME_HINTS):
+                            _tpl_sf = True
+                        if _eq_avg is not None and _eq_avg < 0.90:
+                            row["stall_reason"] = "waiting_for_equipment"
+                            row["stall_detail"] = (
+                                "equipment fulfillment is %.1f%% (< 90%%); training cannot progress without equipment"
+                                % (_eq_avg * 100.0)
+                            )
+                        elif _tpl_sf and (_sf_i is None or _sf_i.get("at_or_over_cap")):
+                            row["stall_reason"] = "special_forces_cap_reached"
+                            if _sf_i:
+                                row["stall_detail"] = (
+                                    "template %r is special forces and field special-forces battalions (%d) "
+                                    "have reached/exceeded the estimated cap (%d of %d total field battalions); "
+                                    "cancel these lines with cancel_training(conveyor=%r, cancel_all=true) or grow regular army first"
+                                    % (
+                                        row.get("template"),
+                                        _sf_i["special_forces_battalions"],
+                                        _sf_i["estimated_cap"],
+                                        _sf_i["total_field_battalions"],
+                                        row["ptr"],
+                                    )
+                                )
+                            else:
+                                row["stall_detail"] = (
+                                    "template %r is special forces with 0.0 training progress; "
+                                    "likely blocked by special-forces battalion cap" % row.get("template")
+                                )
+                        else:
+                            row["stall_reason"] = "stalled_zero_progress"
+                            row["stall_detail"] = (
+                                "progress is 0.0 (equipment_ratio=%s, deploy_province=%s); "
+                                "check equipment stockpile, manpower, or special-forces cap"
+                                % (_eq_avg, row.get("deploy_province"))
+                            )
                 _prev = _CONV_PROGRESS.get((p.pid, conv))
                 if _prev is not None and _best + 0.01 < _prev and _best < 0.25:
                     row["new_batch"] = True
@@ -217,12 +356,15 @@ class MilitaryLandMixin:
         return 64
 
     def train_divisions(self, template_name=None, lines=2, state_id=None, tag=None,
-                        conveyor=None):
+                        conveyor=None, series=0):
         """Open a division-training conveyor and push its first line onto the map.
 
         If `conveyor` (hex pointer or packed handle of an existing conveyor from
         `hoi4_conveyors`) is given, adds `lines` parallel training lines to THAT
         existing conveyor instead of creating a brand-new conveyor (复测 5 §3.11).
+
+        `series`: number of sequential batches to train per line (0 = infinite loop,
+        1 = train a single batch then automatically close the conveyor; D-12).
 
         Three things killed the 1936 run here (2 conveyors x 5 lines, 17 months,
         0 divisions):
@@ -315,26 +457,32 @@ class MilitaryLandMixin:
                     errors.append("priority: %s" % (getattr(self, "_last_cmd_error", "") or "refused"))
             if "SetConveyorSeries" in _CMDS:
                 self._run_cmd(self.cmd.make("SetConveyorSeries",
-                                            conveyor_handle=ch, series=0))
+                                            conveyor_handle=ch, series=max(0, int(series or 0))))
             if int(lines) > 1:
                 self._run_cmd(self.cmd.make("AddConveyorLine",
                                             conveyor_handle=ch, count=int(lines) - 1))
         self._settle(0.4)
+        ser_val = max(0, int(series or 0))
         return {"ok": True, "template": pick.get("name"), "template_handle": [h_type, h_id],
                 "conveyor": conv["ptr"], "conveyor_handle": conv["handle"],
-                "lines": int(lines), "state_id": int(state_id),
+                "lines": int(lines), "series": ser_val, "infinite": ser_val == 0,
+                "series_note": (
+                    "series=0 trains indefinitely until cancelled; pass series=1 to stop automatically after 1 batch"
+                    if ser_val == 0 else "conveyor will train %d batch(es) then stop" % ser_val
+                ),
+                "state_id": int(state_id),
                 "deploy_province": int(prov),
                 "errors": errors,
                 "deploy_error": getattr(self, "_last_cmd_error", "")}
 
     def cancel_training(self, lines=None, conveyor=None, template=None,
                         cancel_all=False, tag=None, dry_run=False):
-        """缩减或取消训练传送带排线（P1-3 根治，解除 DEFICIT_OVER_TRAINING 死锁）。
+        """缩减或取消训练传送带排线（P1-3 / D-07 根治，解除 DEFICIT_OVER_TRAINING 死锁）。
 
-        2026-11-26 经 1.19.5.0 PE 反汇编实证：
-          * `CRemoveConveyorLineCommand` (vt 0x2AC08D0, ctor 0x1C2F020, size 0x30,
+        2026-11-27 经 1.19.5.0 PE ctor 反汇编 + MSVC RTTI 实证：
+          * `CRemoveConveyorLineCommand` (vt 0x2AC0850, ctor 0x1C2F020, size 0x30,
             CanExecute 0x1C31940, Execute 0x1C30D30) 接收单条训练线（type 63）的 handle；
-          * `CRemoveConveyorCommand` (vt 0x2AC0690, ctor 0x1C2EF50, size 0x30,
+          * `CRemoveConveyorCommand` (vt 0x2AC0610, ctor 0x1C2EF50, size 0x30,
             CanExecute 0x1C316E0, Execute 0x1C30CB0) 接收整条传送带（type 64）的 handle。
         优先从训练进度最低的排线开始削减，最大程度保留即将训完的部队；若某传送带全部
         排线都要取消（或 `cancel_all=True`），直接整条删除传送带。
@@ -524,23 +672,18 @@ class MilitaryLandMixin:
             "error": (None if removed_actual > 0 else "no training lines were removed"),
         }
 
-    def deploy_ready_conveyors(self, tag=None, min_progress=0.0):
+    def deploy_ready_conveyors(self, tag=None, min_progress=0.995, require_all_lines=True):
         """Push a conveyor's divisions onto the map (the in-game deploy button).
 
-        2026-11-18: this used to report `deployed: <how many conveyors it poked>`,
-        which is NOT a division count. Live test: 3 conveyors of 6 lines each with
-        min_progress=0.3 returned `deployed: 3` while the division count went
-        30 -> 45. It also deploys the WHOLE conveyor (every line), not "the
-        finished division" the old docstring claimed. Both are now reported as
-        they are: `deployed` is the real DIVISION delta, `lines` says how many
-        divisions each conveyor pushed, and `conveyors_deployed` keeps the old
-        meaning under a name that cannot be mistaken for divisions.
+        2026-11-27 (D-11 / D-22 / D-23):
+          * 默认进度门槛为 `min_progress=0.995`（仅部署已满训的传送带）；
+          * 当 `require_all_lines=True`（默认）且 `min_progress >= 0.95` 时，校验该带最慢的线
+            （`min_progress`）也达标，防止 `DeployConveyor` 把同带未满训的线一起强推出去；
+          * `attempts` 透出每条传送带的 `template`、`lines`、`series`、`min_progress`、
+            `max_progress`、`equipment_ratio`、`stall_reason`、`new_batch`（上一批自动部署后
+            新批次从 0 起的清晰标注）。
         """
         def _divs():
-            # 2026-11-21 (P2-3): this used to read CCountry+0x290 by hand, and the
-            # 2026-11-20 playtest got divisions_before: 35 here against
-            # divisions_count: 30 from hoi4_army_status in the same minute.  Use
-            # the SAME verified reader army_status uses, so they cannot disagree.
             try:
                 return int(self.divisions(tag, limit=1)["count"])
             except Exception:
@@ -548,33 +691,77 @@ class MilitaryLandMixin:
         before = _divs()
         deployed, attempts = 0, []
         for conv in self.conveyors(tag):
-            prog = None
-            if min_progress > 0:
+            prog_max = conv.get("progress")
+            prog_min = conv.get("min_progress")
+            if prog_max is None:
                 try:
-                    _, prog = self._conveyor_progress(conv)
+                    _, prog_max = self._conveyor_progress(conv)
                 except Exception:
-                    prog = None
-                if prog is None or prog < min_progress:
-                    attempts.append({"conveyor": conv["ptr"], "skipped": True,
-                                     "progress": prog, "need": min_progress})
+                    prog_max = None
+            if prog_min is None:
+                prog_min = prog_max
+            base_meta = {
+                "conveyor": conv["ptr"],
+                "template": conv.get("template"),
+                "lines": conv.get("lines"),
+                "series": conv.get("series"),
+                "progress": prog_max,
+                "min_progress": prog_min,
+            }
+            if conv.get("equipment_ratio") is not None:
+                base_meta["equipment_ratio"] = conv.get("equipment_ratio")
+            if conv.get("stall_reason"):
+                base_meta["stall_reason"] = conv.get("stall_reason")
+                if conv.get("stall_detail"):
+                    base_meta["stall_detail"] = conv.get("stall_detail")
+            if conv.get("new_batch"):
+                base_meta["new_batch"] = True
+                base_meta["previous_progress"] = conv.get("previous_progress")
+
+            if min_progress > 0:
+                check_val = (
+                    prog_min
+                    if (require_all_lines and min_progress >= 0.95 and prog_min is not None)
+                    else prog_max
+                )
+                if check_val is None or check_val < min_progress:
+                    sk = dict(base_meta, skipped=True, need=min_progress)
+                    if (prog_max is not None and prog_min is not None
+                            and prog_max >= min_progress > prog_min):
+                        sk["partial_lines_ready"] = True
+                        sk["skip_reason"] = (
+                            "DeployConveyor pushes ALL lines in the conveyor; slowest line is %.3f < %.3f "
+                            "(fastest line %.3f). Wait for all lines or pass require_all_lines=false."
+                            % (prog_min, min_progress, prog_max)
+                        )
+                    attempts.append(sk)
                     continue
             with self:
                 rv = self._run_cmd(self.cmd.make("DeployConveyor",
                                                  conveyor_handle=conv["packed_handle"]))
-            attempts.append({"conveyor": conv["ptr"], "lines": conv.get("lines"),
-                             "run": bool(rv & 0xFF),
-                             "error": getattr(self, "_last_cmd_error", "")})
+            attempts.append(dict(
+                base_meta,
+                run=bool(rv & 0xFF),
+                error=getattr(self, "_last_cmd_error", ""),
+            ))
             if rv & 0xFF:
                 deployed += 1
         if deployed:
             self._settle(0.5)
         after = _divs()
         delta = (after - before) if (before is not None and after is not None) else None
+        skipped_n = sum(1 for x in attempts if x.get("skipped"))
         out = {"conveyors": len(attempts), "conveyors_deployed": deployed,
+               "skipped_below_threshold": skipped_n,
+               "min_progress_used": float(min_progress),
+               "require_all_lines": bool(require_all_lines),
                "deployed": delta, "divisions_before": before, "divisions_after": after,
                "attempts": attempts,
                "note": ("DeployConveyor pushes the WHOLE conveyor (all of its lines), "
-                        "not a single finished division; use min_progress to gate it")}
+                        "not a single finished division; default min_progress=0.995 with "
+                        "require_all_lines=true only deploys fully finished batches. "
+                        "Note: series=0 (infinite) or series>1 conveyors automatically start the "
+                        "next batch near progress=0.0 immediately after a finished batch deploys.")}
         if deployed and delta is not None and delta <= 0:
             out["warning"] = ("the command was accepted but no division appeared -- the "
                               "conveyor may still be waiting for equipment")
@@ -951,24 +1138,93 @@ class MilitaryLandMixin:
                            % (before, after))
         return res
 
+    def _resolve_orders_group(self, orders_group, tag=None):
+        """将集团军指针（int / '0x...' / 十进制）或集团军名称（如 '第1集团军'）解析为 COrdersGroup* 整型地址。
+
+        2026-11-27 (D-02 根治): 返回 `(og_int, err_msg, candidates)`；解析失败时返回 `(0, err, cands)`。
+        """
+        if orders_group is None:
+            return 0, "orders_group is required", []
+        if isinstance(orders_group, int) and not isinstance(orders_group, bool):
+            return (int(orders_group), "", []) if orders_group > 0 else (0, "orders_group must be > 0", [])
+        s = str(orders_group).strip()
+        if not s:
+            return 0, "orders_group is required", []
+        # 1. 优先识别 0x... 十六进制或纯十进制指针
+        if s.lower().startswith("0x"):
+            try:
+                v = int(s, 16)
+                return (v, "", []) if v > 0 else (0, "invalid orders_group pointer %r" % s, [])
+            except ValueError:
+                pass
+        elif s.isdigit():
+            v = int(s, 10)
+            if v > 0x10000:
+                return v, "", []
+        # 2. 按集团军名称（含中文名如 "第1集团军"）在 order_groups 中解析
+        rows = []
+        try:
+            og_res = self.order_groups(tag)
+            if isinstance(og_res, dict):
+                rows = list(og_res.get("groups") or og_res.get("order_groups") or [])
+            elif isinstance(og_res, list):
+                rows = list(og_res)
+        except Exception:
+            rows = []
+        avail = [
+            {"ptr": r.get("ptr"), "name": r.get("name"), "divisions": r.get("divisions"),
+             "is_army_group": bool(r.get("is_army_group"))}
+            for r in rows if isinstance(r, dict) and r.get("ptr")
+        ]
+        exact = [r for r in avail if (r.get("name") or "").strip() == s]
+        if not exact:
+            sl = s.lower()
+            exact = [r for r in avail if (r.get("name") or "").strip().lower() == sl]
+        if not exact:
+            sl = s.lower()
+            exact = [r for r in avail if sl in (r.get("name") or "").strip().lower()]
+        # 优先普通集团军（非集团军群）避免名称重名歧义
+        if len(exact) > 1:
+            armies_only = [r for r in exact if not r.get("is_army_group")]
+            if len(armies_only) == 1:
+                exact = armies_only
+        if len(exact) == 1:
+            return int(str(exact[0]["ptr"]), 16), "", avail
+        if len(exact) > 1:
+            return (
+                0,
+                "ambiguous orders_group name %r matched %d groups; pass explicit hex ptr from candidates"
+                % (s, len(exact)),
+                exact,
+            )
+        return (
+            0,
+            "no orders_group matched %r (pass a hex ptr or army name from inspect topic='armies')" % s,
+            avail,
+        )
+
     def add_divisions_to_army(self, orders_group, divisions=None, count=None,
                               from_army=None, order_id=None, tag=None,
                               move_to_province=None, spread=True,
                               max_per_province=None):
         """将未编组师或指定源集团军的师并入已存在的集团军（不建新军）。
 
-        2026-11-23 (C-3 & 复测 11 P2-1):
-          1. `divisions` 与 `from_army` 均省略：把当前未编组师（自动避开伞兵）并入 `orders_group`
+        2026-11-23 (C-3 & 复测 11 P2-1 & 2026-11-27 D-02):
+          1. `orders_group` 与 `from_army` 同时支持十六进制指针（如 `"0x..."`）与集团军名称（如 `"第1集团军"`）；
+          2. `divisions` 与 `from_army` 均省略：把当前未编组师（自动避开伞兵）并入 `orders_group`
              （未指定 `count` 时自动补足至 24 师上限，或全部未编组师）；
-          2. 指定 `from_army`：把源集团军的师全部（或前 `count` 个）并入目标军（合并散军）；
-          3. 指定 `divisions=[ptr, ...]`：精确并入指定师列表；
-          4. 默认仅改归属不改物理位置（返回 `positions_moved: False`）；若同时传入
+          3. 指定 `from_army`：把源集团军的师全部（或前 `count` 个）并入目标军（合并散军）；
+          4. 指定 `divisions=[ptr, ...]`：精确并入指定师列表；
+          5. 默认仅改归属不改物理位置（返回 `positions_moved: False`）；若同时传入
              `move_to_province=<province_id>`，并军成功后自动调用 `move_divisions(..., spread=spread)`
              把转入的师一步调离原省份（避免继续吃前线补给）。
         """
-        og = int(orders_group, 16) if isinstance(orders_group, str) else int(orders_group or 0)
+        og, og_err, og_cands = self._resolve_orders_group(orders_group, tag=tag)
         if not og:
-            return {"ok": False, "error": "orders_group is required"}
+            out_err = {"ok": False, "blocked_by": "invalid_orders_group", "error": og_err or "orders_group is required"}
+            if og_cands:
+                out_err["available_order_groups"] = og_cands[:20]
+            return out_err
         if sys.platform != "win32":
             return {"ok": False, "error": "add_divisions_to_army is currently implemented on Windows PE 1.19.5.0"}
         import armyops_win as _aw
@@ -977,7 +1233,12 @@ class MilitaryLandMixin:
         if divisions is not None:
             divs = [int(x, 16) if isinstance(x, str) else int(x) for x in divisions]
         elif from_army is not None:
-            src_og = int(from_army, 16) if isinstance(from_army, str) else int(from_army)
+            src_og, src_err, src_cands = self._resolve_orders_group(from_army, tag=tag)
+            if not src_og:
+                out_err = {"ok": False, "blocked_by": "invalid_from_army", "error": src_err or "invalid from_army"}
+                if src_cands:
+                    out_err["available_order_groups"] = src_cands[:20]
+                return out_err
             if src_og == og:
                 return {"ok": False, "error": "from_army and orders_group are the same army"}
             divs = list(_aw.divisions_of(self, src_og))

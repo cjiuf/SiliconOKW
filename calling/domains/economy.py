@@ -353,7 +353,8 @@ class EconomyMixin:
             "naval_idle": max(0, raw_dock - nav_used_sum),
         }
 
-    def set_production_amount(self, line_index: int, amount: int, tag=None, auto_reclaim: bool = True):
+    def set_production_amount(self, line_index=None, amount: int = 0, tag=None,
+                              auto_reclaim: bool = True, equipment=None):
         """Set how many FACTORIES a production line gets (the +/- buttons in the UI).
 
         NOTE. This used to silently do nothing: there is no command called
@@ -367,13 +368,96 @@ class EconomyMixin:
         2026-11-23 (复测 7 B-10): 当陆/空军工产线（type 56）需要加厂但空闲军工不足，且
         `auto_reclaim=True`（默认）时，自动从库存严重超储（`equipmeta.compute_surplus_lines`）
         的产线安全抽调缺口厂数（每条源线至少保留 1 厂），再补给目标线，返回 `reclaimed_from`。
+
+        2026-11-27 (D-01 根治):
+          * 支持直接传装备名定位（`equipment="transport_plane_equipment_1"` 或
+            `line_index="transport_plane_equipment_1"`），彻底免疫产线增删导致的行号偏移；
+          * 同时传整数 `line_index` 与 `equipment` 时执行防错行校验：若该行实际装备不符，
+            直接拒绝并返回 `blocked_by="production_line_mismatch"` 及当前真实行号表，杜绝误砍步枪线。
         """
         p = self.p
         c = self._c(tag)
         prod = p.u64(c.ptr + CO_PRODUCTION)
         lines = _arr(p, prod, PS_MIL_LINES)
-        if not (0 <= line_index < len(lines)):
-            return {"ok": False, "error": "no such line: %d (of %d)" % (line_index, len(lines))}
+
+        def _line_eq_name(ln_ptr):
+            try:
+                self._load_equipment()
+                return self._eq_by_id.get(p.i32(p.u64(ln_ptr + ML_VARIANT) + EV_TYPE_ID))
+            except Exception:
+                return None
+
+        def _lines_table():
+            tbl = []
+            for idx_i, ln_i in enumerate(lines):
+                try:
+                    eq_i = _line_eq_name(ln_i)
+                    fac_i = int(p.i32(ln_i + ML_FACTORIES))
+                except Exception:
+                    eq_i, fac_i = None, None
+                tbl.append({"line": idx_i, "equipment": eq_i, "factories": fac_i})
+            return tbl
+
+        want_eq = str(equipment).strip() if equipment is not None and str(equipment).strip() else None
+        resolved_idx = None
+        if isinstance(line_index, str):
+            s_li = line_index.strip()
+            if s_li.isdigit():
+                resolved_idx = int(s_li)
+            elif s_li:
+                want_eq = want_eq or s_li
+        elif line_index is not None:
+            resolved_idx = int(line_index)
+
+        if resolved_idx is None:
+            if not want_eq:
+                return {"ok": False, "blocked_by": "missing_production_line",
+                        "error": "set_production_amount requires line_index or equipment"}
+            tbl = _lines_table()
+            wl = want_eq.lower()
+            exact = [r for r in tbl if r["equipment"] and r["equipment"].lower() == wl]
+            partial = exact or [r for r in tbl if r["equipment"] and wl in r["equipment"].lower()]
+            if not partial:
+                return {
+                    "ok": False,
+                    "blocked_by": "no_matching_production_line",
+                    "requested_equipment": want_eq,
+                    "error": "no production line matches equipment %r" % want_eq,
+                    "lines": tbl,
+                }
+            # 优先匹配当前已有工厂的线，其次取第一条匹配线
+            partial.sort(key=lambda r: (-(int(r["factories"] or 0) > 0), r["line"]))
+            resolved_idx = int(partial[0]["line"])
+        else:
+            if not (0 <= resolved_idx < len(lines)):
+                return {
+                    "ok": False,
+                    "blocked_by": "invalid_line_index",
+                    "error": "no such line: %d (of %d)" % (resolved_idx, len(lines)),
+                    "lines": _lines_table(),
+                }
+            if want_eq:
+                actual_eq = _line_eq_name(lines[resolved_idx])
+                if actual_eq and want_eq.lower() not in actual_eq.lower() and actual_eq.lower() != want_eq.lower():
+                    tbl = _lines_table()
+                    wl = want_eq.lower()
+                    matches = [r for r in tbl if r["equipment"] and (r["equipment"].lower() == wl or wl in r["equipment"].lower())]
+                    return {
+                        "ok": False,
+                        "blocked_by": "production_line_mismatch",
+                        "line": resolved_idx,
+                        "actual_equipment": actual_eq,
+                        "expected_equipment": want_eq,
+                        "matching_lines": matches,
+                        "lines": tbl,
+                        "error": (
+                            "line %d currently produces %r, not %r (index likely shifted after create/remove line). "
+                            "Use equipment=%r or one of matching_lines=%s."
+                            % (resolved_idx, actual_eq, want_eq, want_eq, matches)
+                        ),
+                    }
+
+        line_index = resolved_idx
         line = lines[line_index]
         before = p.i32(line + ML_FACTORIES)
         # 2026-11-23 (复测 8 B-11/B-12): 反汇编证实 CAddProductionLineFactoriesCommand 修改的是
@@ -503,7 +587,20 @@ class EconomyMixin:
                         hit_line_cap = True
                     break
                 if step > 0 and nxt_assigned == cur_assigned:
-                    break          # requested 已涨但实际分配没涨 -> 已无可用空闲工厂，立即停手防叠灰格
+                    # 2026-11-27 (D-28 根治): 当 requested (+0xE8) 已增加但 assigned (+0x18) 尚未
+                    # 刷新时，短轮询最多 3 次等待 UpdateFactories 把刚腾出的空闲工厂结算到位，
+                    # 避免同计划刚缩减步枪线后紧接加厂被提前误判为缺工厂。
+                    if has_req_field and nxt_req > nxt_assigned:
+                        for _wait_i in range(3):
+                            self._settle(0.20)
+                            _re_a = p.i32(line + ML_FACTORIES)
+                            if _re_a > nxt_assigned:
+                                nxt_assigned = _re_a
+                                tray[-1] = nxt_assigned
+                                if nxt_assigned >= int(amount) or nxt_assigned >= nxt_req:
+                                    break
+                    if nxt_assigned == cur_assigned:
+                        break          # requested 已涨但实际分配仍未涨 -> 已无可用空闲工厂，立即停手防叠灰格
                 cur_assigned = nxt_assigned
                 cur_req = nxt_req
 
@@ -765,7 +862,8 @@ class EconomyMixin:
             out["error"] = "the game did not switch the line (CanExecute refused or the handle was wrong)"
         return out
 
-    def create_production_line(self, equipment: str, tag=None, dry_run=False):
+    def create_production_line(self, equipment: str, tag=None, dry_run=False,
+                               move_to_front: bool = False):
         """Create a brand-new production line for an equipment variant.
 
         This used to be a coin flip: the command's two handle slots were never
@@ -782,6 +880,9 @@ class EconomyMixin:
         very CProductionStatus this module already reads -- and calls
         0x140ED0FF0(prod, variant) to find-or-create the line, then
         0x140ED6100(prod, line, 0) to move it to the top when +0x3C is set).
+
+        2026-11-27 (D-01 根治): 默认 `move_to_front=False`，不再强制把新线插到 index 0
+        导致既有产线行号整体 +1 漂移；同时在返回体回显最新行号映射并提示按 `equipment` 调厂。
         """
         import cmdwin
         p = self.p
@@ -809,7 +910,9 @@ class EconomyMixin:
                                  "change its factory count instead"
                                  % (equipment, i)}
         packed = (vh["id"] << 32) | (vh["type"] & 0xFFFFFFFF)
+        want_front = 1 if move_to_front else 0
         out = {"before": before, "requested": equipment, "dry_run": bool(dry_run),
+               "move_to_front": bool(move_to_front),
                "variant_handle": [vh["type"], vh["id"]], "tag_id": int(c.tag_id)}
         if dry_run:
             out.update(ok=True)
@@ -818,14 +921,11 @@ class EconomyMixin:
                                    {"tag": int(c.tag_id),
                                     "variant_handle": packed,
                                     "mio_handle": 0,
-                                    "move_to_front": 1})
+                                    "move_to_front": want_front})
         out["cmd"] = hex(cmd)
-        # The "move to the top" bool is the one ctor argument that travels on the
-        # stack.  Read it back instead of trusting the call: if a future ARGSPEC
-        # drift drops it again, the line would just quietly land at the bottom.
         out["flag_0x3c"] = p.u8(cmd + 0x3C)
-        if out["flag_0x3c"] != 1:
-            p.write(cmd + 0x3C, b"\x01")
+        if out["flag_0x3c"] != want_front:
+            p.write(cmd + 0x3C, bytes([want_front]))
             out["flag_forced"] = True
             out["flag_0x3c"] = p.u8(cmd + 0x3C)
         can = self.call(p.base + self.PE_ADD_LINE_CANEXE, (cmd,),
@@ -869,17 +969,52 @@ class EconomyMixin:
             return out
         line = new[0]
         name = self._eq_by_id.get(p.i32(p.u64(line + ML_VARIANT) + EV_TYPE_ID))
+        fac_now = p.i32(line + ML_FACTORIES)
+        req_now = fac_now
+        if sys.platform == "win32":
+            try:
+                _rn = int(p.i32(line + 0xE8))
+                if 0 <= _rn <= 200:
+                    req_now = _rn
+            except Exception:
+                req_now = fac_now
+            # D-28: 新建产线默认 requested_factories(+0xE8)=1，若有空闲工厂但 UpdateFactories
+            # 尚未完成结算，短暂等待最多 2 次以便回执中的 factories 与引擎状态一致。
+            if req_now > fac_now:
+                for _w_new in range(2):
+                    self._settle(0.18)
+                    _fn2 = p.i32(line + ML_FACTORIES)
+                    if _fn2 != fac_now:
+                        fac_now = _fn2
+                        break
         out.update(ok=name == equipment, equipment=name,
                    line_index=after_lines.index(line),
-                   factories=p.i32(line + ML_FACTORIES),
-                   units=p.i32(line + ML_FACTORIES))
+                   factories=fac_now,
+                   requested_factories=req_now,
+                   units=fac_now)
+        if req_now > fac_now:
+            out["pending_factories"] = req_now - fac_now
+            out["pending_factories_note"] = (
+                "new line defaults to requested_factories=%d (currently assigned %d); "
+                "it will automatically claim %d factory as soon as military factories are freed"
+                % (req_now, fac_now, req_now - fac_now)
+            )
         if not out["ok"]:
             out["error"] = ("a line appeared but it is for %s, not %s"
                             % (name, equipment))
         else:
+            out["index_shifted"] = bool(out["line_index"] == 0 and before > 0)
+            out["hint"] = (
+                "set_production supports equipment=%r (or line=%d + equipment=%r guard) "
+                "to stay immune to line-index shifts" % (name, out["line_index"], name)
+            )
             # 2026-11-22 (复测 5 §8.4 时刻 ②): 若新开的装备本身已有更新的已解锁型号，立刻提醒
             try:
                 _pls = self.production_lines(c.tag, include_obsolete=True)
+                out["lines_snapshot"] = [
+                    {"line": r.get("index", idx_r), "equipment": r.get("equipment"), "factories": r.get("factories")}
+                    for idx_r, r in enumerate(_pls or ())
+                ]
                 _li = out.get("line_index")
                 if isinstance(_li, int) and 0 <= _li < len(_pls) and _pls[_li].get("obsolete"):
                     _row = _pls[_li]

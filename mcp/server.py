@@ -141,7 +141,7 @@ def verified(result, probe, label=""):
 
 # ----------------------------------------------------------------- MCP loop
 def rpc_result(i, r): return {"jsonrpc": "2.0", "id": i, "result": r}
-def rpc_error(i, c, m): return {"jsonrpc": "2.0", "id": i, "error": {"code": c, "message": m}}
+def rpc_error(i, c, m): return {"jsonrpc": "2.0", "id": i, "error": {"code": int(c), "message": str(m)}}
 
 
 # ---------------------------------------------------------------- watchdog

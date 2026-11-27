@@ -25,25 +25,88 @@ from ._shared import (
 class PoliticsMixin:
     """内政决议、政治理念/法案、推荐理念及顾问聘用领域 Mixin。"""
 
+    # (need_ws, need_war, strict_gt, non_autocratic_needs_war)
+    # 2026-11-27 (D-24 根治): 对齐 HOI4 1.19.5 common/ideas/_economic.txt 与 _manpower.txt
+    # 真实脚本：war_economy 等使用严格大于 `has_war_support > 0.5`（0.500 不通过，必须 > 0.50），
+    # 且非 fascism/communism 国家还需 has_war = yes。解析逻辑兼容旧 2 元组子类 mock。
     _LAW_GATE = {
-        "free_trade": (0.0, False),
-        "export_focus": (0.0, False),
-        "limited_exports": (0.0, False),
-        "civilian_economy": (0.0, False),
-        "low_economic_mobilisation": (0.15, False),
-        "partial_economic_mobilisation": (0.25, False),
-        "war_economy": (0.50, False),
-        "extensive_conscription": (0.20, False),
-        "autarkic_economy": (0.50, False),
-        "service_by_requirement": (0.60, True),
-        "closed_economy": (0.0, True),
-        "tot_economic_mobilisation": (0.80, True),
-        "totaler_krieg_economy": (0.80, True),
-        "all_adults_serve": (0.70, True),
-        "all_men_serve": (0.80, True),
-        "scraping_the_barrel": (0.85, True),
-        "total_mobilization": (0.80, True),
+        "free_trade": (0.0, False, False, False),
+        "export_focus": (0.0, False, False, False),
+        "limited_exports": (0.0, False, False, False),
+        "civilian_economy": (0.0, False, False, False),
+        "low_economic_mobilisation": (0.15, False, True, False),
+        "partial_economic_mobilisation": (0.25, False, True, False),
+        "war_economy": (0.50, False, True, True),
+        "extensive_conscription": (0.20, False, False, False),
+        "autarkic_economy": (0.50, False, True, False),
+        "service_by_requirement": (0.60, True, False, False),
+        "closed_economy": (0.0, True, False, False),
+        "tot_economic_mobilisation": (0.80, True, True, False),
+        "totaler_krieg_economy": (0.80, False, True, False),
+        "all_adults_serve": (0.70, True, True, False),
+        "all_men_serve": (0.80, True, True, False),
+        "scraping_the_barrel": (0.85, True, True, False),
+        "total_mobilization": (0.80, True, True, False),
     }
+
+    @staticmethod
+    def _unpack_law_gate(gate):
+        """兼容 2/3/4 元组 _LAW_GATE，返回 (need_ws, need_war, strict_gt, non_auto_war)。"""
+        n = len(gate)
+        need_ws = float(gate[0])
+        need_war = bool(gate[1])
+        strict_gt = bool(gate[2]) if n >= 3 else False
+        non_auto_war = bool(gate[3]) if n >= 4 else False
+        return need_ws, need_war, strict_gt, non_auto_war
+
+    @staticmethod
+    def _law_available_snippet(key):
+        """纯只读从 common/ideas/*.txt 提取指定法案的 available = { ... } 摘要（D-24）。"""
+        import glob as _glob
+        import os as _os
+        try:
+            import config as _cfg
+            gdir = _cfg.game_dir(required=False)
+        except Exception:
+            gdir = None
+        if not gdir or not key:
+            return None
+        pat = re.compile(r"\b" + re.escape(str(key)) + r"\s*=\s*\{")
+        for path in sorted(_glob.glob(_os.path.join(gdir, "common", "ideas", "*.txt"))):
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    txt = fh.read()
+            except OSError:
+                continue
+            m = pat.search(txt)
+            if not m:
+                continue
+            i, d = m.end(), 1
+            n = len(txt)
+            while d and i < n:
+                ch = txt[i]
+                if ch == "{":
+                    d += 1
+                elif ch == "}":
+                    d -= 1
+                i += 1
+            body = txt[m.end():i - 1]
+            ma = re.search(r"\bavailable\s*=\s*\{", body)
+            if not ma:
+                return None
+            j, da = ma.end(), 1
+            nb = len(body)
+            while da and j < nb:
+                ch = body[j]
+                if ch == "{":
+                    da += 1
+                elif ch == "}":
+                    da -= 1
+                j += 1
+            raw = re.sub(r"#[^\n]*", "", body[ma.end():j - 1])
+            clean = " ".join(raw.split())
+            return clean[:240] if clean else None
+        return None
 
     # Law hierarchy. `recommended_ideas` used to advertise ANY law of the same
     # category that was not active -- including civilian_economy while the country
@@ -435,8 +498,11 @@ class PoliticsMixin:
             is_law = bool(meta.get("is_law") or k in self._LAW_GATE)
             cost = int(meta.get("cost")) if meta.get("cost") is not None else (150 if is_law else 150)
             gate_reason = (
-                self._idea_block_reason(k, c, my_tag, summary=_sum_cache, at_war=_at_war_cache)
-                if is_law else None
+                self._idea_block_reason(
+                    k, c, my_tag, summary=_sum_cache, at_war=_at_war_cache,
+                    ideology=pol.get("ruling_ideology"),
+                )
+                if (is_law and k not in active_set) else None
             )
             rows.append({
                 "key": k,
@@ -519,6 +585,11 @@ class PoliticsMixin:
             "returned": len(items_out),
             "limit": lim,
             "truncated": len(rows) > len(items_out),
+            "prefilter_note": (
+                "law/advisor `available` is a pure-read static pre-filter (strict `>` war_support "
+                "and war/ideology gates aligned with common/ideas); country-specific DLC triggers "
+                "are authoritatively checked by the engine's CanExecute when applying."
+            ),
             "items": items_out,
         }
 
@@ -605,11 +676,19 @@ class PoliticsMixin:
                "pp_before": before, "pp_after": c.political_power,
                "active": key in active}
         if key not in active:
-            out["reason"] = why or ("the engine refused the law change "
-                                    "(CanExecute said no; nothing else changed)")
+            snip = None
+            if not why:
+                snip = self._law_available_snippet(key)
+            out["reason"] = why or (
+                "the engine refused the law change (CanExecute said no; script available: {%s})" % snip
+                if snip else
+                "the engine refused the law change (CanExecute said no; nothing else changed)"
+            )
+            if snip:
+                out["available_trigger"] = snip
         return out
 
-    def _idea_block_reason(self, key, c, tag=None, summary=None, at_war=None):
+    def _idea_block_reason(self, key, c, tag=None, summary=None, at_war=None, ideology=None):
         """Best-effort explanation of why a law change would be refused."""
         reasons = []
         try:
@@ -620,8 +699,19 @@ class PoliticsMixin:
             return None
         gate = self._LAW_GATE.get(key)
         if gate:
-            need_ws, need_war = gate
-            if need_war:
+            need_ws, need_war, strict_gt, non_auto_war = self._unpack_law_gate(gate)
+            effective_need_war = need_war
+            if non_auto_war and not effective_need_war:
+                ideo = ideology
+                if ideo is None:
+                    try:
+                        import legality as _leg_ig
+                        ideo = _leg_ig.ruling_ideology(self, tag or c.tag)
+                    except Exception:
+                        ideo = None
+                if ideo and str(ideo).lower() not in ("fascism", "communism"):
+                    effective_need_war = True
+            if effective_need_war:
                 if at_war is None:
                     try:
                         import combat as _cb_br
@@ -632,8 +722,15 @@ class PoliticsMixin:
                         except Exception:
                             at_war = False
                 if not at_war:
-                    reasons.append("needs a war (this law is war-only)")
-            if ws < need_ws:
+                    reasons.append(
+                        "needs a war (non-fascist/communist requires has_war=yes)"
+                        if (non_auto_war and not need_war) else
+                        "needs a war (this law is war-only)"
+                    )
+            if strict_gt and need_ws > 0:
+                if ws <= need_ws + 1e-6:
+                    reasons.append("needs war_support > %.2f (strictly greater; have %.2f)" % (need_ws, ws))
+            elif ws < need_ws:
                 reasons.append("needs war_support >= %.2f (have %.2f)" % (need_ws, ws))
             if pp < 150:
                 reasons.append("costs 150 political power (have %d)" % pp)
@@ -700,11 +797,25 @@ class PoliticsMixin:
                 blocked.append({"id": k, "why": "would downgrade the current law %s"
                                                 % old["key"]})
                 continue
-            need_ws, need_war = self._LAW_GATE.get(k, (0.50, False))
+            gate_raw = self._LAW_GATE.get(k, (0.50, False, True, False))
+            need_ws, need_war, strict_gt, non_auto_war = self._unpack_law_gate(gate_raw)
+            if non_auto_war and not need_war:
+                try:
+                    import legality as _leg_ri
+                    _ideo_ri = _leg_ri.ruling_ideology(self, c.tag)
+                    if _ideo_ri and str(_ideo_ri).lower() not in ("fascism", "communism"):
+                        need_war = True
+                except Exception:
+                    pass
             if need_war and not at_war:
                 blocked.append({"id": k, "why": "needs a war"})
                 continue
-            if ws < need_ws:
+            if strict_gt and need_ws > 0:
+                if ws <= need_ws + 1e-6:
+                    blocked.append({"id": k, "why": "needs war_support > %.2f (strictly greater; have %.2f)"
+                                                    % (need_ws, ws)})
+                    continue
+            elif ws < need_ws:
                 blocked.append({"id": k, "why": "needs war_support >= %.2f (have %.2f)"
                                                    % (need_ws, ws)})
                 continue

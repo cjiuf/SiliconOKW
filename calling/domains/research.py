@@ -1087,13 +1087,39 @@ class ResearchMixin:
             tag_id = int(self._c(tag).tag_id)
             can0 = cmdwin.can_unlock_doctrine(self, tpl, tag_id)
             if can0 is False:
+                _dl = str(doctrine or "").lower()
+                if any(k in _dl for k in ("fleet", "base_strike", "convoy", "trade_interdiction", "naval")):
+                    _svc = "navy"
+                elif any(k in _dl for k in ("battlefield_support", "operational_integrity", "strategic_destruction", "air")):
+                    _svc = "air"
+                else:
+                    _svc = "army"
+                _cur_xp = None
+                try:
+                    _co_d = self._c(tag)
+                    _xp_m = getattr(_co_d, "experience", None)
+                    if not isinstance(_xp_m, dict) and hasattr(_co_d, "summary"):
+                        _xp_m = (_co_d.summary() or {}).get("experience")
+                    if isinstance(_xp_m, dict) and _xp_m.get(_svc) is not None:
+                        _cur_xp = round(float(_xp_m[_svc]), 1)
+                except Exception:
+                    _cur_xp = None
+                _likely = (
+                    "insufficient %s XP (have %.1f; grand doctrines typically require 100 %s XP)"
+                    % (_svc, _cur_xp, _svc)
+                    if (_cur_xp is not None and _cur_xp < 100.0)
+                    else ("a %s grand doctrine may already be assigned or prerequisite is unmet (%s XP=%.1f)"
+                          % (_svc, _svc, _cur_xp) if _cur_xp is not None else None)
+                )
                 return {"ok": False, "doctrine": doctrine, "localization": loc,
                         "template": hex(tpl), "can_execute": 0,
+                        "xp_service": _svc, "current_xp": _cur_xp,
+                        "likely_reason": _likely,
                         "error": ("the game's own CUnlockGrandDoctrineCommand::"
-                                  "CanExecute refuses %s: its prerequisite is not met, "
-                                  "a land doctrine is already assigned, or there is "
-                                  "not enough army XP. Try grand_battleplan / "
-                                  "mass_assault / superior_firepower." % loc)}
+                                  "CanExecute refuses %s%s: its prerequisite is not met, "
+                                  "a %s doctrine is already assigned, or there is "
+                                  "not enough %s XP."
+                                  % (loc, (" (%s)" % _likely) if _likely else "", _svc, _svc))}
             cmd = cmdwin.make_unlock_doctrine(self, tpl, tag_id)
             # A paused game never drains the queue (§29.8) -- run the clock
             # briefly and restore the pause state before reading anything back.

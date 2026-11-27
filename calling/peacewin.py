@@ -80,6 +80,61 @@ BUILDERS = {
     'liberate': BUILD_LIBERATE,
     'gov': BUILD_CHANGE_GOV,
 }
+VALID_DEMAND_KINDS = tuple(BUILDERS.keys())
+
+_KIND_SUGGESTIONS = {
+    "annex": "state",
+    "annex_all": "state",
+    "take_state": "state",
+    "take_states": "state",
+    "states": "state",
+    "change_gov": "gov",
+    "change_government": "gov",
+    "topple_government": "gov",
+    "take_navy": "navy",
+    "fleet": "navy",
+}
+
+
+def validate_kinds(kinds):
+    """校验并规范化 peace_demands 的 kinds 参数（D-17 根治，杜绝裸 KeyError）。"""
+    if kinds is None:
+        return ["state"]
+    if isinstance(kinds, str):
+        raw = [kinds]
+    elif isinstance(kinds, (list, tuple)):
+        raw = list(kinds)
+    else:
+        raise ValueError(
+            "kinds must be a list of strings (valid: %s; default: ['state'])"
+            % ", ".join(VALID_DEMAND_KINDS)
+        )
+    if not raw:
+        raise ValueError(
+            "kinds cannot be empty (valid: %s; omit kinds to use default ['state'])"
+            % ", ".join(VALID_DEMAND_KINDS)
+        )
+    norm = []
+    invalid = []
+    hints = []
+    for k in raw:
+        ks = str(k or "").strip().lower()
+        if ks in BUILDERS:
+            if ks not in norm:
+                norm.append(ks)
+        else:
+            invalid.append(k)
+            sugg = _KIND_SUGGESTIONS.get(ks)
+            if sugg:
+                hints.append("%r -> use %r" % (k, sugg))
+    if invalid:
+        hint_s = ("; hint: " + ", ".join(hints)) if hints else ""
+        raise ValueError(
+            "invalid peace demand kind(s): %s. Valid kinds: %s (safe default: ['state']; "
+            "omit `kinds` to take states)%s"
+            % (invalid, ", ".join(VALID_DEMAND_KINDS), hint_s)
+        )
+    return norm
 
 ACTION_SIZE = {'state': 0x50, 'puppet': 0x60}
 
@@ -440,7 +495,7 @@ def maps(g, conf=None):
     return {hex(off): map_size(g, conf, off) for off in (0x1B8, 0x1C8, 0x1D8, 0x1E8, 0x1F8)}
 
 
-def finish(g, winner_idx, do_pass=False, wait=20.0):
+def finish(g, winner_idx, do_pass=False, wait=20.0, allow_empty=False):
     """Close the conference without the pass -> done race.
 
     `pass` APPENDS a second turn to +0x1F8 (measured: 1 -> 2).  `done` then merges
@@ -457,6 +512,12 @@ def finish(g, winner_idx, do_pass=False, wait=20.0):
       在执行 `done` 前后纯只读回读玩家实有州集合与每一块已提交诉求州的最终归属，
       透明汇报 `states_before` / `states_after` / `net_states_gained` / `acquired_states` /
       `not_acquired_states`，彻底杜绝静默丢州却毫无感知。
+    2026-11-27 (D-18 根治):
+      1. 默认拦截「零索赔」关闭会议（`queued_actions == 0` 且 `submitted_turns == 0` 且未传
+         `allow_empty=True`），返回 `blocked_by="empty_peace_demands"`，防止前一步
+         `peace_demands` 失败后误把和会以白和平关闭；确需白和平可显式传 `allow_empty=True`。
+      2. 结算完成后 `at_war_after` 区分「刚通过本场和会结清、待下 1 游戏小时清理的残余敌国」
+         与「仍在进行的场外其他战争」，消除同帧 `at_war_after=true` 与下一帧 `战争=否` 矛盾。
     """
     import time
     p = g.p
@@ -475,26 +536,67 @@ def finish(g, winner_idx, do_pass=False, wait=20.0):
 
     states_before = _owned_state_ids(g, winner_tag)
 
-    # 汇总提交到 +0x1F8（及本会话缓存）的全部州诉求，用于结算后逐州核对归属
+    # 汇总提交到 +0x1F8（及本会话缓存）的全部索赔动作与州诉求，用于空单拦截与结算后核对
+    queued_acts_now = _read_existing_turn_actions(p, conf, int(winner_idx), CONF_SUBMIT_MAP)
     demanded_states = []
+    demanded_losers = set()
     seen_dem = set()
-    for a in _read_existing_turn_actions(p, conf, int(winner_idx), CONF_SUBMIT_MAP):
+    for a in queued_acts_now:
         try:
-            atype, _lidx, sid = _action_key(p, a)
+            atype, lidx, sid = _action_key(p, a)
+            if lidx > 0 and lidx in idx_map:
+                demanded_losers.add(idx_map[lidx])
             if atype == ACT_TYPE_TAKE_STATE and sid > 0 and sid not in seen_dem:
                 seen_dem.add(sid)
                 demanded_states.append(sid)
         except Exception:
             continue
     cached_rec = _SUBMITTED_DEMANDS.get((pid, int(conf))) or {}
+    for ltag in (cached_rec.get("queued_states_by_loser") or {}).keys():
+        if ltag and not str(ltag).startswith("#"):
+            demanded_losers.add(str(ltag).upper())
     for sid in (cached_rec.get("states") or ()):
         if sid > 0 and sid not in seen_dem:
             seen_dem.add(sid)
             demanded_states.append(int(sid))
 
+    # 读取结算前的和会参与者集合（用于结算后区分本场和会残余关系与场外活跃敌国）
+    conf_participants_tags = set()
+    try:
+        _sum0 = summary(g) or {}
+        for _pt in (_sum0.get("participants") or ()):
+            _cid = int(_pt.get("country") or -1)
+            if _cid in idx_map:
+                conf_participants_tags.add(idx_map[_cid])
+    except Exception:
+        pass
+
     out = {"before": maps(g, conf)}
     n = out["before"].get("0x1f8")
     out["submitted_turns"] = n
+    out["queued_actions"] = len(queued_acts_now)
+
+    # D-18 零索赔白和平护栏：+0x1F8 无任何排队动作且本会话也无已提交要求时拒绝直接关闭和会
+    if (not allow_empty) and len(queued_acts_now) == 0 and (not n or int(n) == 0) and not demanded_states:
+        return {
+            "ok": False,
+            "blocked_by": "empty_peace_demands",
+            "submitted_turns": int(n or 0),
+            "queued_actions": 0,
+            "conference_still_open": True,
+            "before": out["before"],
+            "error": (
+                "refusing to finalize peace conference with 0 queued demands (submitted_turns=0; "
+                "closing now would produce a WHITE PEACE with 0 states gained). "
+                "Queue demands via peace_demands(loser=...) first, or pass allow_empty=true "
+                "if you genuinely intend a white peace."
+            ),
+        }
+
+    if allow_empty and len(queued_acts_now) == 0 and (not n or int(n) == 0) and not demanded_states:
+        out["white_peace_confirmed"] = True
+        out["warning"] = "finalizing peace conference with 0 queued demands (white peace confirmed via allow_empty=True)"
+
     if n and int(n) > 1:
         out["warning"] = ("+0x1F8 already holds %s turns; install_turns should have "
                           "left exactly one" % n)
@@ -572,11 +674,40 @@ def finish(g, winner_idx, do_pass=False, wait=20.0):
 
     if out["finalized"]:
         _SUBMITTED_DEMANDS.pop((pid, int(conf)), None)
-        # 2026-11-26 (P3-11): 暂停帧下和会条约虽已立刻改变州 owner，但 CCountryResources 与
-        # 工厂缓存要推进 >= 1 游戏小时后才由引擎日/时刷新重算，明确提示调用方避免误读为 0。
+        try:
+            import combat as _cb_pw
+            raw_enemies = list(_cb_pw.enemy_tags(g, winner_tag) or [])
+            raw_at_war = bool(raw_enemies) if raw_enemies else bool(_cb_pw.at_war(g, winner_tag))
+            out["at_war_after_raw"] = raw_at_war
+            settled_tags = set(demanded_losers) | (conf_participants_tags - ({str(winner_tag).upper()} if winner_tag else set()))
+            # 若存在未参与本场和会的敌国，则真实仍处于其他战争；若所有残留敌国均属本场已结清和会对象
+            # （或刚落实条约的暂停帧无活跃战斗），则标记 at_war_after=False 消除同帧假战争矛盾。
+            remaining_outside = [e for e in raw_enemies if str(e).upper() not in settled_tags] if settled_tags else []
+            has_live_combats = False
+            try:
+                has_live_combats = bool(_cb_pw.combats(g, only_mine=True, me=winner_tag))
+            except Exception:
+                has_live_combats = False
+            if raw_at_war and not remaining_outside and not has_live_combats:
+                out["at_war_after"] = False
+                if raw_enemies:
+                    out["at_war_pending_cleanup_enemies"] = raw_enemies
+                out["at_war_note"] = (
+                    "treaty finalized on paused frame; residual CWarRelation entries (%s) "
+                    "for this settled conference clear on the next game hour"
+                    % (", ".join(raw_enemies) if raw_enemies else "conference_closing")
+                )
+            else:
+                out["at_war_after"] = raw_at_war
+                if remaining_outside:
+                    out["remaining_enemies_outside_conference"] = remaining_outside
+        except Exception:
+            pass
+        # 2026-11-26 (P3-11 / 2026-11-27 D-06): 暂停帧下和会条约虽已立刻改变州 owner，
+        # 但 CCountryResources、工厂缓存及残留和会/战争关系对象需推进 >= 1 游戏小时后完全清理。
         out["resources_refresh_note"] = (
-            "peace treaty applied on the current frame; CCountryResources (e.g. rubber/oil) "
-            "and factory totals refresh after the game clock advances >= 1 hour."
+            "peace treaty applied on the current frame; CCountryResources (e.g. rubber/oil), "
+            "factory totals, and residual conference/war-relation objects finish clearing after >= 1 game hour."
         )
     return out
 
@@ -718,6 +849,7 @@ def build_actions(g, loser_idx, kind='state', winner_idx=None):
     demand whose winner is 0 is silently worth nothing (round 2 came back with
     cost 0).  Pass `winner_idx` to write the real one.
     """
+    kind = validate_kinds([kind])[0]
     p = g.p
     arg = cmdwin.alloc(g, 0x100)
     p.write(arg, b"\0" * 0x100)
@@ -996,7 +1128,7 @@ def options(g, loser_idx, winner_idx=None, kind="state", refresh=False):
 
 def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
                    map_off=CONF_SUBMIT_MAP, states=None, filter_info=None,
-                   append=True, replace=False):
+                   append=True, replace=False, replace_all=False):
     """Build demands from the engine's builders and install them in conf+map_off.
 
     2026-11-26 (P0-3 根治):
@@ -1006,8 +1138,12 @@ def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
          （例如先后向 HOL 与 INS 提诉求）时，先读取 `conf+map_off` 里该战胜国已排队的动作，
          与本次新动作按 `(type, loser_idx, state_id)` 保序合并去重后写入**单个**
          `CPeaceBiddingTurn`（保持 +0x1F8 为 1 turn 规避 2-turn 卡死，同时彻底消除后次覆写前次）；
-         如需清空重填可显式传 `replace=True`（或 `append=False`）；
-      3. **预算透出**：汇总每条动作的 `act+0x40` 分值与 `score_now`，在 `filter_info` 返回
+      3. **按 loser 替换（2026-11-27 D-19 根治）**：`replace=True` 默认仅替换当前 `loser_idx`
+         已排队的索赔，**完整保留其他战败国的已排队动作**，避免对第二个 loser 传 `replace=True`
+         静默清空第一个 loser；确需清空整场会议全部战败国队列时显式传 `replace_all=True`。
+      4. **kinds 严格校验（2026-11-27 D-17 根治）**：非法 kind（如 `annex`）在构造前即返回清晰
+         错误及合法列表，绝不抛裸 `KeyError`。
+      5. **预算透出**：汇总每条动作的 `act+0x40` 分值与 `score_now`，在 `filter_info` 返回
          `mode`/`added_actions`/`total_queued_actions`/`queued_states_by_loser`/`estimated_total_cost`/`score_now`/`over_budget`。
     """
     p = g.p
@@ -1016,7 +1152,21 @@ def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
     loser_idx = int(loser_idx)
     if winner_idx <= 0:
         raise ValueError("winner_idx must be > 0 (got %d)" % winner_idx)
-    effective_append = bool(append) and (not bool(replace))
+
+    # D-17: 前置校验 kinds，防止裸 KeyError
+    try:
+        kinds = validate_kinds(kinds)
+    except ValueError as _ke:
+        if filter_info is not None:
+            filter_info["blocked_by"] = "invalid_peace_kind"
+            filter_info["valid_kinds"] = list(VALID_DEMAND_KINDS)
+            filter_info["safe_kinds"] = list(SAFE_OPTION_KINDS)
+            filter_info["default_kinds"] = ["state"]
+        raise
+
+    want_replace_all = bool(replace_all)
+    want_replace_loser = (not want_replace_all) and (bool(replace) or (not bool(append)))
+    effective_append = (not want_replace_all) and (not want_replace_loser)
 
     wanted_states = None
     if states is not None:
@@ -1071,7 +1221,42 @@ def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
             % (wanted_states, loser_idx, available_states)
         )
 
-    prev_acts = _read_existing_turn_actions(p, conf, winner_idx, map_off) if effective_append else []
+    idx_map = _tag_by_idx(g)
+    existing_all = _read_existing_turn_actions(p, conf, winner_idx, map_off)
+    dropped_acts = []
+    preserved_other_by_loser = {}
+    if effective_append:
+        prev_acts = list(existing_all)
+    elif want_replace_loser:
+        # D-19: replace=True 仅替换当前 loser_idx，完整保留其它战败国的已排队动作
+        prev_acts = []
+        for a in existing_all:
+            try:
+                atype, lidx, sid = _action_key(p, a)
+            except Exception:
+                continue
+            if lidx == loser_idx:
+                dropped_acts.append((atype, lidx, sid))
+            else:
+                prev_acts.append(a)
+                if atype == ACT_TYPE_TAKE_STATE and sid > 0:
+                    lkey = idx_map.get(lidx, "#%d" % lidx)
+                    preserved_other_by_loser.setdefault(lkey, []).append(sid)
+    else:
+        # replace_all=True: 显式清空整场会议全部旧动作，并透明回报所有被清除的战败国/州
+        prev_acts = []
+        for a in existing_all:
+            try:
+                dropped_acts.append(_action_key(p, a))
+            except Exception:
+                continue
+
+    dropped_by_loser = {}
+    for atype, lidx, sid in dropped_acts:
+        if atype == ACT_TYPE_TAKE_STATE and sid > 0:
+            lkey = idx_map.get(lidx, "#%d" % lidx)
+            dropped_by_loser.setdefault(lkey, []).append(sid)
+
     merged_acts = []
     added_acts = []
     seen_keys = set()
@@ -1104,7 +1289,6 @@ def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
     install_turns(g, conf, winner_idx, [turn], map_off)
 
     # 汇总队列全貌与预算估算，并缓存给 peace_finish 做结算回读
-    idx_map = _tag_by_idx(g)
     queued_by_loser = {}
     queued_states = []
     est_total_cost = 0
@@ -1131,12 +1315,36 @@ def submit_demands(g, conf, winner_idx, loser_idx, kinds=("state",),
     }
 
     if filter_info is not None:
-        filter_info["mode"] = "append" if effective_append else "replace"
-        filter_info["previous_actions"] = len(prev_acts)
+        if effective_append:
+            filter_info["mode"] = "append"
+        elif want_replace_all:
+            filter_info["mode"] = "replace_all"
+        else:
+            filter_info["mode"] = "replace_loser"
+        filter_info["replace_scope"] = (
+            "all" if want_replace_all else ("loser" if want_replace_loser else "none")
+        )
+        filter_info["previous_actions"] = len(existing_all)
+        filter_info["preserved_actions"] = len(prev_acts)
+        filter_info["replaced_actions_count"] = len(dropped_acts)
         filter_info["added_actions"] = len(added_acts)
         filter_info["skipped_duplicate_actions"] = skipped_dup
         filter_info["total_queued_actions"] = len(merged_acts)
         filter_info["queued_states_by_loser"] = queued_by_loser
+        if preserved_other_by_loser:
+            filter_info["preserved_other_losers"] = {
+                k: len(v) for k, v in preserved_other_by_loser.items()
+            }
+        if dropped_by_loser:
+            filter_info["dropped_states_by_loser"] = dropped_by_loser
+        if want_replace_all and dropped_by_loser:
+            cur_ltag = idx_map.get(loser_idx, "#%d" % loser_idx)
+            other_dropped = {k: v for k, v in dropped_by_loser.items() if k != cur_ltag}
+            if other_dropped:
+                filter_info["warning"] = (
+                    "replace_all=True cleared previous demands for other loser(s): %s"
+                    % ", ".join("%s(%d states)" % (k, len(v)) for k, v in sorted(other_dropped.items()))
+                )
         filter_info["estimated_added_cost"] = est_added_cost
         filter_info["estimated_total_cost"] = est_total_cost
         filter_info["score_now"] = score_now

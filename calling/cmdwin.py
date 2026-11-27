@@ -932,8 +932,8 @@ SPEC_PATCH = {
         size=SIZE_SET_GAME_SPEED,
         args=1,
         fields=[{"offset": 0x28, "size": 4, "arg": 1, "kind": "int"}]),
-    # 2026-11-26 (P1-3 PE 1.19.5.0 反汇编实证):
-    #   CRemoveConveyorLineCommand: vt 0x2AC08D0, ctor 0x1C2F020, size 0x30,
+    # 2026-11-27 (D-07 PE 1.19.5.0 ctor + RTTI 实证修正):
+    #   CRemoveConveyorLineCommand: vt 0x2AC0850, ctor 0x1C2F020, size 0x30,
     #     CanExecute 0x1C31940, Execute 0x1C30D30; +0x28 接收单条 line (type 63) handle
     "CRemoveConveyorLineCommand": dict(
         vt=VT_REMOVE_CONVEYOR_LINE,
@@ -941,7 +941,7 @@ SPEC_PATCH = {
         size=SIZE_REMOVE_CONVEYOR_LINE,
         args=1,
         fields=[{"offset": 0x28, "size": 8, "arg": 1, "kind": "handle"}]),
-    #   CRemoveConveyorCommand: vt 0x2AC0690, ctor 0x1C2EF50, size 0x30,
+    #   CRemoveConveyorCommand: vt 0x2AC0610, ctor 0x1C2EF50, size 0x30,
     #     CanExecute 0x1C316E0, Execute 0x1C30CB0; +0x28 接收整条 conveyor (type 64) handle
     "CRemoveConveyorCommand": dict(
         vt=VT_REMOVE_CONVEYOR,

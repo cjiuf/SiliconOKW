@@ -30,6 +30,7 @@ ALLOWED_ACTIONS = {
     # 政治与事件
     "select_event",
     "set_focus",
+    "drop_focus",
     "select_decision",
     "add_idea",
     "hire_advisor",
@@ -47,11 +48,14 @@ ALLOWED_ACTIONS = {
     "housekeep",
     # 军队与战争
     "upgrade_template_preset",
+    "duplicate_template",
+    "edit_template",
     "plan_front_allocation",
     "add_to_army",
     "train_divisions",
     "cancel_training",
     "deploy_ready",
+    "delete_order",
     "purge_orders",
     "reset_battleplans",
     "army_battleplan",
@@ -87,6 +91,7 @@ ALLOWED_INSPECT_TOPICS = {
     "idea_catalog",
     "decisions",
     "armies",
+    "templates",
     "war_readiness",
     "combat",
     "stockpile",
@@ -117,6 +122,12 @@ ACTION_SPECS = {
         "optional": (),
         "aliases": {"focus": "key", "focus_id": "key"},
         "types": {"key": "str"},
+    },
+    "drop_focus": {
+        "required": (),
+        "optional": (),
+        "aliases": {},
+        "types": {},
     },
     "select_decision": {
         "required": ("key",),
@@ -172,10 +183,10 @@ ACTION_SPECS = {
         "types": {"index": "nonneg_int"},
     },
     "set_production": {
-        "required": ("line", "amount"),
-        "optional": (),
+        "required": ("amount",),
+        "optional": ("line", "equipment"),
         "aliases": {"line_index": "line"},
-        "types": {"line": "nonneg_int", "amount": "nonneg_int"},
+        "types": {"line": "int_or_str", "amount": "nonneg_int", "equipment": "str"},
     },
     "upgrade_production": {
         "required": ("line", "equipment"),
@@ -191,9 +202,9 @@ ACTION_SPECS = {
     },
     "create_production_line": {
         "required": ("equipment",),
-        "optional": ("dry_run",),
+        "optional": ("dry_run", "move_to_front"),
         "aliases": {"equipment_name": "equipment"},
-        "types": {"equipment": "str", "dry_run": "bool"},
+        "types": {"equipment": "str", "dry_run": "bool", "move_to_front": "bool"},
     },
     "upgrade_template_preset": {
         "required": (),
@@ -203,6 +214,28 @@ ACTION_SPECS = {
             "preset": "str",
             "template": "str",
             "auto_rebalance": "bool",
+            "dry_run": "bool",
+        },
+    },
+    "duplicate_template": {
+        "required": ("source",),
+        "optional": ("new_name", "dry_run"),
+        "aliases": {"template": "source", "name": "new_name", "template_name": "source"},
+        "types": {"source": "int_or_str", "new_name": "str", "dry_run": "bool"},
+    },
+    "edit_template": {
+        "required": ("template",),
+        "optional": ("line", "support", "dry_run"),
+        "aliases": {
+            "line_counts": "line",
+            "support_counts": "support",
+            "name": "template",
+            "template_name": "template",
+        },
+        "types": {
+            "template": "int_or_str",
+            "line": "dict",
+            "support": "dict",
             "dry_run": "bool",
         },
     },
@@ -232,15 +265,26 @@ ACTION_SPECS = {
     },
     "add_to_army": {
         "required": ("orders_group",),
-        "optional": ("divisions", "from_army", "count", "order_id"),
-        "aliases": {"army": "orders_group", "target_army": "orders_group"},
-        "types": {"orders_group": "str", "divisions": "list_str", "from_army": "str", "count": "pos_int", "order_id": "nonneg_int"},
+        "optional": ("divisions", "from_army", "count", "order_id",
+                     "move_to_province", "spread", "max_per_province"),
+        "aliases": {"army": "orders_group", "target_army": "orders_group",
+                    "province": "move_to_province"},
+        "types": {
+            "orders_group": "str",
+            "divisions": "list_str",
+            "from_army": "str",
+            "count": "pos_int",
+            "order_id": "nonneg_int",
+            "move_to_province": "pos_int",
+            "spread": "bool",
+            "max_per_province": "pos_int",
+        },
     },
     "train_divisions": {
         "required": (),
-        "optional": ("template", "lines", "state"),
+        "optional": ("template", "lines", "state", "series"),
         "aliases": {"template_name": "template", "state_id": "state"},
-        "types": {"template": "str", "lines": "pos_int", "state": "pos_int"},
+        "types": {"template": "str", "lines": "pos_int", "state": "pos_int", "series": "nonneg_int"},
     },
     "cancel_training": {
         "required": (),
@@ -259,6 +303,12 @@ ACTION_SPECS = {
         "optional": ("min_progress",),
         "aliases": {},
         "types": {"min_progress": "float"},
+    },
+    "delete_order": {
+        "required": ("orders_group", "order_id"),
+        "optional": (),
+        "aliases": {"army": "orders_group", "id": "order_id"},
+        "types": {"orders_group": "str", "order_id": "pos_int"},
     },
     "purge_orders": {
         "required": (),
@@ -377,33 +427,38 @@ ACTION_SPECS = {
     },
     "declare_war": {
         "required": ("target",),
-        "optional": ("dry_run", "ack_co_belligerents", "override_checks"),
+        "optional": ("dry_run", "ack_co_belligerents", "override_checks", "confirm_escalation"),
         "aliases": {"target_tag": "target"},
         "types": {
             "target": "str",
             "dry_run": "bool",
-            "ack_co_belligerents": "bool",
+            "ack_co_belligerents": "bool_or_list_str",
             "override_checks": "bool",
+            "confirm_escalation": "bool",
         },
     },
     "peace_demands": {
         "required": ("loser",),
-        "optional": ("winner", "kinds", "states", "replace", "append"),
-        "aliases": {},
+        "optional": ("winner", "kinds", "states", "replace", "replace_all", "append"),
+        "aliases": {"clear_all": "replace_all"},
         "types": {
             "loser": "str",
             "winner": "str",
             "kinds": "list_str",
             "states": "list_int",
             "replace": "bool",
+            "replace_all": "bool",
             "append": "bool",
+        },
+        "list_enums": {
+            "kinds": ("state", "puppet", "navy", "liberate", "gov"),
         },
     },
     "peace_finish": {
         "required": (),
-        "optional": ("action",),
+        "optional": ("action", "allow_empty"),
         "aliases": {},
-        "types": {"action": "str"},
+        "types": {"action": "str", "allow_empty": "bool"},
         "enums": {"action": ("done", "pass", "endturn")},
     },
     "set_game_speed": {
@@ -489,6 +544,12 @@ def _check_arg_type(kind, val):
         if not isinstance(val, bool):
             return False, val, "必须是布尔值"
         return True, val, None
+    if kind == "bool_or_list_str":
+        if isinstance(val, bool):
+            return True, val, None
+        if isinstance(val, list) and all(isinstance(x, str) and x.strip() for x in val):
+            return True, [x.strip() for x in val], None
+        return False, val, "必须是布尔值或非空字符串列表"
     if kind == "list_str":
         if not isinstance(val, list) or not all(isinstance(x, str) and x.strip() for x in val):
             return False, val, "必须是非空字符串列表"
@@ -547,6 +608,7 @@ def _normalize_action_args(op, raw_args, prefix=""):
 
     types_map = spec.get("types") or {}
     enums_map = spec.get("enums") or {}
+    list_enums_map = spec.get("list_enums") or {}
 
     for req in spec.get("required") or ():
         if req not in norm or norm[req] is None or (isinstance(norm[req], str) and not norm[req].strip()):
@@ -569,6 +631,31 @@ def _normalize_action_args(op, raw_args, prefix=""):
                 "%s.%s.%s=%r 无效（仅支持: %s）"
                 % (prefix.rstrip("."), op, k, norm[k], ", ".join(enums_map[k]))
             )
+        if k in list_enums_map:
+            allowed_vals = tuple(list_enums_map[k])
+            if not norm[k]:
+                errors.append(
+                    "%s.%s.%s 不能为空列表（仅支持: %s；省略则用默认值）"
+                    % (prefix.rstrip("."), op, k, ", ".join(allowed_vals))
+                )
+            else:
+                norm_items = [str(x).strip().lower() for x in norm[k]]
+                bad_items = [x for x in norm_items if x not in allowed_vals]
+                if bad_items:
+                    extra_hint = ""
+                    if op == "peace_demands" and k == "kinds" and any(b in ("annex", "take_state", "take_states") for b in bad_items):
+                        extra_hint = "；吞并地区请使用 'state' 或直接省略 kinds（默认 ['state']）"
+                    errors.append(
+                        "%s.%s.%s 包含非法值 %r（仅支持: %s%s）"
+                        % (prefix.rstrip("."), op, k, bad_items, ", ".join(allowed_vals), extra_hint)
+                    )
+                else:
+                    norm[k] = norm_items
+
+    if op == "edit_template" and not norm.get("line") and not norm.get("support"):
+        errors.append("%s.%s 必须至少提供 'line' 或 'support' 之一" % (prefix.rstrip("."), op))
+    if op == "set_production" and norm.get("line") is None and not norm.get("equipment"):
+        errors.append("%s.%s 必须至少提供 'line' 或 'equipment' 之一" % (prefix.rstrip("."), op))
 
     return norm, errors
 
@@ -1574,6 +1661,55 @@ def _run_inspect_one(g, topic, q, tag):
     if topic == "health":
         import macros as _mc
         return _mc.strategic_health_board(g, tag=tag)
+    if topic == "templates":
+        only_arg = q.get("template")
+        if only_arg is None:
+            only_arg = q.get("name")
+        flt = str(q.get("filter") or "").strip().lower()
+        rows = list(g.template_composition(tag, only_arg) or [])
+        if flt:
+            rows = [
+                r for r in rows
+                if isinstance(r, dict) and flt in str(r.get("name") or "").lower()
+            ]
+        # 纯只读统计每个模板在场师数与引擎权威可伞降师数（CArmy+0x3B8 归属模板，CArmy+0x138->+0x5B5 判空降）
+        using_cnt = {}
+        para_cnt = {}
+        try:
+            import armyops_win as _aw_t
+            import divreserve as _dr_t
+            from game import CO_ARMIES as _CO_ARMIES, _arr as _arr_t
+            co_t = g._c(tag) if hasattr(g, "_c") else g.country(tag)
+            p_t = getattr(g, "p", None)
+            if co_t is not None and p_t is not None:
+                for d_ptr in (_arr_t(p_t, co_t.ptr, _CO_ARMIES) or ()):
+                    try:
+                        ref_ptr = int(p_t.u64(int(d_ptr) + _dr_t.CDIV_TEMPLATE) or 0)
+                    except Exception:
+                        continue
+                    if not ref_ptr:
+                        continue
+                    k_hex = hex(ref_ptr).lower()
+                    using_cnt[k_hex] = using_cnt.get(k_hex, 0) + 1
+                    if _aw_t.can_division_paradrop(p_t, int(d_ptr)) is True:
+                        para_cnt[k_hex] = para_cnt.get(k_hex, 0) + 1
+        except Exception:
+            pass
+        enriched_rows = []
+        for r in rows:
+            item = dict(r) if isinstance(r, dict) else {"raw": r}
+            if isinstance(r, dict) and r.get("ptr"):
+                kp = str(r["ptr"]).lower()
+                if using_cnt:
+                    item["divisions_using"] = using_cnt.get(kp, 0)
+                    item["paradrop_capable_divisions"] = para_cnt.get(kp, 0)
+            enriched_rows.append(item)
+        return {
+            "ok": True,
+            "tag": tag,
+            "count": len(enriched_rows),
+            "templates": enriched_rows,
+        }
     raise ValueError("unknown topic: %s" % topic)
 
 
@@ -1704,6 +1840,8 @@ def _dispatch_action(g, op, args, tag):
         )
     if op == "set_focus":
         return g.set_focus(args["key"], t)
+    if op == "drop_focus":
+        return g.drop_focus(t)
     if op == "select_decision":
         return g.select_decision(args["key"], t)
     if op == "add_idea":
@@ -1731,7 +1869,15 @@ def _dispatch_action(g, op, args, tag):
     if op == "remove_construction":
         return g.remove_construction(int(args["index"]), t)
     if op == "set_production":
-        return g.set_production_amount(int(args["line"]), int(args["amount"]), t)
+        _line_arg = args.get("line")
+        _eq_arg = args.get("equipment")
+        _amt = int(args["amount"])
+        if _eq_arg is not None or not isinstance(_line_arg, int):
+            try:
+                return g.set_production_amount(_line_arg, _amt, t, equipment=_eq_arg)
+            except TypeError:
+                pass
+        return g.set_production_amount(int(_line_arg), _amt, t)
     if op == "upgrade_production":
         return g.set_production_line_equipment(
             int(args["line"]),
@@ -1748,6 +1894,16 @@ def _dispatch_action(g, op, args, tag):
             min_factories_per_line=int(args.get("min_factories_per_line", 1)),
         )
     if op == "create_production_line":
+        if "move_to_front" in args:
+            try:
+                return g.create_production_line(
+                    str(args["equipment"]),
+                    tag=t,
+                    dry_run=bool(args.get("dry_run", False)),
+                    move_to_front=bool(args.get("move_to_front", False)),
+                )
+            except TypeError:
+                pass
         return g.create_production_line(
             str(args["equipment"]),
             tag=t,
@@ -1763,6 +1919,40 @@ def _dispatch_action(g, op, args, tag):
             auto_rebalance=bool(args.get("auto_rebalance", True)),
             dry_run=bool(args.get("dry_run", False)),
         )
+    if op == "duplicate_template":
+        # 2026-11-26：把已存在、已在 PE 上验证过的 duplicate_division_template 接进 Plan DSL。
+        return g.duplicate_division_template(
+            str(args["source"]),
+            tag=t,
+            new_name=args.get("new_name"),
+            dry_run=bool(args.get("dry_run", False)),
+        )
+    if op == "edit_template":
+        import templedit as _te
+        _name = str(args["template"])
+        _pick = None
+        for _t in (g.division_templates(t) or []):
+            if str(_t.get("index")) == _name or _t.get("name") == _name:
+                _pick = _t
+                break
+        if not _pick:
+            return {"ok": False, "error": "no such template: %s" % _name,
+                    "have": [x.get("name") for x in (g.division_templates(t) or [])]}
+        try:
+            return _te.edit_template(
+                g, int(_pick["ptr"], 16),
+                args.get("line"),
+                bool(args.get("dry_run", False)),
+                args.get("support"),
+                tag=t,
+            )
+        except TypeError:
+            return _te.edit_template(
+                g, int(_pick["ptr"], 16),
+                args.get("line"),
+                bool(args.get("dry_run", False)),
+                args.get("support"),
+            )
     if op == "plan_front_allocation":
         import macros as _mc
         return _mc.plan_front_allocation(
@@ -1801,8 +1991,22 @@ def _dispatch_action(g, op, args, tag):
             from_army=args.get("from_army"),
             order_id=args.get("order_id"),
             tag=t,
+            move_to_province=args.get("move_to_province"),
+            spread=bool(args.get("spread", True)),
+            max_per_province=args.get("max_per_province"),
         )
     if op == "train_divisions":
+        if args.get("series") is not None:
+            try:
+                return g.train_divisions(
+                    template_name=args.get("template"),
+                    lines=int(args.get("lines", 2)),
+                    state_id=args.get("state"),
+                    tag=t,
+                    series=int(args["series"]),
+                )
+            except TypeError:
+                pass
         return g.train_divisions(
             template_name=args.get("template"),
             lines=int(args.get("lines", 2)),
@@ -1819,7 +2023,21 @@ def _dispatch_action(g, op, args, tag):
             dry_run=bool(args.get("dry_run", False)),
         )
     if op == "deploy_ready":
-        return g.deploy_ready_conveyors(t, float(args.get("min_progress") or 0.0))
+        _mp = 0.995 if args.get("min_progress") is None else float(args.get("min_progress"))
+        return g.deploy_ready_conveyors(t, _mp)
+    if op == "delete_order":
+        og_raw = args["orders_group"]
+        if hasattr(g, "_resolve_orders_group"):
+            og_ptr, og_err, og_cands = g._resolve_orders_group(og_raw, tag=t)
+            if not og_ptr:
+                out_e = {"ok": False, "blocked_by": "invalid_orders_group", "error": og_err}
+                if og_cands:
+                    out_e["available_order_groups"] = og_cands[:20]
+                return out_e
+        else:
+            og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
+        # 硬守安全红线：Plan DSL 禁止单独删除 type-1 子命令（allow_child 恒为 False），防 0xB2E62E 崩溃
+        return g.delete_order(og_ptr, int(args["order_id"]), allow_child=False)
     if op == "purge_orders":
         return g.purge_empty_orders(t)
     if op == "reset_battleplans":
@@ -1835,7 +2053,15 @@ def _dispatch_action(g, op, args, tag):
         )
     if op == "offensive_line":
         og_raw = args["orders_group"]
-        og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
+        if hasattr(g, "_resolve_orders_group"):
+            og_ptr, og_err, og_cands = g._resolve_orders_group(og_raw, tag=t)
+            if not og_ptr:
+                out_e = {"ok": False, "blocked_by": "invalid_orders_group", "error": og_err}
+                if og_cands:
+                    out_e["available_order_groups"] = og_cands[:20]
+                return out_e
+        else:
+            og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
         divs_raw = args.get("divisions")
         divs_ptrs = (
             [int(x, 16) if isinstance(x, str) and x.lower().startswith("0x") else int(x) for x in divs_raw]
@@ -1852,7 +2078,15 @@ def _dispatch_action(g, op, args, tag):
         )
     if op == "paradrop":
         og_raw = args["orders_group"]
-        og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
+        if hasattr(g, "_resolve_orders_group"):
+            og_ptr, og_err, og_cands = g._resolve_orders_group(og_raw, tag=t)
+            if not og_ptr:
+                out_e = {"ok": False, "blocked_by": "invalid_orders_group", "error": og_err}
+                if og_cands:
+                    out_e["available_order_groups"] = og_cands[:20]
+                return out_e
+        else:
+            og_ptr = int(og_raw, 16) if isinstance(og_raw, str) and og_raw.lower().startswith("0x") else int(og_raw)
         divs_raw = args.get("divisions")
         divs_ptrs = (
             [int(x, 16) if isinstance(x, str) and x.lower().startswith("0x") else int(x) for x in divs_raw]
@@ -1909,17 +2143,29 @@ def _dispatch_action(g, op, args, tag):
             tag=t,
         )
     if op == "declare_war":
-        # 2026-11-26：owner 明确要求保留一条显式强制宣战通道。
-        # 默认 override_checks=False（仍然不绕过引擎/前置校验）；只有调用方**显式**
-        # 传 override_checks=True 才放行，并且自动视同 ack_co_belligerents=True。
+        # 2026-11-27 (D-20 根治): 分离战术门禁与战略外交门禁。
+        # `override_checks=True` 仅跳过战术门禁（边境驻军/前线计划/战争借口），不再静默覆盖
+        # `ack_co_belligerents` 或列强保独/主要国裸边境的高危战略升级确认！
         _oc = bool(args.get("override_checks", False))
-        return g.declare_war(
-            str(args["target"]).upper(),
-            dry_run=bool(args.get("dry_run", False)),
-            force=_oc,
-            override_checks=_oc,
-            ack_co_belligerents=bool(args.get("ack_co_belligerents", False)) or _oc,
-        )
+        _ack_cb = args.get("ack_co_belligerents", False)
+        _conf_esc = bool(args.get("confirm_escalation", False))
+        try:
+            return g.declare_war(
+                str(args["target"]).upper(),
+                dry_run=bool(args.get("dry_run", False)),
+                force=_oc,
+                override_checks=_oc,
+                ack_co_belligerents=_ack_cb,
+                confirm_escalation=_conf_esc,
+            )
+        except TypeError:
+            return g.declare_war(
+                str(args["target"]).upper(),
+                dry_run=bool(args.get("dry_run", False)),
+                force=_oc,
+                override_checks=_oc,
+                ack_co_belligerents=bool(_ack_cb),
+            )
     if op == "peace_demands":
         import peacewin
         lose_idx = g.country(str(args["loser"]).upper()).tag_id
@@ -1928,17 +2174,24 @@ def _dispatch_action(g, op, args, tag):
         kinds = args.get("kinds") or ["state"]
         states = args.get("states")
         replace = bool(args.get("replace", False))
-        append = bool(args.get("append", not replace)) and (not replace)
+        replace_all = bool(args.get("replace_all", False))
+        append = bool(args.get("append", not (replace or replace_all))) and (not replace) and (not replace_all)
         with g:
             conf = peacewin.live_conference(g)
             if not conf:
                 return {"ok": False, "error": "no peace conference is open"}
             finfo = {}
             try:
-                turn, acts = peacewin.submit_demands(
-                    g, conf, win_idx, lose_idx, kinds, states=states, filter_info=finfo,
-                    append=append, replace=replace,
-                )
+                try:
+                    turn, acts = peacewin.submit_demands(
+                        g, conf, win_idx, lose_idx, kinds, states=states, filter_info=finfo,
+                        append=append, replace=replace, replace_all=replace_all,
+                    )
+                except TypeError:
+                    turn, acts = peacewin.submit_demands(
+                        g, conf, win_idx, lose_idx, kinds, states=states, filter_info=finfo,
+                        append=append, replace=replace or replace_all,
+                    )
             except ValueError as e:
                 return {"ok": False, "error": str(e), **finfo}
             out = {
@@ -1946,7 +2199,9 @@ def _dispatch_action(g, op, args, tag):
                 "turn": turn,
                 "actions": len(acts),
                 "mode": finfo.get("mode"),
+                "replace_scope": finfo.get("replace_scope"),
                 "added_actions": finfo.get("added_actions"),
+                "replaced_actions_count": finfo.get("replaced_actions_count"),
                 "total_queued_actions": finfo.get("total_queued_actions"),
                 "queued_states_by_loser": finfo.get("queued_states_by_loser"),
                 "estimated_added_cost": finfo.get("estimated_added_cost"),
@@ -1956,6 +2211,12 @@ def _dispatch_action(g, op, args, tag):
                 "loser": str(args["loser"]).upper(),
                 "status": peacewin.summary(g),
             }
+            if finfo.get("preserved_other_losers"):
+                out["preserved_other_losers"] = finfo["preserved_other_losers"]
+            if finfo.get("dropped_states_by_loser"):
+                out["dropped_states_by_loser"] = finfo["dropped_states_by_loser"]
+            if finfo.get("warning"):
+                out["warning"] = finfo["warning"]
             if finfo.get("budget_warning"):
                 out["budget_warning"] = finfo["budget_warning"]
             if states is not None:
@@ -1967,9 +2228,13 @@ def _dispatch_action(g, op, args, tag):
         import peacewin
         act = str(args.get("action") or "done")
         cidx = int(g.player_tag_id())
+        allow_empty = bool(args.get("allow_empty", False))
         with g:
             if act == "done":
-                return peacewin.finish(g, cidx)
+                try:
+                    return peacewin.finish(g, cidx, allow_empty=allow_empty)
+                except TypeError:
+                    return peacewin.finish(g, cidx)
             return peacewin.execute(g, act, cidx)
     if op == "set_game_speed":
         return g.set_game_speed(
@@ -2064,7 +2329,27 @@ def _summarize_action_result(op, args, res):
     if ok is False or blocked or err:
         why = blocked or err or "failed"
         return "[FAIL] %s(%s): %s" % (op, arg_brief, str(why)[:100])
-    return "[OK] %s(%s)" % (op, arg_brief)
+    # 2026-11-27 (D-26 / D-21): 高副作用动作在顶层回执中直出关键结果摘要，不再隐藏于 raw
+    extra = ""
+    if op == "housekeep" and res.get("summary"):
+        extra = " -> %s" % str(res["summary"])[:140]
+    elif op == "army_battleplan" and (res.get("supply_overloaded") or res.get("supply_warning")):
+        _sup = (res.get("steps") or {}).get("supply") if isinstance(res.get("steps"), dict) else {}
+        if isinstance(_sup, dict) and _sup.get("committed_ratio") is not None:
+            extra = " [WARN: supply_overload %sx (%s/%s divs)]" % (
+                _sup.get("committed_ratio"), _sup.get("committed"), _sup.get("capacity")
+            )
+        else:
+            extra = " [WARN: %s]" % str(res.get("supply_warning") or "supply_overloaded")[:90]
+    elif op == "peace_finish" and res.get("net_states_gained_count") is not None:
+        extra = " -> gained=%d states (at_war=%s)" % (
+            int(res.get("net_states_gained_count") or 0), res.get("at_war_after")
+        )
+    elif op == "declare_war" and (res.get("new_co_belligerents") or res.get("guaranteed_by")):
+        extra = " -> co_belligerents=%d (est_enemy_divs=%s)" % (
+            len(res.get("new_co_belligerents") or ()), res.get("total_enemy_divisions_est")
+        )
+    return "[OK] %s(%s)%s" % (op, arg_brief, extra)
 
 
 def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
@@ -2230,29 +2515,43 @@ def execute_plan(g, plan, dry_run=False, tag=None, persist_state=True):
 def wait_and_brief(g, max_days=14, until_date=None, signals=None,
                    timeout_seconds=None, pause_on_wake=True,
                    respect_red_dots=True, tag=None, include_data=False,
-                   autopilot=None, fast_forward=False):
+                   autopilot=None, fast_forward=False, ignore_red_dots=None):
     """睡到下一个唤醒信号（并自动暂停），醒来后立即附带新一回合紧凑简报。"""
     import turnloop
     tl = turnloop.TurnLoop(g, poll=1.5)
     tm = turnloop.resolve_wait_timeout(requested=timeout_seconds)
+    # 2026-11-27 (D-03 / D-04): wait_and_brief 结束后还要构造紧凑简报（通常 3..8s），
+    # 必须从总预算中预留收尾余量（brief_headroom_s），防止总耗时超出 timeout_seconds 触发客户端 -32001。
+    eff_total = int(tm["effective"])
+    brief_headroom_s = 6 if eff_total >= 45 else 0
+    wait_budget_s = max(5, eff_total - brief_headroom_s)
     sigs = turnloop.ALL_SIGNALS if signals is None else tuple(signals)
-    wait_res = tl.wait(
+    wait_kw = dict(
         max_days=int(max_days or 14),
         until_date=tuple(until_date) if until_date else None,
         signals=sigs,
-        timeout_seconds=tm["effective"],
+        timeout_seconds=wait_budget_s,
         pause_on_wake=bool(pause_on_wake),
         respect_red_dots=bool(respect_red_dots),
         timeout_meta=tm,
         autopilot=autopilot,
         fast_forward=bool(fast_forward),
     )
+    if ignore_red_dots:
+        wait_kw["ignore_red_dots"] = list(ignore_red_dots)
+    try:
+        wait_res = tl.wait(**wait_kw)
+    except TypeError:
+        wait_kw.pop("ignore_red_dots", None)
+        wait_res = tl.wait(**wait_kw)
     brief_res = build_turn_brief(g, tag=tag, include_data=include_data)
     wait_block = {
         "woke_because": wait_res.get("woke_because"),
         "days_elapsed": wait_res.get("waited_game_days", wait_res.get("days_elapsed")),
         "waited_s": wait_res.get("waited_real_seconds", wait_res.get("waited_s")),
-        "timeout_seconds": wait_res.get("effective_timeout_seconds", tm["effective"]),
+        "timeout_seconds": eff_total,
+        "wait_budget_seconds": wait_budget_s,
+        "brief_headroom_seconds": brief_headroom_s,
         "requested_timeout_seconds": tm["requested"],
         "timeout_max_seconds": tm["max_s"],
         "timeout_clamped": tm["clamped"],
@@ -2261,6 +2560,12 @@ def wait_and_brief(g, max_days=14, until_date=None, signals=None,
         "red_dot_paused": wait_res.get("red_dot_paused"),
         "red_dot_codes": wait_res.get("red_dot_codes") or wait_res.get("blocking_codes"),
     }
+    if eff_total > 50:
+        wait_block["timeout_warning"] = (
+            "effective timeout_seconds=%d exceeds common 60s MCP client RPC timeout; "
+            "keep timeout_seconds<=50 (or set HOI4_WAIT_MAX_S<=50) to avoid -32001 disconnects"
+            % eff_total
+        )
     if wait_res.get("wargoal_woke"):
         wait_block["wargoal_woke"] = True
         wait_block["wargoals"] = wait_res.get("wargoals")

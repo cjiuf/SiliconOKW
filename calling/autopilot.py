@@ -2996,6 +2996,7 @@ def _tick_focus(g, st, st_cfg, ctx, dry_run=False):
     picked = None
     on_blocked = f_cfg.get("on_blocked", "wake")
     blocked_reasons_state = st.setdefault("focus_blocked_reasons", {})
+    deferred_focuses = st.setdefault("focus_deferred", [])
     started_counts = st.setdefault("focus_started_counts", {})
 
     for fk in ordered:
@@ -3013,6 +3014,17 @@ def _tick_focus(g, st, st_cfg, ctx, dry_run=False):
             return out
         if fk in sel_by_key or (not sel_rows and hasattr(g, "set_focus")):
             picked = fk
+            if fk in deferred_focuses and not dry_run:
+                try:
+                    deferred_focuses.remove(fk)
+                except ValueError:
+                    pass
+                blocked_reasons_state.pop(fk, None)
+                _append_journal(
+                    st, ctx.get("date"), st.get("current_phase"), "focus",
+                    "recovered_deferred:%s" % fk, ok=True,
+                    detail="previously deferred focus is now selectable and prioritized",
+                )
             break
         why = _blocked_reason(fk)
         prev_why = blocked_reasons_state.get(fk)
@@ -3025,8 +3037,14 @@ def _tick_focus(g, st, st_cfg, ctx, dry_run=False):
         if on_blocked == "wait":
             # 显式等待条件就绪，跳过本次不选替代国策
             return out
-        # on_blocked == "skip": 记录日志并尝试下一项
-        _append_journal(st, ctx.get("date"), st.get("current_phase"), "focus", "skipped_blocked:%s" % fk, ok=True, detail=why)
+        # on_blocked == "skip": 本次暂缓（绝不永久丢弃，下次空槽仍按 must/queue 顺位优先重试）并尝试下一项
+        if not dry_run and fk not in deferred_focuses:
+            deferred_focuses.append(fk)
+        _append_journal(
+            st, ctx.get("date"), st.get("current_phase"), "focus",
+            "skipped_blocked:%s" % fk, ok=True,
+            detail="temporarily deferred (will retry on next free focus slot): %s" % why,
+        )
 
     skipped_repeated = []
     if picked is None and f_cfg.get("fallback") == "tier_score":

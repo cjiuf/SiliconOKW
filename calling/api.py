@@ -2842,7 +2842,7 @@ class HOI4:
             out["suspect"] = True
             out["rejected_raw"] = int(_gated)
             out["lower_bound"] = logd
-        elif logd and int(h) < int(logd) - 3:
+        elif logd and (not _gs_clock) and int(h) < int(logd) - 3:
             _behind = int(logd) - int(h)
             out["source"] = "stale (BEHIND game.log by %s)" % (
                 "%d d" % (_behind // 24) if _behind >= 24 else "%d h" % _behind)
@@ -2862,8 +2862,16 @@ class HOI4:
             out["suspect"] = True
             out["lower_bound"] = logd
         elif _gs_clock:
-            # exact: two memory reads off CCurrentGameState+0x468, no scan, no log
-            out["source"] = "clock (CGameState+0x468, exact)"
+            # 2026-11-27 (D-27 根治): CCurrentGameState+0x468 已通过 +0x478/+0x484/+0x488
+            # 三重自洽校验，是权威引擎活时钟。回档到更早存档时 game.log 末尾仍留着旧局未来日期，
+            # 绝不能因此把精确引擎时钟误判为 stale / suspect=True！
+            if logd and int(h) < int(logd) - 3:
+                _behind = int(logd) - int(h)
+                out["source"] = "clock (CGameState+0x468, exact; save behind older game.log by %s)" % (
+                    "%d d" % (_behind // 24) if _behind >= 24 else "%d h" % _behind)
+                out["reloaded_save_detected"] = True
+            else:
+                out["source"] = "clock (CGameState+0x468, exact)"
         elif _verified:
             if logd and int(h) - int(logd) > 24 * 3:
                 out["source"] = "clock (game.log lags %d d)" % (

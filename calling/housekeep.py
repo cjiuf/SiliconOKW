@@ -994,8 +994,20 @@ class HousekeepMixin:
         out = []
         for conv in self.conveyors(c.tag):
             key = (c.tag, conv["packed_handle"])
-            row = {"conveyor": conv["ptr"], "state_id": want_state,
-                   "deploy_province": want_prov}
+            row = {
+                "conveyor": conv["ptr"],
+                "template": conv.get("template"),
+                "lines": conv.get("lines"),
+                "series": conv.get("series"),
+                "state_id": want_state,
+                "deploy_province": want_prov,
+            }
+            if conv.get("equipment_ratio") is not None:
+                row["equipment_ratio"] = conv.get("equipment_ratio")
+            if conv.get("stall_reason"):
+                row["stall_reason"] = conv.get("stall_reason")
+                if conv.get("stall_detail"):
+                    row["stall_detail"] = conv.get("stall_detail")
             try:
                 with self:
                     rv = self._run_cmd(self.cmd.make("SetConveyorLocation",
@@ -1131,6 +1143,20 @@ class HousekeepMixin:
             under_cap = (count < army_cap) if army_cap else (count < 95)
             # 额外总训练线数防爆保护：若步枪 < 1000 且场上总训练线数已 >= 2，严禁再开新带
             cur_total_lines = sum(max(1, int(cv.get("lines") or 1)) for cv in conv)
+            out["planned_new_conveyor_lines"] = lines
+            out["current_total_lines"] = cur_total_lines
+            out["conveyors_summary"] = [
+                {
+                    "conveyor": cv.get("ptr"),
+                    "template": cv.get("template"),
+                    "lines": cv.get("lines"),
+                    "series": cv.get("series"),
+                    "progress": cv.get("progress"),
+                    "equipment_ratio": cv.get("equipment_ratio"),
+                    "stall_reason": cv.get("stall_reason"),
+                }
+                for cv in conv
+            ]
             over_deficit_cap = (rifles < 1000 and cur_total_lines >= 2)
             if under_cap and manpower > 100000 and len(conv) < max_convs and not over_deficit_cap:
                 out["opened"] = self.train_divisions(lines=lines, tag=tag)
@@ -1141,8 +1167,11 @@ class HousekeepMixin:
                     out["conveyors_after"] = len(conv) + 1
             else:
                 out["conveyors_after"] = len(conv)
-                out["skipped"] = ("count=%d manpower=%.0f rifles=%.0f conveyors=%d/%d lines=%d cur_lines=%d"
-                                  % (count, manpower, rifles, len(conv), max_convs, lines, cur_total_lines))
+                out["skipped"] = (
+                    "count=%d manpower=%.0f rifles=%.0f conveyors=%d/%d "
+                    "planned_new_lines=%d current_total_lines=%d"
+                    % (count, manpower, rifles, len(conv), max_convs, lines, cur_total_lines)
+                )
         except Exception as e:
             out.update(ok=False, error=str(e))
         try:
@@ -1330,10 +1359,26 @@ class HousekeepMixin:
                 r = {"ok": False, "error": str(e)}
             out.append({"doctrine": d, "ok": bool(r.get("ok")),
                         "stored": r.get("stored"), "note": r.get("note"),
+                        "xp_service": r.get("xp_service"),
+                        "current_xp": r.get("current_xp"),
+                        "likely_reason": r.get("likely_reason"),
                         "error": r.get("error")})
             if r.get("ok"):
                 done.add(key)
-        return {"ok": True, "attempts": out}
+        _xp_snap = None
+        try:
+            _co_x = self._c(tag)
+            _xm = getattr(_co_x, "experience", None)
+            if not isinstance(_xm, dict) and hasattr(_co_x, "summary"):
+                _xm = (_co_x.summary() or {}).get("experience")
+            if isinstance(_xm, dict):
+                _xp_snap = {k: round(float(v), 1) for k, v in _xm.items() if isinstance(v, (int, float))}
+        except Exception:
+            _xp_snap = None
+        ret_doc = {"ok": True, "attempts": out}
+        if _xp_snap:
+            ret_doc["xp"] = _xp_snap
+        return ret_doc
 
     def _current_fuel(self, tag=None):
         """只读获取国家当前燃油量；无法读取时返回 None（不误触低油保护）。"""
@@ -1744,7 +1789,8 @@ class HousekeepMixin:
         out["succeeded_steps"] = succeeded_steps
         out["failed_steps"] = failed_steps
         out["skipped_steps"] = skipped_steps
-        # 2026-11-23 (复测 10 B-4): 保留自动花 PP 运营托管，但在顶层摘要明确透明汇报 PP 变动与所购顾问/MIO
+        # 2026-11-23 (复测 10 B-4) + 2026-11-27 (D-26 根治): 顶层摘要透明汇总全部实质副作用
+        # （PP 变动与所购法案/顾问、编组合师、军工/船坞分配、空军附着等），并直出到 Plan 顶层回执。
         _pol_r = out.get("politics") if isinstance(out.get("politics"), dict) else {}
         _pp_delta = _pol_r.get("pp_delta")
         _pol_bought = [
@@ -1756,9 +1802,43 @@ class HousekeepMixin:
             out["pp_delta"] = _pp_delta
         if _pol_bought:
             out["politics_purchased"] = _pol_bought
+
+        side_effects = []
+        if _pp_delta:
+            side_effects.append(
+                "pp_delta=%s (%s)" % (_pp_delta, ", ".join(str(x) for x in _pol_bought))
+                if _pol_bought else "pp_delta=%s" % _pp_delta
+            )
+        _prod_r = out.get("production") if isinstance(out.get("production"), dict) else {}
+        _mil_ch = [x for x in (_prod_r.get("changes") or ()) if isinstance(x, dict) and int(x.get("granted") or 0) != 0]
+        if _mil_ch:
+            side_effects.append("mil_assigned=+%d(%d lines)" % (sum(int(x.get("granted") or 0) for x in _mil_ch), len(_mil_ch)))
+        _dock_ch = [x for x in (_prod_r.get("dockyard_changes") or ()) if isinstance(x, dict) and x.get("ok")]
+        if _dock_ch:
+            _dg = sum(max(0, int(x.get("after", 0)) - int(x.get("before", 0))) for x in _dock_ch)
+            side_effects.append("dock_assigned=+%d" % _dg if _dg else "dock_changes=%d" % len(_dock_ch))
+        _div_r = out.get("divisions") if isinstance(out.get("divisions"), dict) else {}
+        _div_added = sum(
+            int(x.get("added") or x.get("divisions") or 0)
+            for x in (_div_r.get("created") or ())
+            if isinstance(x, dict) and x.get("ok") and not x.get("skipped_paratroopers")
+        )
+        if _div_added > 0:
+            side_effects.append("divs_assigned=%d" % _div_added)
+        _air_r = out.get("air") if isinstance(out.get("air"), dict) else {}
+        _air_att = int((_air_r.get("attach") or {}).get("attached_count") or 0) if isinstance(_air_r.get("attach"), dict) else 0
+        if _air_att > 0:
+            side_effects.append("air_attached=%d" % _air_att)
+        _rec_r = out.get("recruitment") if isinstance(out.get("recruitment"), dict) else {}
+        _rec_dep = int((_rec_r.get("deploy") or {}).get("deployed") or 0) if isinstance(_rec_r.get("deploy"), dict) else 0
+        if _rec_dep > 0:
+            side_effects.append("divs_deployed=%d" % _rec_dep)
+        if side_effects:
+            out["side_effects"] = side_effects
+
         out["summary"] = (
             "%d/%d steps ok" % (len(succeeded_steps), len(step_names))
-            + ("; pp_delta=%s (%s)" % (_pp_delta, ", ".join(str(x) for x in _pol_bought)) if _pp_delta else "")
+            + ("; " + "; ".join(side_effects) if side_effects else "")
             + ("; failed: %s" % ", ".join(failed_steps) if failed_steps else "")
             + ("; skipped: %s" % ", ".join(skipped_steps) if skipped_steps else "")
         )

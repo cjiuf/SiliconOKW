@@ -622,6 +622,31 @@ def _war_relations_win(g, me_tag, refresh=False):
         return []
     id2tag = _country_id_map(g)
 
+    def _enemy_is_annexed_ghost(enemy_tag):
+        """2026-11-27 (D-06): 和平条约刚落实的暂停帧内，彻底被吞并的敌国（0 控制州、0 拥有州、0 师）
+        可能仍残留一条尚未被下个游戏小时清理的 CWarRelation，过滤该幽灵残骸防止 at_war 误报 true。
+        若读取受限（如离线轻量 mock）则保守返回 False（不误滤活跃敌国）。
+        """
+        try:
+            ec = g.country(enemy_tag)
+            if not ec or not getattr(ec, "ptr", None):
+                return False
+            # 确认三个数组头都可读后再判全零（离线未填充这些偏移的 mock 会走异常分支保守返回 False）
+            ctrl_n = p.i32(ec.ptr + O.CO_STATES + O.PDXARRAY_SIZE)
+            own_n = p.i32(ec.ptr + O.CO_STATES_B + O.PDXARRAY_SIZE)
+            army_n = p.i32(ec.ptr + O.CO_ARMIES + O.PDXARRAY_SIZE)
+            if ctrl_n == 0 and own_n == 0 and army_n == 0:
+                # 仅当至少某个指针域曾初始化过（data!=0 或 cap>0）或和会刚结束时判为真实已灭亡国，
+                # 避免把离线单测里全 0 内存 mock 敌国当成已灭亡国。
+                ctrl_cap = p.i32(ec.ptr + O.CO_STATES + O.PDXARRAY_CAP)
+                own_cap = p.i32(ec.ptr + O.CO_STATES_B + O.PDXARRAY_CAP)
+                army_cap = p.i32(ec.ptr + O.CO_ARMIES + O.PDXARRAY_CAP)
+                if ctrl_cap > 0 or own_cap > 0 or army_cap > 0:
+                    return True
+        except Exception:
+            return False
+        return False
+
     def _harvest(ptrs):
         got = []
         for a in ptrs:
@@ -640,6 +665,8 @@ def _war_relations_win(g, me_tag, refresh=False):
                 continue
             enemy = id2tag.get(enemy_id)
             if not enemy or enemy == me_tag:
+                continue
+            if _enemy_is_annexed_ghost(enemy):
                 continue
             got.append({"enemy": enemy, "me": me_tag, "threat": None, "_ptr": a})
         return got

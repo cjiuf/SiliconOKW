@@ -88,25 +88,30 @@ def _division_selftest(a):
       "lines=1..5 (the game silently caps some), state defaults to the capital.",
       dict(TAG, template=_STR, lines=_INT, state=_INT,
            conveyor={"type": "string",
-                     "description": "Optional existing conveyor ptr/handle to add lines to instead of creating a new one"}))
+                     "description": "Optional existing conveyor ptr/handle to add lines to instead of creating a new one"},
+           series={"type": "integer",
+                   "description": "Optional batch count per line (0=infinite, 1=train 1 batch then stop)"}))
 def _train_divs(a):
     import verify as _v
     g = game()
     tag = a.get("tag")
     conv = a.get("conveyor")
     before = _v.conveyor_count(g, tag)
-    r = g.train_divisions(a.get("template"), a.get("lines", 2), a.get("state"), tag,
-                          conveyor=conv)
+    kw = {"conveyor": conv}
+    if a.get("series") is not None:
+        kw["series"] = int(a.get("series"))
+    r = g.train_divisions(a.get("template"), a.get("lines", 2), a.get("state"), tag, **kw)
     if isinstance(r, dict) and (r.get("ok") is False or r.get("mode") == "add_lines_to_existing"):
         return r
     return verified(r, lambda: _v.conveyor_count(g, tag) > before, a.get("template"))
 
 
 @tool("hoi4_deploy_ready",
-      "Push finished (or >= min_progress) conveyor lines onto the map.",
+      "Push finished (or >= min_progress, default 0.995) conveyor lines onto the map.",
       dict(TAG, min_progress={"type": "number"}, **{}))
 def _deploy_ready(a):
-    return game().deploy_ready_conveyors(a.get("tag"), float(a.get("min_progress") or 0.0))
+    mp = 0.995 if a.get("min_progress") is None else float(a.get("min_progress"))
+    return game().deploy_ready_conveyors(a.get("tag"), mp)
 
 
 @tool("hoi4_conveyor_progress", "Training progress of every conveyor line (0..1).", TAG)

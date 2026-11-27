@@ -60,6 +60,7 @@ SA_OWNER = _OW.AIR_SA_OWNER
 # +0xA4, i.e. the engine's own set-mission command already enables the
 # mission.  CStratAirEnableMissionCommand is therefore NOT needed for a
 # normal player order (verified: wing 2 +0xA0 0->1 and +0xA4 0->1).
+WING_ALLOWED_MISSIONS = _OW.AIR_WING_ALLOWED_MISSIONS
 WING_PLANES = _OW.AIR_WING_PLANES
 WING_MISSION = _OW.AIR_WING_MISSION
 WING_MISSION_ON = _OW.AIR_WING_MISSION_ON
@@ -107,6 +108,37 @@ def mission_name(mask):
     if not mask:
         return None
     return MISSION_NAMES.get(mask & -mask, "mask_%d" % mask)
+
+
+def decode_mission_mask(mask):
+    """将空军任务位掩码解析为已知任务名列表（未知高位保留 0x... 标注）。"""
+    m = int(mask or 0)
+    if m <= 0:
+        return []
+    out = []
+    known_bits = 0
+    for bit in sorted(MISSION_NAMES):
+        if m & bit:
+            out.append(MISSION_NAMES[bit])
+            known_bits |= bit
+    extra = m & ~known_bits
+    if extra:
+        # 0x800 经反汇编 0x19D2372 / 0x10098C5 实证为空军训练 (training)
+        if extra & 0x800:
+            out.append("training")
+            extra &= ~0x800
+        if extra:
+            out.append("extra_mask_%s" % hex(extra))
+    return out
+
+
+def wing_allowed_missions(p, wing_ptr):
+    """纯只读获取单支 CAirWing 允许执行的任务位掩码（`CAirWing + 0x30`，0x19CD6BB 实证）。"""
+    try:
+        raw = int(p.u32(int(wing_ptr) + WING_ALLOWED_MISSIONS))
+        return raw, decode_mission_mask(raw)
+    except Exception:
+        return None, []
 
 
 def wing_state(g, w):
@@ -1103,10 +1135,12 @@ def transfer_wings(g, wings, target_state=None, target_province=None,
 
             read_tr = None
             verified = False
+            arrived = False
             if _heap_ptr(wptr):
                 try:
                     if to_reserve:
                         verified = bool(p.u8(wptr + WING_BUSY_0x79))
+                        arrived = verified
                     else:
                         read_tr = int(p.u64(wptr + WING_TRANSFER_TARGET))
                         verified = (read_tr == target_h)
@@ -1116,6 +1150,7 @@ def transfer_wings(g, wings, target_state=None, target_province=None,
                             meta = (ab_after.get("by_wing_ptr") or {}).get(wptr) or {}
                             if meta.get("air_base_state") == target_sid:
                                 verified = True
+                                arrived = True
                 except Exception:
                     pass
             row_ok = bool(pr.get("posted")) and (verified or not _heap_ptr(wptr))
@@ -1123,6 +1158,7 @@ def transfer_wings(g, wings, target_state=None, target_province=None,
                 ok_cnt += 1
             else:
                 fail_cnt += 1
+            in_transit = bool(row_ok and (not to_reserve) and (not arrived))
             results.append({
                 "id": wid,
                 "type": item["type"],
@@ -1132,6 +1168,9 @@ def transfer_wings(g, wings, target_state=None, target_province=None,
                 "ok": row_ok,
                 "can_execute": True,
                 "verified": verified,
+                "order_verified": verified,
+                "arrived": arrived,
+                "in_transit": in_transit,
                 "transfer_target_readback": hex(read_tr) if read_tr else None,
                 "posted": pr.get("posted"),
                 "drained": pr.get("drained"),
@@ -1143,14 +1182,25 @@ def transfer_wings(g, wings, target_state=None, target_province=None,
                 "error": "%s: %s" % (type(exc).__name__, exc),
             })
 
-    return {
+    in_transit_n = sum(1 for r in results if r.get("in_transit"))
+    res_out = {
         **out_base,
         "ok": ok_cnt > 0 and fail_cnt == 0,
         "transferred_count": ok_cnt,
         "failed_count": fail_cnt,
+        "in_transit_count": in_transit_n,
+        "arrived": bool(ok_cnt > 0 and in_transit_n == 0),
         "skipped": skipped,
         "results": results,
     }
+    if in_transit_n > 0:
+        res_out["arrival_note"] = (
+            "%d wing(s) accepted transfer order and are IN TRANSIT to state %s (province %s); "
+            "air_base_state will stay at the origin airport until game time advances and the wings land. "
+            "Check inspect(topic='air') until transferring is cleared before launching paradrops from the destination."
+            % (in_transit_n, target_sid, target_prov)
+        )
+    return res_out
 
 
 def make_enable_mission(game, wing_handles, mission_mask, target_handles=()):

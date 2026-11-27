@@ -525,7 +525,15 @@ class BattleplanOrdersMixin:
             }
         raise NotImplementedError("offensive_line is Windows-only for now")
 
-    def delete_order(self, orders_group, order_id, allow_child=False):
+    def delete_order(self, orders_group, order_id, allow_child=False, tag=None):
+        if isinstance(orders_group, str) and hasattr(self, "_resolve_orders_group"):
+            og_i, og_err, og_cands = self._resolve_orders_group(orders_group, tag=tag)
+            if not og_i:
+                out_e = {"ok": False, "blocked_by": "invalid_orders_group", "error": og_err}
+                if og_cands:
+                    out_e["available_order_groups"] = og_cands[:20]
+                return out_e
+            orders_group = og_i
         if sys.platform == "win32":
             # 2026-11-23 (复测 9 E-1 根治): Windows 1.19.5.0 统一走 armyops_win.delete_order
             # （cmdwin.alloc + CanExecute + attach_fake_vtable + 先停/清 type-1 子命令并回读核验），
@@ -949,32 +957,24 @@ class BattleplanOrdersMixin:
         return info
 
     def war_readiness_check(self, target_tag, tag=None, force=False, hard=True,
-                            ack_co_belligerents=False):
+                            ack_co_belligerents=False, confirm_escalation=False):
         """Would a human press this button? Divisions, rifles, border, front plan,
         wargoal, and diplomatic escalation (factions / guarantees / subjects).
 
-        Returns {"ready": bool, "blockers": [...], "warnings": [...]}.
+        Returns {"ready": bool, "blockers": [...], "tactical_blockers": [...],
+                 "strategic_blockers": [...], "warnings": [...]}.
         Nothing is written to the game; every number comes from the same reads
         the rest of the tool uses.
 
-        `hard=False` skips the position checks -- used by
-        `justify_wargoal`, which only starts a 250-day clock and must be
-        possible long before the army is deployed.  `declare_war` always runs
-        with hard=True: a war you cannot drive is a lost campaign, and
-        2026-11-16 proved it twice.
-
-        硬拦（hard=True 时）：
-          1. 师数可读且 > 0；
-          2. 外交合法性：不可对自己、已交战国、同阵营盟友或己方附庸/宗主宣战；
-          3. 目标国边境上真的站着至少一个师；
-          4. 目标国方向有一条原生前线命令 + 至少一条进攻线 + 至少一个集团军
-             已指派到它上面（`_front_plan_check`）；
-          5. **有战争借口**（`_wargoal_gate`）；
-          6. **阵营/保独/宗主连锁防空门闸**（2026-11-23 复测 6 P0-1）：若宣战将
-             拉入新的接壤参战强敌（>=3 接壤省且拥有 >=5 师或为主要国家），而我方
-             该段边境驻军完全为 0，默认硬拦，防止盲宣小国导致主战线空门崩盘
-             （显式传 `ack_co_belligerents=True` 或 `override_checks=True` 可放行；
-             若已有驻军但较薄弱/缺前线，则写入高醒目 `warnings` 与 `reasons`）。
+        2026-11-27 (D-20 根治):
+          明确拆分「战术门禁」（`tactical_blockers`：边境驻军/前线计划/战争借口，可由
+          `hard=False` / `override_checks=True` 跳过）与「战略门禁」（`strategic_blockers`：
+          外交非法 + 高危战略升级：列强/外部保独 `guaranteed_by`、主要国裸边境、或拉入主要国且
+          联军总师数压倒性超出我军）。
+          * 泛泛的 `override_checks=True` 或布尔 `ack_co_belligerents=True` 不再静默放行
+            列强保独或主要国裸边境这类 8.5x 级联世界大战！
+          * 需通过 `confirm_escalation=True` 或具名列表 `ack_co_belligerents=["ENG","FRA"]`
+            覆盖所有高危新增保独/裸边境主要国方可放行。
         """
         c = self._c(tag)
         me = c.tag
@@ -1001,13 +1001,23 @@ class BattleplanOrdersMixin:
         except Exception:
             year = 0
 
-        blockers, warnings = [], []
+        tactical_blockers, strategic_blockers, warnings = [], [], []
         checks = {"divisions": {"count": my_divs, "source": div.get("source"),
                                 "verified": div.get("verified")}}
         if div.get("warning"):
             checks["divisions"]["warning"] = div["warning"]
 
-        # ---- 2026-11-23 (复测 6 P0-1): 实时外交连锁推演（阵营 / 保独 / 宗主 / 附庸 / 接壤空防）
+        # 解析 ack_co_belligerents：支持 bool（普通附庸/小国连带）或具名国家列表（确认保独/列强）
+        ack_named_tags = set()
+        ack_bool = False
+        if isinstance(ack_co_belligerents, (list, tuple, set)):
+            ack_named_tags = {str(x).strip().upper() for x in ack_co_belligerents if str(x).strip()}
+            ack_bool = bool(ack_named_tags)
+        else:
+            ack_bool = bool(ack_co_belligerents)
+        esc_confirmed = bool(confirm_escalation)
+
+        # ---- 2026-11-23 (复测 6 P0-1) + 2026-11-27 (D-20): 实时外交连锁推演与战略门禁拆分
         diplo = {}
         try:
             import diplomacy as _dip_fc
@@ -1016,12 +1026,80 @@ class BattleplanOrdersMixin:
             diplo = {"error": repr(_de)}
         checks["diplomacy"] = diplo
         for _db in diplo.get("diplomatic_blockers") or []:
-            blockers.append(_db)
+            strategic_blockers.append(_db)
         for _dw in diplo.get("diplomatic_warnings") or []:
             warnings.append(_dw)
-        if hard and not ack_co_belligerents:
-            for _ub in diplo.get("undefended_new_co_belligerents") or []:
-                blockers.append(
+
+        new_cbs_set = {str(t).upper() for t in (diplo.get("new_co_belligerents") or [])}
+        new_guarantors = [str(t).upper() for t in (diplo.get("guaranteed_by") or []) if str(t).upper() in new_cbs_set]
+        undefended_list = list(diplo.get("undefended_new_co_belligerents") or [])
+        undefended_majors = [u for u in undefended_list if u.get("is_major")]
+        new_major_cbs = [
+            str(r.get("tag") or "").upper()
+            for r in (diplo.get("co_belligerent_details") or [])
+            if (not r.get("already_at_war")) and r.get("is_major")
+        ]
+        total_enemy_est = int(diplo.get("total_enemy_divisions_est") or enemy_divs)
+
+        # 高危灾难性战略升级判定（D-20 精准门禁，不误伤正常均衡大战）：
+        #   条件 A: 新增保独国或新增主要国参战，且联军总敌军 >= 我军 2 倍（如 50 师撞 188 师 3.76x）
+        #   条件 B: 新增 >= 2 条无防御裸边境（如 FRA + AST + MAL 3 条空门）
+        #   条件 C: 新增保独国 + 存在主要国 0 驻军裸边境 + 联军总兵力 > 我军 1.8 倍
+        # 普通单条裸边境仍走 strategic_blockers 拦阻（不被 override_checks 静默绕过），
+        # 但非灾难级时允许显式 ack_co_belligerents=True 放行；灾难级必须传 confirm_escalation=True
+        # 或具名列表 ack_co_belligerents=["ENG", "FRA", ...] 明确覆盖高危国！
+        overwhelming_coalition = bool(
+            (new_guarantors or new_major_cbs)
+            and my_divs > 0
+            and total_enemy_est >= max(my_divs * 2, my_divs + 50)
+        )
+        multi_undefended = len(undefended_list) >= 2
+        guarantor_with_undefended_major = bool(
+            new_guarantors and undefended_majors
+            and my_divs > 0 and total_enemy_est >= int(my_divs * 1.8)
+        )
+        severe_esc_tags = []
+        if overwhelming_coalition or multi_undefended or guarantor_with_undefended_major:
+            for _st in list(new_guarantors) + [str(u.get("tag") or "").upper() for u in undefended_majors]:
+                if _st and _st not in severe_esc_tags:
+                    severe_esc_tags.append(_st)
+            if overwhelming_coalition:
+                for _mt in new_major_cbs:
+                    if _mt and _mt not in severe_esc_tags:
+                        severe_esc_tags.append(_mt)
+            if multi_undefended:
+                for u in undefended_list:
+                    _ut = str(u.get("tag") or "").upper()
+                    if _ut and _ut not in severe_esc_tags:
+                        severe_esc_tags.append(_ut)
+
+        unconfirmed_severe = [t for t in severe_esc_tags if t not in ack_named_tags]
+        if severe_esc_tags and (not esc_confirmed) and unconfirmed_severe:
+            _undef_desc = ", ".join(
+                "%s(0 divisions on %d border provinces)" % (u.get("tag"), int(u.get("border_provinces") or 0))
+                for u in undefended_list
+            ) or "none"
+            _esc_msg = (
+                "STRATEGIC ESCALATION GUARD: declaring on %s triggers catastrophic escalation "
+                "(guaranteed_by=%s, new_co_belligerents=%d, est. %d enemy divs vs your %d, "
+                "undefended_borders=[%s]). Generic override_checks/ack_co_belligerents=true does NOT "
+                "auto-approve overwhelming guarantor coalitions or multi-front undefended borders -- pass "
+                "confirm_escalation=true or ack_co_belligerents=%s to explicitly confirm."
+                % (
+                    tgt_tag,
+                    new_guarantors or [],
+                    len(new_cbs_set),
+                    total_enemy_est,
+                    my_divs,
+                    _undef_desc,
+                    sorted(severe_esc_tags),
+                )
+            )
+            if hard or not force:
+                strategic_blockers.append(_esc_msg)
+        elif (not ack_bool) and (not esc_confirmed) and (hard or not force):
+            for _ub in undefended_list:
+                strategic_blockers.append(
                     "undefended co-belligerent border: declaring on %s pulls in %s (%s, %d enemy divs) "
                     "which shares %d border provinces with %s, but 0 divisions guard that border -- "
                     "deploy defense first or pass ack_co_belligerents=true to proceed anyway"
@@ -1032,7 +1110,7 @@ class BattleplanOrdersMixin:
 
         # ---- hard check 1: can we count an army at all, and is there one?
         if not my_divs:
-            blockers.append(
+            tactical_blockers.append(
                 "no divisions: %s reports 0 (source=%s). Either the army really is "
                 "gone or the enumeration is broken -- in both cases a war is lost "
                 "before it starts. Run hoi4_division_selftest(deep=true) to tell the "
@@ -1043,12 +1121,12 @@ class BattleplanOrdersMixin:
             bd = self._border_divisions(tgt_tag, tag=tag)
             checks["border"] = bd
             if bd.get("error"):
-                blockers.append("cannot verify the border: %s" % bd["error"])
+                tactical_blockers.append("cannot verify the border: %s" % bd["error"])
             elif not bd.get("border_provinces"):
-                blockers.append("no land border province owned by %s touches %s"
-                                % (me, tgt_tag))
+                tactical_blockers.append("no land border province owned by %s touches %s"
+                                         % (me, tgt_tag))
             elif not bd.get("divisions_on_border"):
-                blockers.append(
+                tactical_blockers.append(
                     "no division on the %s border: %d divisions exist (%d border "
                     "provinces) but none stands on one of them -- deploy first"
                     % (tgt_tag, bd.get("divisions_count") or 0,
@@ -1059,8 +1137,8 @@ class BattleplanOrdersMixin:
             fp = self._front_plan_check(tgt_tag, tag=tag)
             checks["front_plan"] = fp
             if not fp.get("ok"):
-                blockers.append(fp.get("problem") or
-                                "no battle plan with an offensive line faces %s" % tgt_tag)
+                tactical_blockers.append(fp.get("problem") or
+                                         "no battle plan with an offensive line faces %s" % tgt_tag)
             # ---- hard check 4 (2026-11-18 / 2026-11-23 复测 7 B-1 & B-7 根治):
             # 必须有战争借口。Windows 1.19.5 已打通 O(1) 实时直读 CDiplomacyStatus+0x80
             # （0.2ms，100% 包含新造 CB 与国策 CB），不再被旧 fast list 漏新 arena 坑死！
@@ -1125,13 +1203,13 @@ class BattleplanOrdersMixin:
             }
             if _werr:
                 checks["wargoal"]["state"] = "unknown"
-                blockers.append(
+                tactical_blockers.append(
                     "cannot verify a casus belli against %s (%s) -- tool lookup error, "
                     "do NOT re-justify blindly; verify with hoi4_wargoals first"
                     % (tgt_tag, _werr)
                 )
             elif _prob:
-                blockers.append(_prob)
+                tactical_blockers.append(_prob)
             # frontd 指令降级为提示：它管的是逐师微操，不再是宣战的前置条件。
             fd = self._front_directive_check(tgt_tag)
             checks["front_directive"] = fd
@@ -1141,7 +1219,6 @@ class BattleplanOrdersMixin:
                 warnings.append(fd["warning"])
 
         # ---- advisory (skippable with force=True)
-        total_enemy_est = int(diplo.get("total_enemy_divisions_est") or enemy_divs)
         min_divs = max(12 if me == "GER" else 8, int(enemy_divs * 1.2))
         if my_divs < min_divs:
             warnings.append("thin army: have %d, want >= %d (%s has %d)"
@@ -1164,10 +1241,14 @@ class BattleplanOrdersMixin:
                             "war goal before that is allowed, it just raises world tension"
                             % (" + ".join(self.GER_SNOWBALL[:2]), year, have))
 
+        blockers = list(strategic_blockers) + list(tactical_blockers)
         ready = not blockers
         return {
             "ready": ready,
             "blockers": blockers,
+            "tactical_blockers": tactical_blockers,
+            "strategic_blockers": strategic_blockers,
+            "strategic_escalation_required_ack": sorted(unconfirmed_severe) if severe_esc_tags else [],
             "warnings": warnings,
             "advisory_only": bool(warnings) and not blockers,
             # kept for older callers
@@ -1199,8 +1280,16 @@ class BattleplanOrdersMixin:
 
     def paradrop(self, orders_group, source_province=None, target_province=0,
                  divisions=None, order_id=0, confirm=False, wait=8.0, dry_run=False,
-                 replace_existing=False, allow_duplicate=False):
+                 replace_existing=False, allow_duplicate=False, tag=None):
         """创建/更新并可选激活伞降订单（type-4，PE 1.19.5.0 双命令原生实现）。"""
+        if isinstance(orders_group, str) and hasattr(self, "_resolve_orders_group"):
+            og_i, og_err, og_cands = self._resolve_orders_group(orders_group, tag=tag)
+            if not og_i:
+                out_e = {"ok": False, "blocked_by": "invalid_orders_group", "error": og_err}
+                if og_cands:
+                    out_e["available_order_groups"] = og_cands[:20]
+                return out_e
+            orders_group = og_i
         import armyops
         res = armyops.paradrop(
             self, orders_group, source_province, target_province,
